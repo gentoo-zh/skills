@@ -1,10 +1,11 @@
 import json as _json
+from datetime import datetime
 from pathlib import Path
 
 import click
 
 from gzh.bump import bump_scaffold, diff_ebuild, highest_ebuild
-from gzh.bump_issues import run_bump_issues
+from gzh.bump_issues import run_bump_issues, write_output
 from gzh.buildtest import run_build_test
 from gzh.commit import run_commit
 from gzh.ebuild_parser import parse_ebuild
@@ -147,12 +148,18 @@ def commit_cmd(paths, message):
 @click.option("--pkg", default=None, help="filter by cat/pkg")
 @click.option("--comments/--no-comments", default=True, show_default=True)
 @click.option("--limit", default=100, show_default=True, type=click.IntRange(1, 100))
-def bump_issues_cmd(repo, state, maintainer, pkg, comments, limit):
+@click.option("--no-output", is_flag=True, default=False,
+              help="skip writing the .gzh/bump-issues-<ts>.json snapshot")
+def bump_issues_cmd(repo, state, maintainer, pkg, comments, limit, no_output):
     """List nvchecker bump-reminder issues as a JSON queue (read-only)."""
     res = run_bump_issues(repo=repo, state=state, maintainer=maintainer, pkg=pkg,
                           with_comments=comments, limit=limit)
     exit_code = res.pop("exit_code", 0)
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
+    if not no_output and res.get("ok"):
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        out = write_output(res, Path.cwd() / ".gzh", ts)
+        click.echo(f"wrote {out}", err=True)
     if exit_code:
         raise SystemExit(exit_code)
 

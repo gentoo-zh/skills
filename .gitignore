@@ -13,3 +13,6 @@ dist/
 
 # Local gentoo-zh overlay checkout for L3 smoke testing (do not track)
 gentoo-zh/
+
+# gzh command output (bump-issues snapshots, etc.)
+.gzh/

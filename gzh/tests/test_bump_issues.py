@@ -233,3 +233,38 @@ def test_run_bump_issues_caps_limit_at_100():
     assert res["ok"] is True
     assert "first:100" in captured["query"]
     assert "first:250" not in captured["query"]
+
+
+def test_write_output_creates_timestamped_json(tmp_path):
+    from gzh.bump_issues import write_output
+    payload = {"ok": True, "results": [], "skipped": 0}
+    p = write_output(payload, tmp_path, "20260704-020000")
+    assert p.name == "bump-issues-20260704-020000.json"
+    assert p.parent == tmp_path
+    written = json.loads(p.read_text())
+    assert written["ok"] is True
+    assert written["results"] == []
+
+
+def test_cli_writes_output_file_and_stdout(tmp_path, monkeypatch):
+    import gzh.cli as cli_mod
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "gzh.cli.run_bump_issues",
+        lambda **kw: {"ok": True, "results": [], "skipped": 0, "exit_code": 0})
+    result = CliRunner().invoke(cli_mod.cli, ["bump-issues"])
+    assert result.exit_code == 0
+    files = sorted((tmp_path / ".gzh").glob("bump-issues-*.json"))
+    assert len(files) == 1
+    assert json.loads(files[0].read_text())["ok"] is True
+    assert '"results"' in result.output  # stdout still has full JSON
+
+
+def test_cli_no_output_skips_file(tmp_path, monkeypatch):
+    import gzh.cli as cli_mod
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "gzh.cli.run_bump_issues",
+        lambda **kw: {"ok": True, "results": [], "skipped": 0, "exit_code": 0})
+    CliRunner().invoke(cli_mod.cli, ["bump-issues", "--no-output"])
+    assert not (tmp_path / ".gzh").exists()

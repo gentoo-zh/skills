@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from pathlib import Path
 
 _TITLE_RE = re.compile(r'^\[nvchecker\]\s+(\S+)\s+can be bump to\s+(\S+)$')
 _OLDVER_RE = re.compile(r'oldver:\s*(\S+)', re.IGNORECASE)
@@ -128,3 +129,10 @@ def run_bump_issues(repo: str = "Gentoo-zh/gentoo-zh", state: str = "open",
     queue, skipped = graphql_to_queue(nodes, with_comments=with_comments)
     queue = apply_filters(queue, maintainer=maintainer, pkg=pkg)
     return {"ok": True, "results": queue, "skipped": skipped, "exit_code": 0}
+
+
+def write_output(payload: dict, out_dir: Path, timestamp: str) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"bump-issues-{timestamp}.json"
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
