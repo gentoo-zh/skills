@@ -6,6 +6,7 @@ import click
 from gzh.bump import bump_scaffold, diff_ebuild, highest_ebuild
 from gzh.ebuild_parser import parse_ebuild
 from gzh.lint import lint_ebuild
+from gzh.nvchecker_config import get_entry, set_entry
 from gzh.repo import find_overlay_root
 from gzh.upstream import get_latest_version
 
@@ -65,6 +66,25 @@ def bump_scaffold_cmd(cat_pkg, new_pv):
 def diff_ebuild_cmd(old, new):
     """Print a unified diff between two ebuilds."""
     click.echo(diff_ebuild(old, new), nl=False)
+
+
+@cli.command("nvchecker-config")
+@click.argument("cat_pkg")
+@click.argument("action", type=click.Choice(["get", "set"]))
+@click.option("--source", help="nvchecker source key, e.g. github/pypi/git")
+@click.option("--json", "json_entry", help="full entry as JSON (for set)")
+def nvchecker_config_cmd(cat_pkg, action, source, json_entry):
+    """Read or write a package's nvchecker entry in overlay.toml."""
+    root = find_overlay_root()
+    overlay_toml = root / ".github" / "workflows" / "overlay.toml"
+    if action == "get":
+        click.echo(_json.dumps(get_entry(overlay_toml, cat_pkg), indent=2,
+                               ensure_ascii=False))
+    else:
+        if not json_entry:
+            raise click.UsageError("--json is required for set")
+        set_entry(overlay_toml, cat_pkg, _json.loads(json_entry))
+        click.echo("NOTE: overlay.toml rewritten; comments lost. Review the diff.")
 
 
 def main():
