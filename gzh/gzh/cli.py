@@ -8,6 +8,7 @@ from gzh.ebuild_parser import parse_ebuild
 from gzh.lint import lint_ebuild
 from gzh.manifest import run_manifest
 from gzh.nvchecker_config import get_entry, set_entry
+from gzh.pkgcheck import run_pkgcheck
 from gzh.repo import find_overlay_root
 from gzh.upstream import get_latest_version
 
@@ -94,6 +95,18 @@ def manifest_cmd(ebuild):
     """Regenerate the Manifest for an ebuild via pkgdev."""
     pkg_dir = Path(ebuild).parent
     res = run_manifest(ebuild, cwd=pkg_dir)
+    click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
+    if not res["ok"]:
+        raise SystemExit(1)
+
+
+@cli.command("pkgcheck")
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+@click.option("--min-severity", default="warning",
+              type=click.Choice(["error", "warning", "info", "style"]))
+def pkgcheck_cmd(path, min_severity):
+    """Run pkgcheck scan and print structured results filtered by severity."""
+    res = run_pkgcheck(path, min_severity=min_severity)
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
     if not res["ok"]:
         raise SystemExit(1)
