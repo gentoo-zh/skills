@@ -18,6 +18,8 @@ def list_skipped(log_path: Path, pkg: str | None = None) -> list[dict]:
             rec = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if not isinstance(rec, dict):
+            continue
         if pkg and rec.get("cat_pkg") != pkg:
             continue
         out.append(rec)

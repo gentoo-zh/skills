@@ -42,6 +42,15 @@ def test_skip_creates_parent_dir(tmp_path):
     assert len(list_skipped(log)) == 1
 
 
+def test_list_skips_non_dict_json_lines(tmp_path):
+    log = tmp_path / "skip-log.jsonl"
+    log.write_text("42\n[1,2]\n\"str\"\n", encoding="utf-8")
+    skip_issue(log, 5, "a/b", "1", "r")
+    listed = list_skipped(log)
+    assert len(listed) == 1
+    assert listed[0]["issue"] == 5
+
+
 from click.testing import CliRunner
 
 from gzh.cli import cli
