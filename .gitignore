@@ -10,3 +10,6 @@ dist/
 .pytest_cache/
 .coverage
 .mypy_cache/
+
+# Local gentoo-zh overlay checkout for L3 smoke testing (do not track)
+gentoo-zh/
