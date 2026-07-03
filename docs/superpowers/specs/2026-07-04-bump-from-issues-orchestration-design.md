@@ -70,7 +70,7 @@ gzh triage skip <issue> --cat-pkg <cat/pkg> --target-version <ver> --reason <tex
 ```
 - `list`：读 jsonl，解析每行 JSON，可选 `--pkg` 过滤，输出数组。
 - `skip`：追加一行（`skipped_at` = 当前 ISO 时间），文件不存在则创建。
-- 退出码：成功 0；解析失败 1。
+- 退出码：成功 0；坏行/非 dict 行静默跳过（不报错、不 exit 1）。
 
 ---
 
