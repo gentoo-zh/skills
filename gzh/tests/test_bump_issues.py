@@ -28,3 +28,57 @@ def test_parse_body_missing_fields():
 
 def test_parse_body_cc_without_at_sign():
     assert parse_body("CC: someone")["maintainer"] == "someone"
+
+
+from gzh.bump_issues import apply_filters, graphql_to_queue
+
+NODES = [
+    {"number": 10581,
+     "title": "[nvchecker] media-fonts/sarasa-gothic can be bump to 1.0.40",
+     "body": "oldver: 1.0.39\nCC: @Linerre", "state": "OPEN",
+     "url": "https://github.com/Gentoo-zh/gentoo-zh/issues/10581",
+     "comments": {"nodes": [
+         {"author": {"login": "microcai"}, "body": "hi",
+          "createdAt": "2026-07-01T00:00:00Z"}]}},
+    {"number": 999, "title": "random nvchecker note", "body": "",
+     "state": "OPEN", "url": "u", "comments": {"nodes": []}},
+]
+
+
+def test_graphql_to_queue_skips_unmatched():
+    queue, skipped = graphql_to_queue(NODES)
+    assert skipped == 1
+    assert len(queue) == 1
+    item = queue[0]
+    assert item["issue"] == 10581
+    assert item["cat_pkg"] == "media-fonts/sarasa-gothic"
+    assert item["target_version"] == "1.0.40"
+    assert item["oldver"] == "1.0.39"
+    assert item["maintainer"] == "Linerre"
+    assert item["state"] == "open"
+    assert item["url"].endswith("/issues/10581")
+    assert item["comments_truncated"] is False
+    assert item["comments"][0]["author"] == "microcai"
+
+
+def test_graphql_to_queue_no_comments_option():
+    queue, _ = graphql_to_queue(NODES, with_comments=False)
+    assert queue[0]["comments"] == []
+    assert queue[0]["comments_truncated"] is False
+
+
+def test_graphql_to_queue_truncates_over_50_comments():
+    many = [{"author": {"login": "x"}, "body": "y", "createdAt": "z"}] * 51
+    nodes = [{"number": 1, "title": "[nvchecker] a/b can be bump to 1",
+              "body": "", "state": "OPEN", "url": "u", "comments": {"nodes": many}}]
+    queue, _ = graphql_to_queue(nodes)
+    assert len(queue[0]["comments"]) == 50
+    assert queue[0]["comments_truncated"] is True
+
+
+def test_apply_filters_by_maintainer_and_pkg():
+    queue, _ = graphql_to_queue(NODES)
+    assert len(apply_filters(queue, maintainer="Linerre")) == 1
+    assert apply_filters(queue, maintainer="nobody") == []
+    assert len(apply_filters(queue, pkg="media-fonts/sarasa-gothic")) == 1
+    assert apply_filters(queue, pkg="x/y") == []
