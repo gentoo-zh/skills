@@ -54,3 +54,23 @@ def test_send_api_error(monkeypatch):
     res = send_telegram("hi")
     assert res["ok"] is False
     assert res["status"] == 400
+
+
+from click.testing import CliRunner
+
+from gzh.cli import cli
+
+
+def test_notify_telegram_help_registered():
+    result = CliRunner().invoke(cli, ["notify", "telegram", "--help"])
+    assert result.exit_code == 0
+
+
+def test_notify_telegram_missing_token_exits_zero(monkeypatch):
+    import gzh.cli as cli_mod
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+    result = CliRunner().invoke(cli_mod.cli,
+                                ["notify", "telegram", "--message", "hi"])
+    assert result.exit_code == 0  # non-fatal
+    assert '"ok": false' in result.output

@@ -11,6 +11,7 @@ from gzh.commit import run_commit
 from gzh.ebuild_parser import parse_ebuild
 from gzh.lint import lint_ebuild
 from gzh.manifest import run_manifest
+from gzh.notify import send_telegram
 from gzh.nvchecker_config import get_entry, set_entry
 from gzh.pkgcheck import run_pkgcheck
 from gzh.repo import find_overlay_root
@@ -190,6 +191,21 @@ def triage_skip_cmd(issue, cat_pkg, target_version, reason):
     rec = skip_issue(root / "triage" / "skip-log.jsonl", issue, cat_pkg,
                      target_version, reason)
     click.echo(_json.dumps(rec, indent=2, ensure_ascii=False))
+
+
+@cli.group("notify")
+def notify_group():
+    """Send result notifications (e.g. telegram)."""
+
+
+@notify_group.command("telegram")
+@click.option("--message", "-m", required=True)
+@click.option("--chat", "chat_id", default=None, help="override TELEGRAM_CHAT_ID")
+def notify_telegram_cmd(message, chat_id):
+    """Send a message via Telegram bot (token/chat from env)."""
+    res = send_telegram(message, chat_id=chat_id)
+    click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
+    # non-fatal: never exit non-zero (notification is auxiliary)
 
 
 def main():
