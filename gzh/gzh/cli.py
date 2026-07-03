@@ -4,6 +4,7 @@ from pathlib import Path
 import click
 
 from gzh.bump import bump_scaffold, diff_ebuild, highest_ebuild
+from gzh.bump_issues import run_bump_issues
 from gzh.buildtest import run_build_test
 from gzh.commit import run_commit
 from gzh.ebuild_parser import parse_ebuild
@@ -136,6 +137,24 @@ def commit_cmd(paths, message):
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
     if not res["ok"]:
         raise SystemExit(1)
+
+
+@cli.command("bump-issues")
+@click.option("--repo", default="Gentoo-zh/gentoo-zh", show_default=True)
+@click.option("--state", default="open", show_default=True,
+              type=click.Choice(["open", "all", "closed"]))
+@click.option("--maintainer", default=None, help="filter by issue body 'CC: @<name>'")
+@click.option("--pkg", default=None, help="filter by cat/pkg")
+@click.option("--comments/--no-comments", default=True, show_default=True)
+@click.option("--limit", default=200, show_default=True, type=int)
+def bump_issues_cmd(repo, state, maintainer, pkg, comments, limit):
+    """List nvchecker bump-reminder issues as a JSON queue (read-only)."""
+    res = run_bump_issues(repo=repo, state=state, maintainer=maintainer, pkg=pkg,
+                          with_comments=comments, limit=limit)
+    exit_code = res.pop("exit_code", 0)
+    click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
+    if exit_code:
+        raise SystemExit(exit_code)
 
 
 def main():

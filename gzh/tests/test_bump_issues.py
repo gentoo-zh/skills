@@ -155,3 +155,24 @@ def test_run_bump_issues_filters_pass_through():
     res = run_bump_issues(maintainer="nobody", runner=fake_run)
     assert res["ok"] is True
     assert res["results"] == []
+
+
+from click.testing import CliRunner
+
+from gzh.cli import cli
+
+
+def test_bump_issues_help_registered():
+    result = CliRunner().invoke(cli, ["bump-issues", "--help"])
+    assert result.exit_code == 0
+    assert "nvchecker" in result.output.lower() or "bump" in result.output.lower()
+
+
+def test_bump_issues_not_authenticated_exits_2(monkeypatch):
+    import gzh.cli as cli_mod
+
+    def fake_run(args, **kw):
+        return subprocess.CompletedProcess(args, 1, "", "not logged in")
+    monkeypatch.setattr("gzh.bump_issues.subprocess.run", fake_run)
+    result = CliRunner().invoke(cli_mod.cli, ["bump-issues"])
+    assert result.exit_code == 2
