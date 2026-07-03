@@ -3,6 +3,7 @@ from pathlib import Path
 
 import click
 
+from gzh.bump import bump_scaffold, diff_ebuild, highest_ebuild
 from gzh.ebuild_parser import parse_ebuild
 from gzh.lint import lint_ebuild
 from gzh.repo import find_overlay_root
@@ -44,6 +45,26 @@ def upstream_version_cmd(cat_pkg):
     """Look up the latest upstream version for category/package."""
     res = get_latest_version(cat_pkg, find_overlay_root())
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@cli.command("bump-scaffold")
+@click.argument("cat_pkg")
+@click.argument("new_pv")
+def bump_scaffold_cmd(cat_pkg, new_pv):
+    """Copy the highest existing ebuild to <pn>-<new_pv>.ebuild."""
+    root = find_overlay_root()
+    category, pn = cat_pkg.split("/", 1)
+    pkg_dir = root / category / pn
+    dst = bump_scaffold(pkg_dir, pn, new_pv)
+    click.echo(str(dst))
+
+
+@cli.command("diff-ebuild")
+@click.argument("old", type=click.Path(exists=True, path_type=Path))
+@click.argument("new", type=click.Path(exists=True, path_type=Path))
+def diff_ebuild_cmd(old, new):
+    """Print a unified diff between two ebuilds."""
+    click.echo(diff_ebuild(old, new), nl=False)
 
 
 def main():
