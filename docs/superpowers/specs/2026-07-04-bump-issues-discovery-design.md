@@ -51,7 +51,7 @@ gzh bump-issues [--repo Gentoo-zh/gentoo-zh] [--state open|all|closed]
 
 ---
 
-## 4. 输出 schema（JSON 数组）
+## 4. 输出 schema
 
 ```json
 [
@@ -75,7 +75,7 @@ gzh bump-issues [--repo Gentoo-zh/gentoo-zh] [--state open|all|closed]
 - 缺失字段（无 `oldver`/无 `CC`）为 `null`，不省略键。
 - `comments`：数组，每项 `{author, body, created_at}`；无回复为 `[]`。
 - `comments_truncated`：该 issue 回复 >50 时为 `true`（GraphQL `first:50` 截断）。
-- 顶层不包 summary 对象——保持与 MVP 其他 `gzh` 命令一致的"纯 JSON 数组/对象"风格。未匹配标题的 issue 不进入数组，仅在 stderr 打印 `skipped: <count>` 提示。
+- cli 输出 JSON **对象** `{"ok": true, "results": [...], "skipped": N}`（与 §5、`manifest`/`pkgcheck` 等命令风格一致）；上方 schema 是 `results` 数组中每个 item 的结构。失败时对象含 `error`/`stderr` 而非 `results`。`skipped`（标题不匹配被跳过的计数）随对象输出，便于脚本消费。
 
 ---
 
