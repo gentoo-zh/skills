@@ -6,6 +6,7 @@ import click
 from gzh.ebuild_parser import parse_ebuild
 from gzh.lint import lint_ebuild
 from gzh.repo import find_overlay_root
+from gzh.upstream import get_latest_version
 
 
 @click.group()
@@ -35,6 +36,14 @@ def lint_cmd(ebuild):
     click.echo(_json.dumps(issues, indent=2, ensure_ascii=False))
     if any(i["severity"] == "error" for i in issues):
         raise SystemExit(1)
+
+
+@cli.command("upstream-version")
+@click.argument("cat_pkg")
+def upstream_version_cmd(cat_pkg):
+    """Look up the latest upstream version for category/package."""
+    res = get_latest_version(cat_pkg, find_overlay_root())
+    click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
 
 
 def main():
