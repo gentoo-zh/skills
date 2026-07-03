@@ -310,7 +310,7 @@ gentoo-zh 已有完整上游检测基础设施（**默认复用，不重复造�
 | **0 / MVP** | `gzh` 核心 + 收尾流程 + `gzh-version-bump` skill |
 | **1** | `fix-build-failure` / `qa-fix` / `eapi-deps` / `create` 子 skill（复用执行器） |
 | **2** | 扫描发现层：`gzh outdated`、读 bumpbot issue、`drop-old` 定时任务 |
-| **3** | 自动值守 + `--pr` 自动化 + 容器测试 backend（incus/chroot，**TODO：解决 build-test full 的非 root install 限制**——portage `install` chown 需 root，非 root 环境跑不到 install phase，需 chroot/container backend 才能完整验证 full） |
+| **3** | 自动值守 + `--pr` 自动化 + 容器测试 backend（incus/chroot，**TODO：解决 build-test full 的非 root install 限制**——portage `install` chown 需 root，非 root 环境跑不到 install phase，需 chroot/container backend 才能完整验证 full。**已验证 fakeroot 轻量解不可行**：`sys-apps/fakeroot` 被 portage sandbox 的 `LD_PRELOAD` 覆盖；禁 sandbox 后 `dobin` 的 chown 可过，但 `dodoc` 等 Python copy 因 fakeroot 拦截 `stat` 而失败 → 必须真 root 环境） |
 
 ---
 
