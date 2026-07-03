@@ -28,7 +28,7 @@ description: "Orchestrate batch version-bump from nvchecker bump-reminder issues
 
 ### 阶段 3：循环处理
 - **skip 的** → `gzh triage skip <issue> --cat-pkg <p> --target-version <v> --reason "<理由>"`。
-- **bump 的** → 每包独立分支（`git fetch origin && git checkout -b <cat>-<pn>-<ver> origin/master`），按 **gzh-version-bump** skill 的 A→收尾全流程，**到本地 commit 为止**：
+- **bump 的** → 按 **gzh-version-bump** skill 的 A→收尾全流程（A3 含 `git fetch origin && git checkout -b <cat>-<pn>-<ver> origin/master`，勿重复 checkout），**到本地 commit 为止**：
   - A1-A8 + 收尾（`gzh lint`/`manifest`/`pkgcheck`/`build-test`/`diff-ebuild`/`commit`）。
   - 硬门失败（manifest/patch/build-test）→ **记失败**（汇总：cat/pkg + phase + error + 诊断分支），**不写 triage skip**（尝试失败 ≠ 主动跳过），build-test 失败提示「转 fix-build-failure（未实现）」。
   - 重试上限 3 次：同包同错重复 2 次即停、记失败、继续下一个。

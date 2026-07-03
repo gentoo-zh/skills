@@ -56,6 +56,20 @@ def test_send_api_error(monkeypatch):
     assert res["status"] == 400
 
 
+def test_send_network_error_returns_not_ok(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123")
+
+    def boom(*a, **k):
+        raise httpx.ConnectError("conn refused")
+
+    monkeypatch.setattr("gzh.notify.httpx.post", boom)
+    res = send_telegram("hi")
+    assert res["ok"] is False
+    assert "conn refused" in res["error"]
+    assert res["status"] is None
+
+
 from click.testing import CliRunner
 
 from gzh.cli import cli
