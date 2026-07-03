@@ -33,16 +33,26 @@ class NvcheckerProvider(VersionProvider):
         with tempfile.TemporaryDirectory() as d:
             dpath = Path(d)
             cfg_path = dpath / "n.toml"
-            newver = dpath / "new.json"
-            cfg = {"__config__": {"newver": str(newver)}, cat_pkg: entry}
+            cfg = {"__config__": {}, cat_pkg: entry}
             cfg_path.write_text(tomli_w.dumps(cfg), encoding="utf-8")
-            args = [self.cmd, "--file", str(cfg_path)]
+            args = [self.cmd, "--file", str(cfg_path), "--logger", "json"]
             if self.keyfile:
                 args += ["--keyfile", str(self.keyfile)]
-            subprocess.run(args, check=True, capture_output=True, text=True)
-            if newver.exists():
-                data = json.loads(newver.read_text(encoding="utf-8") or "{}")
-                return data.get(cat_pkg)
+            proc = subprocess.run(args, check=True, capture_output=True, text=True)
+        # nvchecker --logger json emits one JSON object per line per event;
+        # the result line carries name + event in {updated,new} + version.
+        for line in proc.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if (ev.get("name") == cat_pkg
+                    and ev.get("event") in ("updated", "new")
+                    and ev.get("version") is not None):
+                return ev["version"]
         return None
 
 

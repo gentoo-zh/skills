@@ -22,17 +22,15 @@ def test_nvchecker_provider_reads_newver(monkeypatch, tmp_path):
     overlay = _overlay(tmp_path)
 
     def fake_run(args, **kw):
-        # args: [nvchecker, --file, <cfg>] ; read cfg to find newver path
-        import tomllib
-        cfg = tomllib.loads(Path(args[args.index("--file") + 1]).read_text())
-        newver = Path(cfg["__config__"]["newver"])
-        newver.write_text(json.dumps({"dev-python/foo": "1.2.3"}))
-        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        # nvchecker --logger json emits JSON-lines on stdout
+        out = json.dumps({"name": "dev-python/foo", "event": "updated",
+                          "version": "1.2.3"})
+        return subprocess.CompletedProcess(args, 0, stdout=out, stderr="")
 
     monkeypatch.setattr("gzh.upstream.subprocess.run", fake_run)
     prov = NvcheckerProvider(overlay)
     assert prov.latest("dev-python/foo") == "1.2.3"
-    assert prov.latest("dev-python/missing") is None
+    assert prov.latest("dev-python/missing") is None  # no overlay.toml entry
 
 
 def test_pypi_provider_via_http(monkeypatch):
@@ -46,19 +44,12 @@ def test_pypi_provider_via_http(monkeypatch):
 
 def test_get_latest_prefers_nvchecker(monkeypatch, tmp_path):
     overlay = _overlay(tmp_path)
-    monkeypatch.setattr(
-        "gzh.upstream.subprocess.run",
-        lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="", stderr=""),
-    )
-    # make nvchecker write newver
-    import gzh.upstream as up
 
     def fake_run(args, **kw):
-        import tomllib
-        cfg = tomllib.loads(Path(args[args.index("--file") + 1]).read_text())
-        Path(cfg["__config__"]["newver"]).write_text(
-            json.dumps({"dev-python/foo": "2.0.0"}))
-        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        out = json.dumps({"name": "dev-python/foo", "event": "updated",
+                          "version": "2.0.0"})
+        return subprocess.CompletedProcess(args, 0, stdout=out, stderr="")
+
     monkeypatch.setattr("gzh.upstream.subprocess.run", fake_run)
     res = get_latest_version("dev-python/foo", overlay.parent,
                              overlay_toml=overlay)
