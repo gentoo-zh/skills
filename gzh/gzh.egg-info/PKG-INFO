@@ -1,8 +1,0 @@
-Metadata-Version: 2.4
-Name: gzh
-Version: 0.1.0
-Summary: Deterministic tooling for gentoo-zh overlay maintenance
-Requires-Python: >=3.11
-Requires-Dist: click>=8.1
-Requires-Dist: httpx>=0.27
-Requires-Dist: tomli-w>=1.0
