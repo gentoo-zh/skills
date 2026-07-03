@@ -4,6 +4,7 @@ from pathlib import Path
 import click
 
 from gzh.bump import bump_scaffold, diff_ebuild, highest_ebuild
+from gzh.buildtest import run_build_test
 from gzh.ebuild_parser import parse_ebuild
 from gzh.lint import lint_ebuild
 from gzh.manifest import run_manifest
@@ -107,6 +108,18 @@ def manifest_cmd(ebuild):
 def pkgcheck_cmd(path, min_severity):
     """Run pkgcheck scan and print structured results filtered by severity."""
     res = run_pkgcheck(path, min_severity=min_severity)
+    click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
+    if not res["ok"]:
+        raise SystemExit(1)
+
+
+@cli.command("build-test")
+@click.argument("ebuild", type=click.Path(exists=True, path_type=Path))
+@click.option("--level", default="quick",
+              type=click.Choice(["none", "quick", "full"]))
+def build_test_cmd(ebuild, level):
+    """Run a staged ebuild build test (none/quick/full)."""
+    res = run_build_test(ebuild, level=level)
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
     if not res["ok"]:
         raise SystemExit(1)
