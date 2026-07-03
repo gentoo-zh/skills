@@ -146,7 +146,7 @@ def commit_cmd(paths, message):
 @click.option("--maintainer", default=None, help="filter by issue body 'CC: @<name>'")
 @click.option("--pkg", default=None, help="filter by cat/pkg")
 @click.option("--comments/--no-comments", default=True, show_default=True)
-@click.option("--limit", default=200, show_default=True, type=int)
+@click.option("--limit", default=100, show_default=True, type=click.IntRange(1, 100))
 def bump_issues_cmd(repo, state, maintainer, pkg, comments, limit):
     """List nvchecker bump-reminder issues as a JSON queue (read-only)."""
     res = run_bump_issues(repo=repo, state=state, maintainer=maintainer, pkg=pkg,

@@ -94,10 +94,11 @@ def _check_gh_auth(runner) -> bool:
 
 def run_bump_issues(repo: str = "Gentoo-zh/gentoo-zh", state: str = "open",
                     maintainer: str | None = None, pkg: str | None = None,
-                    with_comments: bool = True, limit: int = 200,
+                    with_comments: bool = True, limit: int = 100,
                     runner=None) -> dict:
     if runner is None:
         runner = subprocess.run
+    limit = min(int(limit), 100)
     if not _check_gh_auth(runner):
         return {"ok": False, "exit_code": 2,
                 "error": "gh not authenticated; run `gh auth login` first"}

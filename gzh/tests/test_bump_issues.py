@@ -176,3 +176,18 @@ def test_bump_issues_not_authenticated_exits_2(monkeypatch):
     monkeypatch.setattr("gzh.bump_issues.subprocess.run", fake_run)
     result = CliRunner().invoke(cli_mod.cli, ["bump-issues"])
     assert result.exit_code == 2
+
+
+def test_run_bump_issues_caps_limit_at_100():
+    captured = {}
+
+    def fake_run(args, **kw):
+        if args[:3] == ["gh", "auth", "status"]:
+            return subprocess.CompletedProcess(args, 0, "", "")
+        captured["query"] = args[4]
+        return subprocess.CompletedProcess(args, 0, json.dumps(_resp()), "")
+
+    res = run_bump_issues(limit=250, runner=fake_run)
+    assert res["ok"] is True
+    assert "first:100" in captured["query"]
+    assert "first:250" not in captured["query"]
