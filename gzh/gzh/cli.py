@@ -14,6 +14,7 @@ from gzh.manifest import run_manifest
 from gzh.nvchecker_config import get_entry, set_entry
 from gzh.pkgcheck import run_pkgcheck
 from gzh.repo import find_overlay_root
+from gzh.triage import list_skipped, skip_issue
 from gzh.upstream import get_latest_version
 
 
@@ -162,6 +163,33 @@ def bump_issues_cmd(repo, state, maintainer, pkg, comments, limit, no_output):
         click.echo(f"wrote {out}", err=True)
     if exit_code:
         raise SystemExit(exit_code)
+
+
+@cli.group("triage")
+def triage_group():
+    """Read/write the bump skip log (triage/skip-log.jsonl)."""
+
+
+@triage_group.command("list")
+@click.option("--pkg", default=None, help="filter by cat/pkg")
+def triage_list_cmd(pkg):
+    """List skipped issues from the skip log."""
+    root = find_overlay_root()
+    records = list_skipped(root / "triage" / "skip-log.jsonl", pkg=pkg)
+    click.echo(_json.dumps(records, indent=2, ensure_ascii=False))
+
+
+@triage_group.command("skip")
+@click.argument("issue", type=int)
+@click.option("--cat-pkg", required=True)
+@click.option("--target-version", required=True)
+@click.option("--reason", required=True)
+def triage_skip_cmd(issue, cat_pkg, target_version, reason):
+    """Append a skip record to the skip log."""
+    root = find_overlay_root()
+    rec = skip_issue(root / "triage" / "skip-log.jsonl", issue, cat_pkg,
+                     target_version, reason)
+    click.echo(_json.dumps(rec, indent=2, ensure_ascii=False))
 
 
 def main():

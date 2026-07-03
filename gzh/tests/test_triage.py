@@ -40,3 +40,32 @@ def test_skip_creates_parent_dir(tmp_path):
     skip_issue(log, 9, "x/y", "1", "r")
     assert log.exists()
     assert len(list_skipped(log)) == 1
+
+
+from click.testing import CliRunner
+
+from gzh.cli import cli
+
+
+def test_triage_list_help_registered():
+    result = CliRunner().invoke(cli, ["triage", "list", "--help"])
+    assert result.exit_code == 0
+
+
+def test_triage_skip_and_list_via_cli(tmp_path, monkeypatch):
+    import gzh.cli as cli_mod
+    monkeypatch.setattr("gzh.cli.find_overlay_root", lambda: tmp_path)
+    r1 = CliRunner().invoke(cli_mod.cli,
+                            ["triage", "skip", "100",
+                             "--cat-pkg", "a/b", "--target-version", "1.0",
+                             "--reason", "testing"])
+    assert r1.exit_code == 0
+    import json as _json
+    assert _json.loads(r1.output)["issue"] == 100
+    r2 = CliRunner().invoke(cli_mod.cli, ["triage", "list"])
+    assert r2.exit_code == 0
+    listed = _json.loads(r2.output)
+    assert len(listed) == 1
+    assert listed[0]["cat_pkg"] == "a/b"
+    # file landed under <root>/triage/skip-log.jsonl
+    assert (tmp_path / "triage" / "skip-log.jsonl").exists()
