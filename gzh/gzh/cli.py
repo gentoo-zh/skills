@@ -6,6 +6,7 @@ import click
 from gzh.bump import bump_scaffold, diff_ebuild, highest_ebuild
 from gzh.ebuild_parser import parse_ebuild
 from gzh.lint import lint_ebuild
+from gzh.manifest import run_manifest
 from gzh.nvchecker_config import get_entry, set_entry
 from gzh.repo import find_overlay_root
 from gzh.upstream import get_latest_version
@@ -85,6 +86,17 @@ def nvchecker_config_cmd(cat_pkg, action, source, json_entry):
             raise click.UsageError("--json is required for set")
         set_entry(overlay_toml, cat_pkg, _json.loads(json_entry))
         click.echo("NOTE: overlay.toml rewritten; comments lost. Review the diff.")
+
+
+@cli.command("manifest")
+@click.argument("ebuild", type=click.Path(exists=True, path_type=Path))
+def manifest_cmd(ebuild):
+    """Regenerate the Manifest for an ebuild via pkgdev."""
+    pkg_dir = Path(ebuild).parent
+    res = run_manifest(ebuild, cwd=pkg_dir)
+    click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
+    if not res["ok"]:
+        raise SystemExit(1)
 
 
 def main():
