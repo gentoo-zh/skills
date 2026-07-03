@@ -35,7 +35,7 @@ gentoo-zh 已有完整上游检测基础设施：nvchecker CI（`.github/workflo
 ```
 gzh bump-issues [--repo Gentoo-zh/gentoo-zh] [--state open|all|closed]
                 [--maintainer <name>] [--pkg <cat/pkg>]
-                [--comments/--no-comments] [--limit 200]
+                [--comments/--no-comments] [--limit 100]
 ```
 
 | 选项 | 默认 | 用途 |
@@ -45,7 +45,7 @@ gzh bump-issues [--repo Gentoo-zh/gentoo-zh] [--state open|all|closed]
 | `--maintainer` | （不过滤） | 按 issue body 的 `CC: @<name>` 过滤（去 `@`） |
 | `--pkg` | （不过滤） | 按 `<cat/pkg>` 精确过滤 |
 | `--comments` | **on** | 拉取每个 issue 的回复；`--no-comments` 跳过（仅标题+body，快速列表） |
-| `--limit` | `200` | 最多列出多少条（GraphQL `first:` 上界） |
+| `--limit` | `100` | 最多列出多少条（GitHub GraphQL `first:` 上限 100） |
 
 **退出码**：成功（含空队列）= 0；gh 调用失败 = 1；gh 未装/未认证 = 2。
 
@@ -98,7 +98,7 @@ gzh bump-issues
 ```graphql
 query {
   repository(owner: "Gentoo-zh", name: "gentoo-zh") {
-    issues(labels: ["nvchecker"], first: 200) {
+    issues(labels: ["nvchecker"], first: 100) {
       nodes {
         number title body state url
         author { login }
@@ -108,7 +108,7 @@ query {
 ```
 > `states` 参数按 `--state` 拼（`open`→`OPEN`、`closed`→`CLOSED`；`all` 不传 states；GitHub issue 只有 OPEN/CLOSED 两态，无 MERGED）。
 
-**为何 GraphQL 而非 REST**：减调用（1 vs 1+N）、抗未来增长、单响应含 comments 嵌套。gentoo-zh 当前 ~25 issue、评论稀疏，单页（first:200 issues、first:50 comments）足够，MVP 不实现分页。
+**为何 GraphQL 而非 REST**：减调用（1 vs 1+N）、抗未来增长、单响应含 comments 嵌套。gentoo-zh 当前 ~25 issue、评论稀疏，单页（first:100 issues、first:50 comments；GitHub GraphQL `first` 上限 100）足够，MVP 不实现分页。
 
 **为何 `gh api graphql` 而非 python GraphQL 库**：gh 已认证（刚用其开过 PR #10720），与 gzh 的 commit/PR 走 gh/pkgdev 一致，零 token 管理、零新依赖。
 
