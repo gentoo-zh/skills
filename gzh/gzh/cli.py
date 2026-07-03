@@ -4,6 +4,7 @@ from pathlib import Path
 import click
 
 from gzh.ebuild_parser import parse_ebuild
+from gzh.lint import lint_ebuild
 from gzh.repo import find_overlay_root
 
 
@@ -24,6 +25,16 @@ def repo_cmd():
 def ebuild_parse_cmd(ebuild):
     """Print parsed ebuild variables as JSON."""
     click.echo(_json.dumps(parse_ebuild(ebuild), indent=2, ensure_ascii=False))
+
+
+@cli.command("lint")
+@click.argument("ebuild", type=click.Path(exists=True, path_type=Path))
+def lint_cmd(ebuild):
+    """Lint one ebuild against devmanual rules + gentoo-zh ~arch policy."""
+    issues = lint_ebuild(parse_ebuild(ebuild))
+    click.echo(_json.dumps(issues, indent=2, ensure_ascii=False))
+    if any(i["severity"] == "error" for i in issues):
+        raise SystemExit(1)
 
 
 def main():
