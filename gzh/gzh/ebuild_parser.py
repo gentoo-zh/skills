@@ -30,4 +30,6 @@ def parse_ebuild(path: Path) -> dict:
     for m in _VAR_RE.finditer(text):
         result[m.group(1)] = _strip(m.group(2))
     result["PV"] = _pv_from_name(Path(path).name)
+    m = re.search(r'^inherit\s+(.+)$', text, re.MULTILINE)
+    result["inherit"] = m.group(1).split() if m else []
     return result

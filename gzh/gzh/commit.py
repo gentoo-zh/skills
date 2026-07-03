@@ -7,6 +7,8 @@ from pathlib import Path
 def run_commit(paths: list[Path], cwd: Path,
                message: str | None = None,
                runner=subprocess.run) -> dict:
+    for p in paths:
+        runner(["git", "add", str(p)], cwd=cwd, capture_output=True, text=True)
     args = ["pkgdev", "commit"]
     if message:
         args += ["--message", message]

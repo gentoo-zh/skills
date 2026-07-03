@@ -32,3 +32,26 @@ def test_missing_license_is_error():
     bad["LICENSE"] = ""
     issues = lint_ebuild(bad)
     assert any(i["rule"] == "missing-license" for i in issues)
+
+
+def test_pypi_eclass_skips_missing_src_uri():
+    bad = _good()
+    bad["SRC_URI"] = ""
+    bad["inherit"] = ["distutils-r1", "pypi"]
+    issues = lint_ebuild(bad)
+    assert not any(i["rule"] == "missing-src_uri" for i in issues)
+
+
+def test_missing_src_uri_reported_without_eclass():
+    bad = _good()
+    bad["SRC_URI"] = ""
+    issues = lint_ebuild(bad)
+    assert any(i["rule"] == "missing-src_uri" for i in issues)
+
+
+def test_liveup_skips_missing_src_uri():
+    bad = _good()
+    bad["SRC_URI"] = ""
+    bad["PV"] = "9999"
+    issues = lint_ebuild(bad)
+    assert not any(i["rule"] == "missing-src_uri" for i in issues)

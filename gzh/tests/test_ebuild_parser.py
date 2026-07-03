@@ -32,3 +32,9 @@ def test_pv_from_revision(tmp_path):
     eb = tmp_path / "foo-1.2.3-r1.ebuild"
     eb.write_text("EAPI=8\n")
     assert parse_ebuild(eb)["PV"] == "1.2.3-r1"
+
+
+def test_parse_inherit(tmp_path):
+    eb = tmp_path / "foo-1.0.ebuild"
+    eb.write_text("EAPI=8\ninherit distutils-r1 pypi\n")
+    assert parse_ebuild(eb)["inherit"] == ["distutils-r1", "pypi"]

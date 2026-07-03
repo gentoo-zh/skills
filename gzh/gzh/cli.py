@@ -95,8 +95,7 @@ def nvchecker_config_cmd(cat_pkg, action, source, json_entry):
 @click.argument("ebuild", type=click.Path(exists=True, path_type=Path))
 def manifest_cmd(ebuild):
     """Regenerate the Manifest for an ebuild via pkgdev."""
-    pkg_dir = Path(ebuild).parent
-    res = run_manifest(ebuild, cwd=pkg_dir)
+    res = run_manifest(Path(ebuild).resolve(), cwd=find_overlay_root())
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
     if not res["ok"]:
         raise SystemExit(1)
