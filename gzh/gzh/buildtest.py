@@ -9,7 +9,7 @@ PHASES = {
 }
 
 
-def run_build_test(ebuild: Path, level: str = "quick",
+def run_build_test(ebuild: Path, level: str = "full",
                    runner=subprocess.run) -> dict:
     if level == "none":
         return {"ok": True, "level": level, "skipped": True,

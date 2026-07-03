@@ -41,6 +41,17 @@ def test_full_includes_compile_install(monkeypatch, tmp_path):
     assert "compile" in phases and "install" in phases
 
 
+def test_default_level_is_full(monkeypatch, tmp_path):
+    seen = []
+
+    def fake_run(args, **kw):
+        seen.append(args[-1])
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    run_build_test(_eb(tmp_path), runner=fake_run)  # no level → default
+    assert "install" in seen  # default is full (includes install)
+
+
 def test_failure_locates_phase(monkeypatch, tmp_path):
     def fake_run(args, **kw):
         # clean & unpack pass; prepare fails

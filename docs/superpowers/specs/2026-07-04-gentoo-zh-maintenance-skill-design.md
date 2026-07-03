@@ -193,13 +193,13 @@ gentoo-zh 已有完整上游检测基础设施（**默认复用，不重复造�
 | 级别 | 跑什么 | 能抓什么 | 何时用 |
 |---|---|---|---|
 | **none** | 不编译（仅靠阶段 3 pkgcheck 硬门） | — | 包巨大/需特殊环境(GUI/硬件)；**必须显式声明跳过原因**写入交付报告 |
-| **quick**（默认） | `ebuild <f> clean unpack prepare configure` | patch 不适用、依赖缺失、SRC_URI 结构错、解包失败 | MVP 默认 |
-| **full** | quick + `compile install`（可选 `FEATURES=test` 跑 `src_test`） | 真编译/链接/安装错误 | 改动风险高（动 patch/依赖/EAPI）时 agent 主动升级 |
+| **quick** | `ebuild <f> clean unpack prepare configure` | patch 不适用、依赖缺失、SRC_URI 结构错、解包失败 | 明确降级时（包巨大、或 full 受环境限制） |
+| **full**（默认） | quick + `compile install`（可选 `FEATURES=test` 跑 `src_test`） | 真编译/链接/安装错误 | **默认**；完整编译验证 |
 
-- **默认 quick** 的理由：gzh-version-bump 最高频错误（patch 不适用、SRC_URI 变）在 `unpack/prepare` 即暴露，不必真编译。
-- **编译失败 → 场景切换**：quick/full 失败时，执行器识别并提示"建议转 `fix-build-failure` 场景"（该场景阶段 1 才实现）。
-- **bin 包**：full 也快（解压二进制），建议 bin 包默认 full。
-- **编译环境**：MVP 在用户主机直接跑 `ebuild`，不建 chroot/container；容器作为阶段 3 可选 backend。
+- **默认 full** 的理由：完整编译（compile/install）才能抓真编译/链接/安装错误；只有明确理由才降级 `quick`（仅结构验证）或 `none`（注明跳过原因）。
+- **编译失败 → 场景切换**：full/quick 失败时，执行器识别并提示"建议转 `fix-build-failure` 场景"（该场景阶段 1 才实现）。
+- **bin 包**：full 也快（解压二进制）。
+- **编译环境**：非 root 环境下 install phase 会因 portage chown 失败，完整 full 需在 root/chroot 下跑；容器作为阶段 3 可选 backend。
 - 按 devmanual phase 顺序执行（`pkg_setup→src_unpack→src_prepare→src_configure→src_compile→src_install`，`src_test` 由 `FEATURES=test` 控制）。
 
 ---
@@ -219,7 +219,7 @@ gentoo-zh 已有完整上游检测基础设施（**默认复用，不重复造�
 | Fork / PR head | 动态取 `gh api user`，不写死 `liangyongxiang` |
 | Maintainer | 从现有 ebuild 的 metadata.xml 继承或参数传入 |
 | nvchecker owner | `gzh outdated --owner <name>` 参数化 |
-| 测试环境 | 不假设 incus；quick 默认主机跑，容器为可选 backend（阶段 3） |
+| 测试环境 | 不假设 incus；默认 full 需 root/chroot（非 root 下 install 受限），容器为可选 backend（阶段 3） |
 
 **安全边界（不能做）：**
 - 不动 `master`、不自动 push/PR（除非 `--pr`）。
@@ -297,7 +297,7 @@ gentoo-zh 已有完整上游检测基础设施（**默认复用，不重复造�
 **不包含（后续阶段）：** 其他场景子 skill（fix/qa/eapi/create）；扫描发现层；自动值守/`--pr` 自动化；容器测试 backend；`drop-old`。
 
 **验收标准：**
-1. 对 1 个真实 `-bin` 包 + 1 个真实源码包，跑通全流程：`upstream-version → bump-scaffold → (agent 改) → lint → manifest → pkgcheck → build-test → diff → commit`（源码包用 `quick`，`-bin` 包用 `full`，见 §9），所有🔴硬门通过，产出规范 commit（无 AI 署名），停在本地分支。
+1. 对 1 个真实 `-bin` 包 + 1 个真实源码包，跑通全流程：`upstream-version → bump-scaffold → (agent 改) → lint → manifest → pkgcheck → build-test → diff → commit`（build-test **默认 full**，见 §9），所有🔴硬门通过，产出规范 commit（无 AI 署名），停在本地分支。
 2. `gzh` L1 单测覆盖各子命令。
 3. **去个人化**：任何维护者 clone 仓库 → `pip install -e ./gzh` → 设 `$GZH_OVERLAY_DIR` 即可用，无 `liangyongxiang` 硬编码。
 

@@ -119,7 +119,7 @@ def pkgcheck_cmd(path, min_severity):
 
 @cli.command("build-test")
 @click.argument("ebuild", type=click.Path(exists=True, path_type=Path))
-@click.option("--level", default="quick",
+@click.option("--level", default="full",
               type=click.Choice(["none", "quick", "full"]))
 def build_test_cmd(ebuild, level):
     """Run a staged ebuild build test (none/quick/full)."""
