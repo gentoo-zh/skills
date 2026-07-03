@@ -5,6 +5,7 @@ import click
 
 from gzh.bump import bump_scaffold, diff_ebuild, highest_ebuild
 from gzh.buildtest import run_build_test
+from gzh.commit import run_commit
 from gzh.ebuild_parser import parse_ebuild
 from gzh.lint import lint_ebuild
 from gzh.manifest import run_manifest
@@ -120,6 +121,19 @@ def pkgcheck_cmd(path, min_severity):
 def build_test_cmd(ebuild, level):
     """Run a staged ebuild build test (none/quick/full)."""
     res = run_build_test(ebuild, level=level)
+    click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
+    if not res["ok"]:
+        raise SystemExit(1)
+
+
+@cli.command("commit")
+@click.argument("paths", nargs=-1, type=click.Path(path_type=Path))
+@click.option("--message", "-m", default=None)
+def commit_cmd(paths, message):
+    """Commit via pkgdev (no AI attribution; gentoo-zh style)."""
+    if not paths:
+        raise click.UsageError("at least one path required")
+    res = run_commit(list(paths), cwd=find_overlay_root(), message=message)
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
     if not res["ok"]:
         raise SystemExit(1)

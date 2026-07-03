@@ -1,0 +1,16 @@
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+
+def run_commit(paths: list[Path], cwd: Path,
+               message: str | None = None,
+               runner=subprocess.run) -> dict:
+    args = ["pkgdev", "commit"]
+    if message:
+        args += ["--message", message]
+    args += [str(p) for p in paths]
+    proc = runner(args, cwd=cwd, capture_output=True, text=True)
+    return {"ok": proc.returncode == 0, "returncode": proc.returncode,
+            "stdout": proc.stdout, "stderr": proc.stderr}
