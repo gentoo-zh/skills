@@ -59,8 +59,12 @@ class NvcheckerProvider(VersionProvider):
 class PyPIProvider(VersionProvider):
     def latest(self, cat_pkg: str) -> str | None:
         pn = cat_pkg.rsplit("/", 1)[-1]
-        resp = httpx.get(f"https://pypi.org/pypi/{pn}/json", timeout=30)
-        resp.raise_for_status()
+        try:
+            resp = httpx.get(f"https://pypi.org/pypi/{pn}/json", timeout=30)
+            resp.raise_for_status()
+        except httpx.HTTPError:
+            # not a python package (e.g. *-bin); fall through to "none"
+            return None
         return resp.json().get("info", {}).get("version")
 
 

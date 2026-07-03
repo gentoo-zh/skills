@@ -42,6 +42,16 @@ def test_pypi_provider_via_http(monkeypatch):
     assert PyPIProvider().latest("dev-python/foo") == "9.9.9"
 
 
+def test_pypi_provider_http_error_returns_none(monkeypatch):
+    import httpx
+
+    def boom(*a, **k):
+        raise httpx.HTTPError("404 not found")
+    monkeypatch.setattr("gzh.upstream.httpx.get", boom)
+    # a *-bin package is not on pypi; provider must not raise
+    assert PyPIProvider().latest("app-text/lemminx-bin") is None
+
+
 def test_get_latest_prefers_nvchecker(monkeypatch, tmp_path):
     overlay = _overlay(tmp_path)
 
