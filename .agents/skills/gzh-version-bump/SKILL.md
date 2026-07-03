@@ -1,9 +1,9 @@
 ---
-name: version-bump
+name: gzh-version-bump
 description: "Bump an existing gentoo-zh package to a new upstream version. Trigger on requests like 'bump dev-python/foo', '升级 wechat', 'update to 1.2.3', or package atoms needing a new version. Covers upstream lookup, scaffolding, dep/patch assessment, and the manifest→pkgcheck→build-test→commit finish pipeline. Only for gentoo-zh overlay (~arch only). Skip new-package creation and main gentoo tree."
 ---
 
-# version-bump — 为现有 gentoo-zh 包升版本
+# gzh-version-bump — 为现有 gentoo-zh 包升版本
 
 仅负责执行器的**阶段 A（特化改动）**，完成后按 [finish-pipeline.md](references/finish-pipeline.md) 走收尾。
 

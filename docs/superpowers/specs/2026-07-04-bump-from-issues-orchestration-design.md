@@ -1,18 +1,18 @@
-# `bump-from-issues` 编排闭环 — 设计文档
+# `gzh-bump-from-issues` 编排闭环 — 设计文档
 
 - **日期**: 2026-07-04
 - **状态**: Draft（待用户 review）
 - **仓库**: `Gentoo-zh/skills`
-- **范围**: 路线图阶段 3「自动值守」的半自动雏形 —— 新 `bump-from-issues` skill + 两个 gzh 命令（`gzh triage` 跳过记录、`gzh notify telegram` 回报），把 `gzh bump-issues`（发现层）与 `version-bump` skill（执行层）编排成闭环。
-- **前置**: 阶段 0 MVP（`gzh` 11 子命令 + `version-bump` skill）、阶段 2 第一刀（`gzh bump-issues` 读 nvchecker issue 列队列）均已交付并合并 master。
+- **范围**: 路线图阶段 3「自动值守」的半自动雏形 —— 新 `gzh-bump-from-issues` skill + 两个 gzh 命令（`gzh triage` 跳过记录、`gzh notify telegram` 回报），把 `gzh bump-issues`（发现层）与 `gzh-version-bump` skill（执行层）编排成闭环。
+- **前置**: 阶段 0 MVP（`gzh` 11 子命令 + `gzh-version-bump` skill）、阶段 2 第一刀（`gzh bump-issues` 读 nvchecker issue 列队列）均已交付并合并 master。
 
 ---
 
 ## 1. 背景与目标
 
-`gzh bump-issues` 已能列出 Gentoo-zh/gentoo-zh 上约 22 个 open nvchecker bump reminder issue（含 comments）。`version-bump` skill 已能对单个包跑完整 bump 流程。**缺口**：两者之间没有编排层——维护者仍需逐个手动触发 version-bump，且跳过决策无持久记录（下次又从头评估）。
+`gzh bump-issues` 已能列出 Gentoo-zh/gentoo-zh 上约 22 个 open nvchecker bump reminder issue（含 comments）。`gzh-version-bump` skill 已能对单个包跑完整 bump 流程。**缺口**：两者之间没有编排层——维护者仍需逐个手动触发 gzh-version-bump，且跳过决策无持久记录（下次又从头评估）。
 
-`bump-from-issues` 要做的：agent 读 bump-issues 队列 → 综合评估每个 → 对合适的调 version-bump（到本地 commit）→ 跳过/失败持久记录 → 汇总 + 可选 telegram 回报。形成「nvchecker CI → issue → 评估 → bump → 本地 commit → 用户 review → 手动 PR → 关 issue」的半自动闭环。
+`gzh-bump-from-issues` 要做的：agent 读 bump-issues 队列 → 综合评估每个 → 对合适的调 gzh-version-bump（到本地 commit）→ 跳过/失败持久记录 → 汇总 + 可选 telegram 回报。形成「nvchecker CI → issue → 评估 → bump → 本地 commit → 用户 review → 手动 PR → 关 issue」的半自动闭环。
 
 **核心价值**：把 22 个待 bump issue 从「纯人工」提升到「agent 预处理 + 持久决策记录 + 人工只 review/PR」；跳过记录避免重复评估、可追溯。
 
@@ -26,7 +26,7 @@
 | 去个人化 | telegram token/chat、PR head、maintainer 全动态或 env；无 `liangyongxiang` 硬编码 |
 | 安全边界 | 每包独立分支；bump 到**本地 commit 为止**，不自动 push/PR；不碰 `/var/db/repos` |
 | 确定性可单测 | gzh triage / gzh notify 全 mock（文件/httpx），pytest 覆盖；评估/失败/汇总靠 L3 |
-| 复用 | 不改 version-bump skill；复用其 finish-pipeline + 11 个 gzh 子命令 |
+| 复用 | 不改 gzh-version-bump skill；复用其 finish-pipeline + 11 个 gzh 子命令 |
 
 ---
 
@@ -34,7 +34,7 @@
 
 三件套：
 
-1. **新 skill `bump-from-issues`**（`.agents/skills/bump-from-issues/SKILL.md`）：agent 编排——取队列、综合评估、循环 bump、汇总、回报。无代码，纯文档指导。
+1. **新 skill `gzh-bump-from-issues`**（`.agents/skills/gzh-bump-from-issues/SKILL.md`）：agent 编排——取队列、综合评估、循环 bump、汇总、回报。无代码，纯文档指导。
 2. **新 gzh 命令 `gzh triage`**：跳过记录的确定性强读写（`triage/skip-log.jsonl`），可单测。
 3. **新 gzh 命令 `gzh notify telegram`**：结果回报（env 配置，可选），可单测。
 
@@ -48,7 +48,7 @@
 2. **综合评估**：agent 对剩余 issue 逐个判断 bump/skip（细则见 §6），输出决策 + 理由。
 3. **循环 bump**：
    - skip 的 → `gzh triage skip <issue> --cat-pkg <p> --target-version <v> --reason <text>` 记录。
-   - bump 的 → **每包独立分支**（`category-package-${VERSION}`，从 `origin/master` 切），调 version-bump skill 的 A→收尾全流程，**到本地 commit 为止**（不自动 PR）。失败处理见 §7。
+   - bump 的 → **每包独立分支**（`category-package-${VERSION}`，从 `origin/master` 切），调 gzh-version-bump skill 的 A→收尾全流程，**到本地 commit 为止**（不自动 PR）。失败处理见 §7。
 4. **汇总 + 回报**：生成汇总报告（§8）；env 配置则 `gzh notify telegram --message <摘要>` 回报（§9）；提示用户手动 PR。
 
 ---
@@ -102,7 +102,7 @@ bump 过程中硬门失败（manifest fetch 失败 / patch 不适用 / build-tes
 写 `.gzh/bump-batch-<时间戳>.md`（ignored）+ stdout 摘要：
 
 ```markdown
-# bump-from-issues 批次 <时间戳>
+# gzh-bump-from-issues 批次 <时间戳>
 
 ## 成功（N）
 - media-fonts/sarasa-gothic-1.0.40  branch=media-fonts-sarasa-gothic-1.0.40  issue=#10581
@@ -144,7 +144,7 @@ gzh notify telegram --message <text> [--chat <chat_id>]
 - **不自动 push/PR**：每包到本地 commit 为止；PR 命令在汇总里作为**提示**给用户手动执行。
 - 不碰 `/var/db/repos/gentoo-zh`（synced 副本）；每包在开发副本独立分支。
 - `gzh notify` 仅发 Telegram 消息（read-only 语义的 write：只 sendMessage，不碰 bot 配置）。
-- commit 无 AI 署名（继承 version-bump/AGENTS.md）。
+- commit 无 AI 署名（继承 gzh-version-bump/AGENTS.md）。
 
 ---
 
@@ -156,7 +156,7 @@ gzh notify telegram --message <text> [--chat <chat_id>]
 | **`gzh notify telegram` L1** | 发送成功（mock httpx 200）、缺 token 跳过、Telegram API 错误（mock 非 200） | pytest + monkeypatch `httpx.post`；不真实发送 |
 | **评估/失败/汇总 L3** | skill 全流程真实跑通 | 选 1-2 个真实 open issue 跑编排：成功包有分支+commit、跳过包进 triage/skip-log.jsonl、汇总报告生成、（env 配置时）telegram 收到消息 |
 
-**L2 skill 触发不在本刀范围**（bump-from-issues 触发靠 opencode skill 发现，量化评估后置）。
+**L2 skill 触发不在本刀范围**（gzh-bump-from-issues 触发靠 opencode skill 发现，量化评估后置）。
 
 ---
 
@@ -165,15 +165,15 @@ gzh notify telegram --message <text> [--chat <chat_id>]
 **包含：**
 - `gzh/gzh/triage.py`（`list_skipped`/`skip_issue` 纯函数 + JSONL 读写）+ `gzh triage` cli 注册 + L1 单测
 - `gzh/gzh/notify.py`（`send_telegram` httpx 封装）+ `gzh notify telegram` cli 注册 + L1 单测
-- `.agents/skills/bump-from-issues/SKILL.md`（4 阶段编排指导）
-- 无新文档（复用 devmanual/AGENTS.md）；version-bump skill 不改
+- `.agents/skills/gzh-bump-from-issues/SKILL.md`（4 阶段编排指导）
+- 无新文档（复用 devmanual/AGENTS.md）；gzh-version-bump skill 不改
 
 **不包含：** 自动值守（定时触发）、自动 PR、fix-build-failure skill（失败只记录+提示）、其他通知后端（Slack/邮件）、L2 触发量化。
 
 **验收：**
 1. `gzh triage skip 99999 --cat-pkg a/b --target-version 1 --reason test` → 追加一行；`gzh triage list --pkg a/b` 命中。
 2. `gzh notify telegram --message hi`（无 env）→ `ok=False` + token 缺失提示，非崩溃。
-3. L3：对 1 个真实 open issue（如 `dev-python/fuo-ytmusic` 0.4.18）跑 bump-from-issues 编排 → 成功分支 + commit；对 1 个 comments 含 crash 信号的 issue 评估为 skip → triage/skip-log.jsonl 有记录；汇总报告生成。
+3. L3：对 1 个真实 open issue（如 `dev-python/fuo-ytmusic` 0.4.18）跑 gzh-bump-from-issues 编排 → 成功分支 + commit；对 1 个 comments 含 crash 信号的 issue 评估为 skip → triage/skip-log.jsonl 有记录；汇总报告生成。
 4. L1 全绿；去个人化（env/动态 gh user，无硬编码）。
 
 ---
@@ -181,6 +181,6 @@ gzh notify telegram --message <text> [--chat <chat_id>]
 ## 13. 后续（独立刀）
 
 - **fix-build-failure skill**（阶段 1）：build 失败时真正诊断修复，当前编排只记录+提示。
-- **自动值守**（阶段 3）：定时触发 bump-from-issues（cron/CI），含 PR 自动化（当前停本地 commit）。
+- **自动值守**（阶段 3）：定时触发 gzh-bump-from-issues（cron/CI），含 PR 自动化（当前停本地 commit）。
 - **其他通知后端**：Slack/邮件/Server酱（`gzh notify` 扩展 `--backend`）。
 - **评估 heuristics 代码化**：当评估规则稳定，把关键词扫描/版本跨度计算沉淀为 `gzh triage assess`（确定性辅助），agent 做最终判断。

@@ -6,7 +6,7 @@ gentoo-zh overlay 维护的 opencode/claude skill 套件 + `gzh` Python 工具�
 ```bash
 pip install -e ./gzh          # 安装 gzh CLI
 # symlink skill 到发现路径（opencode/claude 均兼容 .agents/skills/）：
-ln -s "$PWD/.agents/skills/version-bump" ~/.agents/skills/version-bump
+ln -s "$PWD/.agents/skills/gzh-version-bump" ~/.agents/skills/gzh-version-bump
 export GZH_OVERLAY_DIR=/path/to/gentoo-zh-dev-checkout
 ```
 

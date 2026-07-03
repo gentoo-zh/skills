@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 新增 `gzh bump-issues` 子命令——通过 `gh api graphql` 单次批量查询读取 `Gentoo-zh/gentoo-zh` 上 `label=nvchecker` 的 bump reminder issue（含 comments），解析成结构化 JSON 队列，纯只读，衔接现有 version-bump skill。
+**Goal:** 新增 `gzh bump-issues` 子命令——通过 `gh api graphql` 单次批量查询读取 `Gentoo-zh/gentoo-zh` 上 `label=nvchecker` 的 bump reminder issue（含 comments），解析成结构化 JSON 队列，纯只读，衔接现有 gzh-version-bump skill。
 
 **Architecture:** 业务逻辑放 `gzh/gzh/bump_issues.py` 的纯函数（解析/映射/过滤/GraphQL 构造），`gh` 调用与退出码编排放 `run_bump_issues(runner=)`（runner 注入可单测），click 薄壳在 `cli.py` 注册。与 MVP 其他命令同一模式（`run_manifest`/`run_pkgcheck` 风格）。
 

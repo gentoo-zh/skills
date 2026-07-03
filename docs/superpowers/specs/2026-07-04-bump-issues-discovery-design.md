@@ -4,15 +4,15 @@
 - **状态**: Draft（待用户 review）
 - **仓库**: `Gentoo-zh/skills`
 - **范围**: 路线图阶段 2「扫描发现层」的第一刀 —— 仅落地 `gzh bump-issues`（读 bump reminder issue 列队列）。`gzh outdated`（本地 nvcmp 全量扫描）与 `gzh drop-old`（旧版本清理）属后续独立刀，不在本设计内。
-- **前置**: 阶段 0 MVP 已交付（`gzh` 11 子命令 + `version-bump` skill，合并 master，经真实 PR #10720 验证）。
+- **前置**: 阶段 0 MVP 已交付（`gzh` 11 子命令 + `gzh-version-bump` skill，合并 master，经真实 PR #10720 验证）。
 
 ---
 
 ## 1. 背景与目标
 
-gentoo-zh 已有完整上游检测基础设施：nvchecker CI（`.github/workflows/nvchecker.yml`）比对当前 ebuild 与上游，对过期包在 `Gentoo-zh/gentoo-zh` 开 **bump reminder issue**（label `nvchecker`，标题 `[nvchecker] <cat/pkg> can be bump to <version>`）。当前这类 open issue 约 25 个。缺口在于：**issue 开出后，bump 动作仍纯人工**——维护者需手动逐个翻阅 issue、判断是否可 bump、再跑 version-bump。
+gentoo-zh 已有完整上游检测基础设施：nvchecker CI（`.github/workflows/nvchecker.yml`）比对当前 ebuild 与上游，对过期包在 `Gentoo-zh/gentoo-zh` 开 **bump reminder issue**（label `nvchecker`，标题 `[nvchecker] <cat/pkg> can be bump to <version>`）。当前这类 open issue 约 25 个。缺口在于：**issue 开出后，bump 动作仍纯人工**——维护者需手动逐个翻阅 issue、判断是否可 bump、再跑 gzh-version-bump。
 
-`gzh bump-issues` 要做的，是把"翻阅 issue、提取待 bump 信息、含 LLM 分析所需的回复上下文"这一**确定性、可重复**的动作沉淀为一条命令，输出结构化 JSON 队列，交由 agent（version-bump skill）或维护者判断与执行。
+`gzh bump-issues` 要做的，是把"翻阅 issue、提取待 bump 信息、含 LLM 分析所需的回复上下文"这一**确定性、可重复**的动作沉淀为一条命令，输出结构化 JSON 队列，交由 agent（gzh-version-bump skill）或维护者判断与执行。
 
 **核心价值**：闭环 nvchecker CI → issue → bump → PR → 关 issue 的"发现"环节；把 issue（含回复）结构化，便于 LLM 后续分析（回复常含 build 失败细节、维护者讨论、特殊说明）。
 
@@ -22,7 +22,7 @@ gentoo-zh 已有完整上游检测基础设施：nvchecker CI（`.github/workflo
 
 | 原则 | 落实 |
 |---|---|
-| 脚本给数据，agent 做判断 | `gzh bump-issues` 仅列队列（只读），不触发 bump；bump 由 version-bump skill 编排 |
+| 脚本给数据，agent 做判断 | `gzh bump-issues` 仅列队列（只读），不触发 bump；bump 由 gzh-version-bump skill 编排 |
 | 去个人化 | 仓库默认 `Gentoo-zh/gentoo-zh`（组织固定名）+ `--repo` 覆盖；不硬编码任何个人路径/owner |
 | 纯只读、零副作用 | 仅 `gh api graphql` 查询，不改 issue、不 push、不 PR、不碰 `/var/db/repos` |
 | 确定性可单测 | gh 输出全 mock，pytest 覆盖解析/过滤/错误路径 |
@@ -177,19 +177,19 @@ gh 输出全部用 fixtures + `runner=` 注入（同 MVP 的 `run_manifest`/`run
 **安全边界（纯只读）：**
 - 仅 `gh api graphql` 查询（read-only），不调任何 mutation。
 - 不修改 issue（不评论/不关闭）、不 push、不开 PR、不改 overlay 文件、不碰 `/var/db/repos`。
-- bump 动作由 version-bump skill 在显式触发时执行，本命令不联动。
+- bump 动作由 gzh-version-bump skill 在显式触发时执行，本命令不联动。
 
 ---
 
-## 10. 与 version-bump skill 的衔接
+## 10. 与 gzh-version-bump skill 的衔接
 
-松耦合，本刀不改 version-bump：
+松耦合，本刀不改 gzh-version-bump：
 
 1. `gzh bump-issues` 产出队列 JSON（含 issue 号、cat/pkg、目标版本、maintainer、comments）。
-2. agent / 维护者选定一个包，调 version-bump skill 走 A→收尾全流程（version-bump 的 A1 `upstream-version` 会实时复核上游版本，与 issue 快照目标通常一致）。
-3. version-bump 的 `finish-pipeline.md` 已含 `gh pr create --head $(gh api user --jq .login):<branch>` 与 PR body `closes #<issue>` 的格式 —— 完成后 PR 自动关 issue。
+2. agent / 维护者选定一个包，调 gzh-version-bump skill 走 A→收尾全流程（gzh-version-bump 的 A1 `upstream-version` 会实时复核上游版本，与 issue 快照目标通常一致）。
+3. gzh-version-bump 的 `finish-pipeline.md` 已含 `gh pr create --head $(gh api user --jq .login):<branch>` 与 PR body `closes #<issue>` 的格式 —— 完成后 PR 自动关 issue。
 
-即：bump-issues 负责"发现 + 结构化"，version-bump 负责"执行 + 交付"，两者通过 issue 号衔接，无新 skill。
+即：bump-issues 负责"发现 + 结构化"，gzh-version-bump 负责"执行 + 交付"，两者通过 issue 号衔接，无新 skill。
 
 ---
 
@@ -216,6 +216,6 @@ gh 输出全部用 fixtures + `runner=` 注入（同 MVP 的 `run_manifest`/`run
 ## 12. 后续（独立刀）
 
 - `gzh outdated [--owner] [--pkg]`：本地 nvcmp 全量扫描，列过期包报告（偏 CI/手动全量，与读 issue 互补）。
-- `gzh drop-old <cat/pkg>`：按规则（保留 N 个最新版 / 按时间）清理旧版本，补 version-bump「只 add 不 drop」。
+- `gzh drop-old <cat/pkg>`：按规则（保留 N 个最新版 / 按时间）清理旧版本，补 gzh-version-bump「只 add 不 drop」。
 - GraphQL 分页：当 nvchecker open issue >200 或单 issue 评论 >50 时启用（当前规模非必要）。
-- bump 编排 skill（阶段 3 自动值守）：读 bump-issues 队列 → 循环 version-bump，含失败汇总。
+- bump 编排 skill（阶段 3 自动值守）：读 bump-issues 队列 → 循环 gzh-version-bump，含失败汇总。

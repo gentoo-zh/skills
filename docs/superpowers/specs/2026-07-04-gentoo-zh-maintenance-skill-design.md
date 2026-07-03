@@ -49,7 +49,7 @@
 - **场景子 skill** 只写自己场景的**独特判断**，收尾流程（校验→Manifest→QA→验证→提交）统一调用 `gzh`，不重复实现。
 
 **分阶段交付**（与"三模式都要"对齐，按依赖排序）：
-1. **阶段 0 / MVP**：执行器核心（`gzh` + 收尾流程）+ `version-bump` 子 skill
+1. **阶段 0 / MVP**：执行器核心（`gzh` + 收尾流程）+ `gzh-version-bump` 子 skill
 2. **阶段 1**：补齐 `fix-build-failure` / `qa-fix` / `eapi-deps` / `create` 子 skill
 3. **阶段 2**：扫描发现层（`gzh outdated`、读 bumpbot issue、`drop-old` 定时任务）
 4. **阶段 3**：自动值守 + `--pr` 自动化 + 容器测试 backend
@@ -77,7 +77,7 @@ skills/
 │   │   └── commit.py               # pkgdev commit 封装
 │   └── tests/                      # pytest L1
 ├── .agents/skills/                 # skill 定义（opencode + claude 兼容路径）
-│   └── version-bump/               # ★ MVP 场景子 skill
+│   └── gzh-version-bump/               # ★ MVP 场景子 skill
 │       ├── SKILL.md                # 含内嵌"收尾"小节
 │       └── references/
 │           ├── upstream-lookup.md  # 各上游源(pypi/github/git/apt)取版本策略
@@ -99,7 +99,7 @@ skills/
 
 可 `pip install -e ./gzh` 安装，agent 统一调 `gzh <子命令>`，每条命令返回结构化 JSON。
 
-### MVP 子命令（version-bump 所需）
+### MVP 子命令（gzh-version-bump 所需）
 
 | 子命令 | 用途 | 底层 |
 |---|---|---|
@@ -196,7 +196,7 @@ gentoo-zh 已有完整上游检测基础设施（**默认复用，不重复造�
 | **quick**（默认） | `ebuild <f> clean unpack prepare configure` | patch 不适用、依赖缺失、SRC_URI 结构错、解包失败 | MVP 默认 |
 | **full** | quick + `compile install`（可选 `FEATURES=test` 跑 `src_test`） | 真编译/链接/安装错误 | 改动风险高（动 patch/依赖/EAPI）时 agent 主动升级 |
 
-- **默认 quick** 的理由：version-bump 最高频错误（patch 不适用、SRC_URI 变）在 `unpack/prepare` 即暴露，不必真编译。
+- **默认 quick** 的理由：gzh-version-bump 最高频错误（patch 不适用、SRC_URI 变）在 `unpack/prepare` 即暴露，不必真编译。
 - **编译失败 → 场景切换**：quick/full 失败时，执行器识别并提示"建议转 `fix-build-failure` 场景"（该场景阶段 1 才实现）。
 - **bin 包**：full 也快（解压二进制），建议 bin 包默认 full。
 - **编译环境**：MVP 在用户主机直接跑 `ebuild`，不建 chroot/container；容器作为阶段 3 可选 backend。
@@ -240,7 +240,7 @@ gentoo-zh 已有完整上游检测基础设施（**默认复用，不重复造�
 
 ---
 
-## 12. version-bump 子 skill（MVP 场景，阶段 A 特化逻辑）
+## 12. gzh-version-bump 子 skill（MVP 场景，阶段 A 特化逻辑）
 
 只负责执行器阶段 A，产出"改好的 ebuild（git 工作区）"后移交收尾流程。
 
@@ -258,8 +258,8 @@ gentoo-zh 已有完整上游检测基础设施（**默认复用，不重复造�
 **关键决策（用户确认）：**
 - **A1 不过滤预发布**：上游发布即可 bump（agent 信任上游最新）。版本号仍按 Gentoo 规范化。
 - **A7 默认只 add 不 drop**：`drop` 拆为独立能力——① 定时任务（阶段 2 `gzh drop-old`）② 手动触发。MVP 不 drop。
-- **A6 patch 评估**是 version-bump 最易错点，SKILL.md 重点指导：读 patch、对照新源码判断适用性，失败则重新生成。
-- **区分 `-bin` 包 vs 源码包**：bin 包 version-bump 重在 SRC_URI（A4）；源码包重在依赖/patch（A5/A6）。
+- **A6 patch 评估**是 gzh-version-bump 最易错点，SKILL.md 重点指导：读 patch、对照新源码判断适用性，失败则重新生成。
+- **区分 `-bin` 包 vs 源码包**：bin 包 gzh-version-bump 重在 SRC_URI（A4）；源码包重在依赖/patch（A5/A6）。
 - **重试上限 3 次**适用于整个 A→收尾流程。
 
 ---
@@ -270,7 +270,7 @@ gentoo-zh 已有完整上游检测基础设施（**默认复用，不重复造�
 |---|---|---|---|
 | **L1 `gzh` 单测**（重点） | 各子命令：upstream 查询、pkgcheck 解析、ebuild 解析、版本比较、overlay.toml 读写、lint 规则 | pytest + fixtures（样本 ebuild/toml/pkgcheck 输出）；网络全 mock（httpx mock 上游/GitHub API）；portage 用系统库或 mock；CI 跑 | bash 不可靠→Python 可单测 |
 | **L2 skill 触发**（降级） | skill description 触发准不准 | opencode **无原生 skill eval**（frontmatter 不认 eval.yaml/eval-triggers.json；skill-creator 的 run_eval.py 绑定 claude）。MVP 靠 ① description 遵循 opencode 规则（≤1024 字、含触发词 `ebuild/gentoo-zh/bump/pkgdev`）② L3 端到端冒烟自然检验触发。量化触发测试后置（基于 run_eval.py 适配 opencode CLI，不进 MVP） | skill 太大执行不准 |
-| **L3 端到端冒烟** | version-bump 全流程真实跑通 | 选 1-2 个真实小包（1 个 `-bin` + 1 个源码）作回归基线，CI cron 或手动 | 整体可用性 |
+| **L3 端到端冒烟** | gzh-version-bump 全流程真实跑通 | 选 1-2 个真实小包（1 个 `-bin` + 1 个源码）作回归基线，CI cron 或手动 | 整体可用性 |
 
 ---
 
@@ -286,11 +286,11 @@ gentoo-zh 已有完整上游检测基础设施（**默认复用，不重复造�
 
 ## 15. MVP 交付边界与验收标准
 
-**MVP = 执行器核心（`gzh` + 收尾流程）+ `version-bump` 子 skill。**
+**MVP = 执行器核心（`gzh` + 收尾流程）+ `gzh-version-bump` 子 skill。**
 
 **包含：**
 - `gzh` 包 + MVP 子命令（§5）+ L1 pytest
-- `version-bump` skill（SKILL.md + upstream-lookup.md + finish-pipeline.md）
+- `gzh-version-bump` skill（SKILL.md + upstream-lookup.md + finish-pipeline.md）
 - `docs/devmanual.md` 共享参考
 - `AGENTS.md`（去个人化约定 + 优先用 gzh）
 
@@ -307,7 +307,7 @@ gentoo-zh 已有完整上游检测基础设施（**默认复用，不重复造�
 
 | 阶段 | 内容 |
 |---|---|
-| **0 / MVP** | `gzh` 核心 + 收尾流程 + `version-bump` skill |
+| **0 / MVP** | `gzh` 核心 + 收尾流程 + `gzh-version-bump` skill |
 | **1** | `fix-build-failure` / `qa-fix` / `eapi-deps` / `create` 子 skill（复用执行器） |
 | **2** | 扫描发现层：`gzh outdated`、读 bumpbot issue、`drop-old` 定时任务 |
 | **3** | 自动值守 + `--pr` 自动化 + 容器测试 backend（incus 可选） |

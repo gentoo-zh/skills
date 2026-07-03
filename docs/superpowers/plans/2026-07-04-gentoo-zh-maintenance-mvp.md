@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 实现 `gzh` Python CLI 工具核心（11 个子命令）+ `version-bump` skill，使一个 gentoo-zh 维护者能对真实包跑通 version-bump 全流程并产出规范 commit。
+**Goal:** 实现 `gzh` Python CLI 工具核心（11 个子命令）+ `gzh-version-bump` skill，使一个 gentoo-zh 维护者能对真实包跑通 gzh-version-bump 全流程并产出规范 commit。
 
 **Architecture:** 方案 B——确定性动作沉淀为 Python 包 `gzh`（pytest 可测），判断交由 skill 指导 agent；执行器收尾流程内嵌 skill。每个 `gzh` 子命令的业务逻辑放在 `gzh/<mod>.py` 的纯函数里（可单测），click 包装在 `cli.py` 注册（薄壳）。
 
@@ -50,7 +50,7 @@ gzh/                              # Python 包根（独立 pip 包）
     ├── test_pkgcheck.py
     ├── test_buildtest.py
     └── test_commit.py
-.agents/skills/version-bump/      # skill（opencode+claude 兼容路径）
+.agents/skills/gzh-version-bump/      # skill（opencode+claude 兼容路径）
 ├── SKILL.md
 └── references/
     ├── upstream-lookup.md
@@ -297,7 +297,7 @@ git commit -m "feat(gzh): add repo command to locate overlay checkout"
 - Test: `gzh/tests/test_ebuild_parser.py`
 
 **Interfaces:**
-- Produces: `gzh.ebuild_parser.parse_ebuild(path: Path) -> dict`——返回顶层变量（含 `PV` 取自文件名）。MVP 限制：正则提取标量顶层赋值，不展开 `${...}`、不执行 ebuild；满足 version-bump 所需（EAPI/KEYWORDS/SRC_URI/LICENSE/HOMEPAGE/DESCRIPTION/SLOT/PV）。
+- Produces: `gzh.ebuild_parser.parse_ebuild(path: Path) -> dict`——返回顶层变量（含 `PV` 取自文件名）。MVP 限制：正则提取标量顶层赋值，不展开 `${...}`、不执行 ebuild；满足 gzh-version-bump 所需（EAPI/KEYWORDS/SRC_URI/LICENSE/HOMEPAGE/DESCRIPTION/SLOT/PV）。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -1557,7 +1557,7 @@ gentoo-zh overlay 维护的 opencode/claude skill 套件 + `gzh` Python 工具�
 \`\`\`bash
 pip install -e ./gzh          # 安装 gzh CLI
 # symlink skill 到发现路径（opencode/claude 均兼容 .agents/skills/）：
-ln -s "$PWD/.agents/skills/version-bump" ~/.agents/skills/version-bump
+ln -s "$PWD/.agents/skills/gzh-version-bump" ~/.agents/skills/gzh-version-bump
 export GZH_OVERLAY_DIR=/path/to/gentoo-zh-dev-checkout
 \`\`\`
 
@@ -1582,12 +1582,12 @@ git commit -m "docs: add devmanual index, AGENTS conventions, README"
 
 ---
 
-### Task 13: `version-bump` skill
+### Task 13: `gzh-version-bump` skill
 
 **Files:**
-- Create: `.agents/skills/version-bump/SKILL.md`
-- Create: `.agents/skills/version-bump/references/upstream-lookup.md`
-- Create: `.agents/skills/version-bump/references/finish-pipeline.md`
+- Create: `.agents/skills/gzh-version-bump/SKILL.md`
+- Create: `.agents/skills/gzh-version-bump/references/upstream-lookup.md`
+- Create: `.agents/skills/gzh-version-bump/references/finish-pipeline.md`
 
 **Interfaces:** skill 通过 opencode `skill` 工具按需加载；引用 `docs/devmanual.md` 与各 `gzh` 命令。
 
@@ -1595,11 +1595,11 @@ git commit -m "docs: add devmanual index, AGENTS conventions, README"
 
 ```markdown
 ---
-name: version-bump
+name: gzh-version-bump
 description: "Bump an existing gentoo-zh package to a new upstream version. Trigger on requests like 'bump dev-python/foo', '升级 wechat', 'update to 1.2.3', or package atoms needing a new version. Covers upstream lookup, scaffolding, dep/patch assessment, and the manifest→pkgcheck→build-test→commit finish pipeline. Only for gentoo-zh overlay (~arch only). Skip new-package creation and main gentoo tree."
 ---
 
-# version-bump — 为现有 gentoo-zh 包升版本
+# gzh-version-bump — 为现有 gentoo-zh 包升版本
 
 仅负责执行器的**阶段 A（特化改动）**，完成后按 [finish-pipeline.md](references/finish-pipeline.md) 走收尾。
 
@@ -1658,14 +1658,14 @@ description: "Bump an existing gentoo-zh package to a new upstream version. Trig
 2. **PyPIProvider（回退）**：overlay.toml 无该包条目时，查 `https://pypi.org/pypi/<pn>/json`。
 3. 无结果：返回 `source=none` + advisory。
 
-返回结构：`{"cat_pkg", "upstream", "source", "advisory"}`。`advisory` 非空时，version-bump 的 A8 步骤应补 overlay.toml 条目（`gzh nvchecker-config set`）。
+返回结构：`{"cat_pkg", "upstream", "source", "advisory"}`。`advisory` 非空时，gzh-version-bump 的 A8 步骤应补 overlay.toml 条目（`gzh nvchecker-config set`）。
 
 **新包无配置**：上游类型判断后用 `gzh nvchecker-config set <cat/pkg> --json '{"source":"github","github":"org/repo","use_latest_release":true}'`，注意 set 会重写 overlay.toml（丢注释），务必人工 review diff。
 ```
 
 - [ ] **Step 4: 校验 skill name 合规（opencode 规则）**
 
-Run: `python -c "import re,sys; n='version-bump'; assert re.match(r'^[a-z0-9]+(-[a-z0-9]+)*$', n) and n==__import__('pathlib').Path('.agents/skills/version-bump').name; print('ok')"`
+Run: `python -c "import re,sys; n='gzh-version-bump'; assert re.match(r'^[a-z0-9]+(-[a-z0-9]+)*$', n) and n==__import__('pathlib').Path('.agents/skills/gzh-version-bump').name; print('ok')"`
 Expected: `ok`
 
 - [ ] **Step 5: 手动触发冒烟（如已装 opencode/claude）**
@@ -1675,8 +1675,8 @@ Expected: `ok`
 - [ ] **Step 6: Commit**
 
 ```bash
-git add .agents/skills/version-bump
-git commit -m "feat(skill): add version-bump skill with finish pipeline and upstream lookup"
+git add .agents/skills/gzh-version-bump
+git commit -m "feat(skill): add gzh-version-bump skill with finish pipeline and upstream lookup"
 ```
 
 ---
@@ -1685,7 +1685,7 @@ git commit -m "feat(skill): add version-bump skill with finish pipeline and upst
 
 **1. Spec coverage（spec §15 MVP 验收）：**
 - §5 `gzh` MVP 子命令（11 个）：repo(T2)/ebuild-parse(T3)/lint(T4)/upstream-version(T5)/bump-scaffold+diff-ebuild(T6)/nvchecker-config(T7)/manifest(T8)/pkgcheck(T9)/build-test(T10)/commit(T11) ✅
-- `version-bump` skill + references：T13 ✅
+- `gzh-version-bump` skill + references：T13 ✅
 - `docs/devmanual.md`：T12 ✅
 - `AGENTS.md`（去个人化约定 + 优先用 gzh）：T12 ✅
 - L1 pytest：每个 task 均含 ✅
