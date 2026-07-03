@@ -89,7 +89,10 @@ def build_query(owner: str, name: str, state: str | None,
 
 
 def _check_gh_auth(runner) -> bool:
-    return runner(["gh", "auth", "status"], capture_output=True, text=True).returncode == 0
+    try:
+        return runner(["gh", "auth", "status"], capture_output=True, text=True).returncode == 0
+    except FileNotFoundError:
+        return False
 
 
 def run_bump_issues(repo: str = "Gentoo-zh/gentoo-zh", state: str = "open",
@@ -101,7 +104,7 @@ def run_bump_issues(repo: str = "Gentoo-zh/gentoo-zh", state: str = "open",
     limit = min(int(limit), 100)
     if not _check_gh_auth(runner):
         return {"ok": False, "exit_code": 2,
-                "error": "gh not authenticated; run `gh auth login` first"}
+                "error": "gh not authenticated (or not installed); run `gh auth login` first"}
     owner, _, name = repo.partition("/")
     if not name:
         return {"ok": False, "exit_code": 1,

@@ -136,6 +136,14 @@ def test_run_bump_issues_not_authenticated():
     assert res["exit_code"] == 2
 
 
+def test_run_bump_issues_gh_not_installed():
+    def fake_run(args, **kw):
+        raise FileNotFoundError("gh not installed")
+    res = run_bump_issues(runner=fake_run)
+    assert res["ok"] is False
+    assert res["exit_code"] == 2
+
+
 def test_run_bump_issues_gh_failure_after_auth():
     def fake_run(args, **kw):
         if args[:3] == ["gh", "auth", "status"]:
@@ -155,6 +163,40 @@ def test_run_bump_issues_filters_pass_through():
     res = run_bump_issues(maintainer="nobody", runner=fake_run)
     assert res["ok"] is True
     assert res["results"] == []
+
+
+def test_run_bump_issues_graphql_errors():
+    def fake_run(args, **kw):
+        if args[:3] == ["gh", "auth", "status"]:
+            return subprocess.CompletedProcess(args, 0, "", "")
+        body = json.dumps({"errors": [{"message": "rate limit"}]})
+        return subprocess.CompletedProcess(args, 0, body, "")
+    res = run_bump_issues(runner=fake_run)
+    assert res["ok"] is False
+    assert res["exit_code"] == 1
+    assert "rate limit" in res["error"]
+
+
+def test_run_bump_issues_invalid_repo():
+    def fake_run(args, **kw):
+        if args[:3] == ["gh", "auth", "status"]:
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return subprocess.CompletedProcess(args, 0, json.dumps(_resp()), "")
+    res = run_bump_issues(repo="not-a-repo", runner=fake_run)
+    assert res["ok"] is False
+    assert res["exit_code"] == 1
+    assert "invalid --repo" in res["error"]
+
+
+def test_run_bump_issues_invalid_json():
+    def fake_run(args, **kw):
+        if args[:3] == ["gh", "auth", "status"]:
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return subprocess.CompletedProcess(args, 0, "not-json-at-all", "")
+    res = run_bump_issues(runner=fake_run)
+    assert res["ok"] is False
+    assert res["exit_code"] == 1
+    assert "invalid JSON" in res["error"]
 
 
 from click.testing import CliRunner
