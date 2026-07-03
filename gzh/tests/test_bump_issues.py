@@ -82,3 +82,76 @@ def test_apply_filters_by_maintainer_and_pkg():
     assert apply_filters(queue, maintainer="nobody") == []
     assert len(apply_filters(queue, pkg="media-fonts/sarasa-gothic")) == 1
     assert apply_filters(queue, pkg="x/y") == []
+
+
+import json
+import subprocess
+
+from gzh.bump_issues import build_query, run_bump_issues
+
+
+def test_build_query_open_with_comments():
+    q = build_query("Gentoo-zh", "gentoo-zh", "OPEN", 200, True)
+    assert 'owner:"Gentoo-zh"' in q
+    assert 'name:"gentoo-zh"' in q
+    assert 'labels:["nvchecker"]' in q
+    assert "states:[OPEN]" in q
+    assert "first:200" in q
+    assert "comments(first:50)" in q
+
+
+def test_build_query_all_state_no_comments():
+    q = build_query("Gentoo-zh", "gentoo-zh", None, 50, False)
+    assert "states:" not in q
+    assert "comments" not in q
+
+
+def _resp():
+    return {"data": {"repository": {"issues": {"nodes": [
+        {"number": 10581,
+         "title": "[nvchecker] media-fonts/sarasa-gothic can be bump to 1.0.40",
+         "body": "oldver: 1.0.39\nCC: @Linerre", "state": "OPEN",
+         "url": "https://github.com/Gentoo-zh/gentoo-zh/issues/10581",
+         "comments": {"nodes": []}},
+    ]}}}}
+
+
+def test_run_bump_issues_success():
+    def fake_run(args, **kw):
+        if args[:3] == ["gh", "auth", "status"]:
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return subprocess.CompletedProcess(args, 0, json.dumps(_resp()), "")
+    res = run_bump_issues(runner=fake_run)
+    assert res["ok"] is True
+    assert res["results"][0]["cat_pkg"] == "media-fonts/sarasa-gothic"
+    assert res["skipped"] == 0
+    assert res["exit_code"] == 0
+
+
+def test_run_bump_issues_not_authenticated():
+    def fake_run(args, **kw):
+        return subprocess.CompletedProcess(args, 1, "", "not logged in")
+    res = run_bump_issues(runner=fake_run)
+    assert res["ok"] is False
+    assert res["exit_code"] == 2
+
+
+def test_run_bump_issues_gh_failure_after_auth():
+    def fake_run(args, **kw):
+        if args[:3] == ["gh", "auth", "status"]:
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return subprocess.CompletedProcess(args, 1, "", "rate limited")
+    res = run_bump_issues(runner=fake_run)
+    assert res["ok"] is False
+    assert res["exit_code"] == 1
+    assert "rate limited" in res["stderr"]
+
+
+def test_run_bump_issues_filters_pass_through():
+    def fake_run(args, **kw):
+        if args[:3] == ["gh", "auth", "status"]:
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return subprocess.CompletedProcess(args, 0, json.dumps(_resp()), "")
+    res = run_bump_issues(maintainer="nobody", runner=fake_run)
+    assert res["ok"] is True
+    assert res["results"] == []

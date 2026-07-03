@@ -66,3 +66,59 @@ def apply_filters(queue: list, maintainer: str | None = None,
     if pkg:
         out = [x for x in out if x.get("cat_pkg") == pkg]
     return out
+
+
+_STATE_MAP = {"open": "OPEN", "closed": "CLOSED"}
+
+
+def build_query(owner: str, name: str, state: str | None,
+                limit: int, with_comments: bool) -> str:
+    args = ['labels:["nvchecker"]', f"first:{limit}"]
+    if state:
+        args.append(f"states:[{state}]")
+    comments_block = " comments(first:50){nodes{author{login} body createdAt}}" if with_comments else ""
+    return (
+        "query {\n"
+        f'  repository(owner:"{owner}",name:"{name}") {{\n'
+        f"    issues({', '.join(args)}) {{\n"
+        f"      nodes {{ number title body state url author {{login}}{comments_block} }}\n"
+        "    }\n"
+        "  }\n"
+        "}\n"
+    )
+
+
+def _check_gh_auth(runner) -> bool:
+    return runner(["gh", "auth", "status"], capture_output=True, text=True).returncode == 0
+
+
+def run_bump_issues(repo: str = "Gentoo-zh/gentoo-zh", state: str = "open",
+                    maintainer: str | None = None, pkg: str | None = None,
+                    with_comments: bool = True, limit: int = 200,
+                    runner=subprocess.run) -> dict:
+    if not _check_gh_auth(runner):
+        return {"ok": False, "exit_code": 2,
+                "error": "gh not authenticated; run `gh auth login` first"}
+    owner, _, name = repo.partition("/")
+    if not name:
+        return {"ok": False, "exit_code": 1,
+                "error": f"invalid --repo: {repo!r} (expect owner/name)"}
+    gstate = _STATE_MAP.get(state)  # None for "all"
+    query = build_query(owner, name, gstate, limit, with_comments)
+    proc = runner(["gh", "api", "graphql", "-f", f"query={query}"],
+                  capture_output=True, text=True)
+    if proc.returncode != 0:
+        return {"ok": False, "exit_code": 1,
+                "error": "gh graphql call failed", "stderr": proc.stderr}
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return {"ok": False, "exit_code": 1,
+                "error": "invalid JSON from gh", "stdout": proc.stdout}
+    if data.get("errors"):
+        return {"ok": False, "exit_code": 1, "error": str(data["errors"])}
+    nodes = (((data.get("data") or {}).get("repository") or {})
+             .get("issues") or {}).get("nodes") or []
+    queue, skipped = graphql_to_queue(nodes, with_comments=with_comments)
+    queue = apply_filters(queue, maintainer=maintainer, pkg=pkg)
+    return {"ok": True, "results": queue, "skipped": skipped, "exit_code": 0}
