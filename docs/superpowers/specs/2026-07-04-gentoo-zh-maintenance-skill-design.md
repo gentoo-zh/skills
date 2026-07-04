@@ -108,7 +108,7 @@ skills/
 | `gzh lint <ebuild>` | devmanual 规则 + gentoo-zh 约束检查 | 见 §8 |
 | `gzh upstream-version <cat/pkg>` | 查单个包上游最新版 | VersionProvider（默认 nvchecker，见 §7） |
 | `gzh bump-scaffold <cat/pkg> <newver>` | 复制最高旧 ebuild 为新版本文件 | 文件操作 |
-| `gzh nvchecker-config <cat/pkg> <get\|set>` | 读/写 overlay.toml 的 source 配置 | toml 读写 |
+| `gzh nvchecker-config <get\|set> <cat/pkg>` | 读/写 overlay.toml 的 source 配置 | toml 读写 |
 | `gzh manifest <ebuild>` | 重新生成 Manifest | `pkgdev manifest` |
 | `gzh pkgcheck [--min-severity error] <path>` | QA 扫描，结构化输出 | `pkgcheck scan` |
 | `gzh build-test <ebuild> --level quick\|full\|none` | 分级编译验证 | `ebuild <phase>` 序列 |

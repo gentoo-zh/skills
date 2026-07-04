@@ -78,23 +78,32 @@ def diff_ebuild_cmd(old, new):
     click.echo(diff_ebuild(old, new), nl=False)
 
 
-@cli.command("nvchecker-config")
+@cli.group("nvchecker-config")
+def nvchecker_config_group():
+    """Read/write a package's nvchecker entry in overlay.toml."""
+
+
+@nvchecker_config_group.command("get")
 @click.argument("cat_pkg")
-@click.argument("action", type=click.Choice(["get", "set"]))
-@click.option("--source", help="nvchecker source key, e.g. github/pypi/git")
-@click.option("--json", "json_entry", help="full entry as JSON (for set)")
-def nvchecker_config_cmd(cat_pkg, action, source, json_entry):
-    """Read or write a package's nvchecker entry in overlay.toml."""
+def nvchecker_config_get_cmd(cat_pkg):
+    """Print a package's nvchecker entry as JSON."""
     root = find_overlay_root()
     overlay_toml = root / ".github" / "workflows" / "overlay.toml"
-    if action == "get":
-        click.echo(_json.dumps(get_entry(overlay_toml, cat_pkg), indent=2,
-                               ensure_ascii=False))
-    else:
-        if not json_entry:
-            raise click.UsageError("--json is required for set")
-        set_entry(overlay_toml, cat_pkg, _json.loads(json_entry))
-        click.echo("NOTE: overlay.toml rewritten; comments lost. Review the diff.")
+    click.echo(_json.dumps(get_entry(overlay_toml, cat_pkg), indent=2,
+                           ensure_ascii=False))
+
+
+@nvchecker_config_group.command("set")
+@click.argument("cat_pkg")
+@click.option("--json", "json_entry", help="full entry as JSON")
+def nvchecker_config_set_cmd(cat_pkg, json_entry):
+    """Write a package's nvchecker entry (rewrites overlay.toml, comments lost)."""
+    if not json_entry:
+        raise click.UsageError("--json is required")
+    root = find_overlay_root()
+    overlay_toml = root / ".github" / "workflows" / "overlay.toml"
+    set_entry(overlay_toml, cat_pkg, _json.loads(json_entry))
+    click.echo("NOTE: overlay.toml rewritten; comments lost. Review the diff.")
 
 
 @cli.command("manifest")
