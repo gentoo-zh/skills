@@ -1,6 +1,7 @@
 from pathlib import Path
+import subprocess
 
-from gzh.drop_old import drop_candidates, list_ebuilds
+from gzh.drop_old import _enumerate_pkgs, drop_candidates, list_ebuilds, run_drop_old
 
 
 def _pkgdir(tmp_path, versions, pn="foo"):
@@ -51,3 +52,69 @@ def test_drop_nothing_when_within_keep(tmp_path):
     dropped, kept = drop_candidates(list_ebuilds(d, "foo"), "foo", keep=2)
     assert dropped == []
     assert sorted(p.name for p in kept) == ["foo-1.0.ebuild", "foo-2.0.ebuild"]
+
+
+def _overlay(tmp_path):
+    # 两个包：foo 多版本（会 drop），bar 单版本（不 drop）
+    foo = tmp_path / "cat" / "foo"
+    foo.mkdir(parents=True)
+    for v in ["1.0", "1.1", "1.2"]:
+        (foo / f"foo-{v}.ebuild").write_text("EAPI=8\n")
+    bar = tmp_path / "cat" / "bar"
+    bar.mkdir(parents=True)
+    (bar / "bar-1.0.ebuild").write_text("EAPI=8\n")
+    notpkg = tmp_path / "cat" / "empty"
+    notpkg.mkdir(parents=True)
+    return tmp_path
+
+
+def test_enumerate_pkgs_all(tmp_path):
+    root = _overlay(tmp_path)
+    assert _enumerate_pkgs(root, "all") == ["cat/bar", "cat/foo"]
+
+
+def test_enumerate_pkgs_single(tmp_path):
+    assert _enumerate_pkgs(tmp_path, "cat/foo") == ["cat/foo"]
+
+
+def test_run_drop_old_dry_run_does_not_delete(tmp_path):
+    root = _overlay(tmp_path)
+    res = run_drop_old("all", keep=2, apply=False, overlay_root=root)
+    assert res["ok"] is True
+    by_pkg = {r["cat_pkg"]: r for r in res["results"]}
+    assert by_pkg["cat/foo"]["dropped"] == ["foo-1.0.ebuild"]
+    assert by_pkg["cat/bar"]["dropped"] == []
+    # dry-run: files still there
+    assert (root / "cat" / "foo" / "foo-1.0.ebuild").exists()
+
+
+def test_run_drop_old_apply_deletes_and_manifests(tmp_path):
+    root = _overlay(tmp_path)
+    manifest_calls = []
+
+    def fake_manifest_runner(args, **kw):
+        manifest_calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    res = run_drop_old("all", keep=2, apply=True, overlay_root=root,
+                       manifest_runner=fake_manifest_runner)
+    by_pkg = {r["cat_pkg"]: r for r in res["results"]}
+    # foo had a drop -> file deleted + manifest called
+    assert not (root / "cat" / "foo" / "foo-1.0.ebuild").exists()
+    assert by_pkg["cat/foo"]["manifest_ok"] is True
+    # bar had no drop -> no manifest call for it
+    assert "manifest_ok" not in by_pkg["cat/bar"]
+    # manifest called once (for foo only)
+    assert len(manifest_calls) == 1
+
+
+def test_run_drop_old_manifest_failure_recorded(tmp_path):
+    root = _overlay(tmp_path)
+
+    def fake_manifest_runner(args, **kw):
+        return subprocess.CompletedProcess(args, 1, "", "fetch fail")
+
+    res = run_drop_old("all", keep=2, apply=True, overlay_root=root,
+                       manifest_runner=fake_manifest_runner)
+    by_pkg = {r["cat_pkg"]: r for r in res["results"]}
+    assert by_pkg["cat/foo"]["manifest_ok"] is False
