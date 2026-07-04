@@ -67,6 +67,23 @@ def test_set_entry_sorts_after_add(tmp_path):
     assert content.index('["cat/a"]') < content.index('["cat/z"]')
 
 
+def test_sort_overlay_toml_normalizes_blank_lines():
+    # source has: multiple blanks before cat/b, zero blank between b and a
+    src = ('[__config__]\nnewver = "n"\n\n\n\n'
+           '["cat/b"]\nsource = "pypi"\n'
+           '["cat/a"]\nsource = "github"\n')
+    out = sort_overlay_toml(src)
+    lines = out.split("\n")
+    # no consecutive blank lines
+    for i in range(len(lines) - 1):
+        assert not (lines[i] == "" and lines[i + 1] == ""), f"consecutive blanks at {i}"
+    # exactly one blank before each block
+    a_idx = lines.index('["cat/a"]')
+    b_idx = lines.index('["cat/b"]')
+    assert lines[a_idx - 1] == ""
+    assert lines[b_idx - 1] == ""
+
+
 from click.testing import CliRunner
 
 from gzh.cli import cli

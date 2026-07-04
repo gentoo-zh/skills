@@ -44,8 +44,14 @@ def sort_overlay_toml(text: str) -> str:
         blocks.append((key, lines[starts[j]:end]))
     blocks.sort(key=lambda b: b[0])
     out = list(header)
+    while out and out[-1].strip() == "":
+        out.pop()
     for _, blk in blocks:
-        out.extend(blk)
+        b = blk.copy()
+        while b and b[0].strip() == "":
+            b.pop(0)
+        out.append("")  # exactly one blank line between blocks
+        out.extend(b)
     return "\n".join(out)
 
 
