@@ -81,10 +81,16 @@ def run_audit(apply: bool = False, filter_system: bool = True,
 
     out_missing: list[dict] = []
     skipped_unknown: list[str] = []
+    skipped_live: list[str] = []
     for cat_pkg in missing:
         cat, pn = cat_pkg.split("/", 1)
-        ebs = sorted((root / cat / pn).glob(f"{pn}-*.ebuild"))
+        pkg_dir = root / cat / pn
+        ebs = sorted(pkg_dir.glob(f"{pn}-*.ebuild"))
         if not ebs:
+            continue
+        pvs = [eb.name[len(pn) + 1:].removesuffix(".ebuild") for eb in ebs]
+        if pvs and all(pv == "9999" or pv.startswith("9999") for pv in pvs):
+            skipped_live.append(cat_pkg)
             continue
         try:
             parsed = parse_ebuild(ebs[-1])
@@ -102,4 +108,4 @@ def run_audit(apply: bool = False, filter_system: bool = True,
         out_missing.append({"cat_pkg": cat_pkg, "source": source,
                             "entry": entry, "applied": applied})
     return {"ok": True, "stale": stale, "missing": out_missing,
-            "skipped_unknown": skipped_unknown}
+            "skipped_unknown": skipped_unknown, "skipped_live": skipped_live}

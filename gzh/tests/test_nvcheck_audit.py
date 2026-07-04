@@ -158,6 +158,23 @@ def test_run_audit_apply_sets_entries(tmp_path):
     assert all(m["applied"] is True for m in res["missing"])
 
 
+def test_run_audit_skips_live_only(tmp_path):
+    # live-only package (just 9999) → skipped_live, not configured
+    d = tmp_path / "cat" / "live"
+    d.mkdir(parents=True)
+    (d / "live-9999.ebuild").write_text(
+        'EAPI=8\nHOMEPAGE="https://github.com/o/live"\nSRC_URI=""\nSLOT="0"\n')
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "overlay.toml").write_text('__config__ = {newver="n.json"}\n')
+    set_calls = []
+    res = run_audit(apply=True, overlay_root=tmp_path,
+                    set_entry_fn=lambda *a, **k: set_calls.append(a))
+    assert res["skipped_live"] == ["cat/live"]
+    assert res["missing"] == []
+    assert set_calls == []  # no set for live-only
+
+
 from click.testing import CliRunner
 
 from gzh.cli import cli
