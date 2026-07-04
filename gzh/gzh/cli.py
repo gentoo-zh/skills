@@ -13,6 +13,7 @@ from gzh.ebuild_parser import parse_ebuild
 from gzh.lint import lint_ebuild
 from gzh.manifest import run_manifest
 from gzh.notify import send_telegram
+from gzh.nvcheck_audit import run_audit
 from gzh.nvchecker_config import get_entry, set_entry
 from gzh.pkgcheck import run_pkgcheck
 from gzh.repo import find_overlay_root
@@ -229,6 +230,21 @@ def drop_old_cmd(all_, pkg, keep, apply):
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
     if not res["ok"]:
         raise SystemExit(1)
+
+
+@cli.command("nvcheck-audit")
+@click.option("--apply", is_flag=True, default=False,
+              help="write inferred entries to overlay.toml (rewrites file, comments lost)")
+@click.option("--no-filter-system", is_flag=True, default=False,
+              help="include acct-*/virtual/* in missing check")
+def nvcheck_audit_cmd(apply, no_filter_system):
+    """Audit overlay.toml (nvchecker config) vs actual packages; infer upstreams."""
+    res = run_audit(apply=apply, filter_system=not no_filter_system,
+                    overlay_root=find_overlay_root())
+    click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
+    if apply and res["missing"]:
+        click.echo("NOTE: overlay.toml rewritten; comments lost. Review the diff.",
+                   err=True)
 
 
 def main():

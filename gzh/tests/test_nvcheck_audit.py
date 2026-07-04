@@ -141,3 +141,30 @@ def test_run_audit_apply_sets_entries(tmp_path):
     assert "cat/gh" in applied_pkgs and "cat/pyp" in applied_pkgs
     assert "cat/unk" not in applied_pkgs  # unknown skipped
     assert all(m["applied"] is True for m in res["missing"])
+
+
+from click.testing import CliRunner
+
+from gzh.cli import cli
+
+
+def test_nvcheck_audit_help_registered():
+    result = CliRunner().invoke(cli, ["nvcheck-audit", "--help"])
+    assert result.exit_code == 0
+    assert "apply" in result.output.lower()
+
+
+def test_nvcheck_audit_dry_run_via_cli(tmp_path, monkeypatch):
+    import gzh.cli as cli_mod
+    # minimal overlay with one missing github pkg
+    (tmp_path / "cat" / "gh").mkdir(parents=True)
+    (tmp_path / "cat" / "gh" / "gh-1.0.ebuild").write_text(
+        'EAPI=8\nHOMEPAGE="https://github.com/o/gh"\nSRC_URI=""\nSLOT="0"\n')
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "overlay.toml").write_text('__config__ = {newver="n.json"}\n', encoding="utf-8")
+    monkeypatch.setattr("gzh.cli.find_overlay_root", lambda: tmp_path)
+    result = CliRunner().invoke(cli_mod.cli, ["nvcheck-audit"])
+    assert result.exit_code == 0
+    assert "cat/gh" in result.output
+    assert '"applied": false' in result.output  # dry-run
