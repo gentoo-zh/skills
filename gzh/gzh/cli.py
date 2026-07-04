@@ -97,13 +97,13 @@ def nvchecker_config_get_cmd(cat_pkg):
 @click.argument("cat_pkg")
 @click.option("--json", "json_entry", help="full entry as JSON")
 def nvchecker_config_set_cmd(cat_pkg, json_entry):
-    """Write a package's nvchecker entry (rewrites overlay.toml, comments lost)."""
+    """Write a package's nvchecker entry (updates overlay.toml, preserves comments)."""
     if not json_entry:
         raise click.UsageError("--json is required")
     root = find_overlay_root()
     overlay_toml = root / ".github" / "workflows" / "overlay.toml"
     set_entry(overlay_toml, cat_pkg, _json.loads(json_entry))
-    click.echo("NOTE: overlay.toml rewritten; comments lost. Review the diff.")
+    click.echo("NOTE: overlay.toml updated. Review the diff.")
 
 
 @cli.command("manifest")
@@ -243,7 +243,7 @@ def drop_old_cmd(all_, pkg, keep, apply):
 
 @cli.command("nvcheck-audit")
 @click.option("--apply", is_flag=True, default=False,
-              help="write inferred entries to overlay.toml (rewrites file, comments lost)")
+              help="write inferred entries to overlay.toml (preserves comments)")
 @click.option("--no-filter-system", is_flag=True, default=False,
               help="include acct-*/virtual/* in missing check")
 def nvcheck_audit_cmd(apply, no_filter_system):
@@ -254,7 +254,7 @@ def nvcheck_audit_cmd(apply, no_filter_system):
     if not res["ok"]:
         raise SystemExit(1)
     if apply and res["missing"]:
-        click.echo("NOTE: overlay.toml rewritten; comments lost. Review the diff.",
+        click.echo("NOTE: overlay.toml updated. Review the diff.",
                    err=True)
 
 
