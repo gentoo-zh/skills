@@ -242,6 +242,8 @@ def nvcheck_audit_cmd(apply, no_filter_system):
     res = run_audit(apply=apply, filter_system=not no_filter_system,
                     overlay_root=find_overlay_root())
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
+    if not res["ok"]:
+        raise SystemExit(1)
     if apply and res["missing"]:
         click.echo("NOTE: overlay.toml rewritten; comments lost. Review the diff.",
                    err=True)

@@ -34,6 +34,23 @@ def test_infer_git_from_gitlab_url():
     assert source == "git"
     assert entry["source"] == "git"
     assert entry["use_max_tag"] is True
+    assert entry["src"]  # non-empty: gitlab URL or homepage
+
+
+def test_infer_git_src_from_dot_git_url():
+    parsed = {"HOMEPAGE": "https://example.org/proj",
+              "SRC_URI": "https://example.org/proj-1.0.tar.gz", "inherit": []}
+    # explicit .git clone URL in HOMEPAGE wins the src
+    parsed2 = {"HOMEPAGE": "https://git.example.org/org/foo.git",
+               "SRC_URI": "", "inherit": []}
+    _, entry = infer_source(parsed2, "foo")
+    assert entry["src"] == "https://git.example.org/org/foo.git"
+
+
+def test_infer_github_dotted_repo():
+    parsed = {"HOMEPAGE": "https://github.com/org/foo.bar", "SRC_URI": "", "inherit": []}
+    source, entry = infer_source(parsed, "foo.bar")
+    assert entry["github"] == "org/foo.bar"
 
 
 def test_infer_unknown_when_no_match():
@@ -168,3 +185,38 @@ def test_nvcheck_audit_dry_run_via_cli(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert "cat/gh" in result.output
     assert '"applied": false' in result.output  # dry-run
+
+
+def test_run_audit_overlay_toml_error(tmp_path):
+    # overlay.toml missing -> ok=False, error mentions overlay.toml
+    res = run_audit(overlay_root=tmp_path)
+    assert res["ok"] is False
+    assert "overlay.toml" in res["error"]
+    assert res["stale"] == [] and res["missing"] == []
+
+
+def test_cli_overlay_error_exits_1(tmp_path, monkeypatch):
+    monkeypatch.setattr("gzh.cli.find_overlay_root", lambda: tmp_path)
+    result = CliRunner().invoke(cli, ["nvcheck-audit"])
+    assert result.exit_code == 1
+    assert '"ok": false' in result.output
+
+
+def test_run_audit_skips_bad_ebuild(tmp_path):
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "overlay.toml").write_text('__config__ = {newver="n.json"}\n', encoding="utf-8")
+    # good pkg parses fine
+    good = tmp_path / "cat" / "good"
+    good.mkdir(parents=True)
+    (good / "good-1.0.ebuild").write_text(
+        'EAPI=8\nHOMEPAGE="https://github.com/o/good"\nSRC_URI=""\nSLOT="0"\n',
+        encoding="utf-8")
+    # bad pkg: invalid UTF-8 so parse_ebuild throws
+    bad = tmp_path / "cat" / "bad"
+    bad.mkdir(parents=True)
+    (bad / "bad-1.0.ebuild").write_bytes(b"\xff\xfe\x00not utf-8")
+    res = run_audit(overlay_root=tmp_path)
+    assert res["ok"] is True
+    assert "cat/bad" in res["skipped_unknown"]
+    assert any(m["cat_pkg"] == "cat/good" for m in res["missing"])

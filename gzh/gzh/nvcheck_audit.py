@@ -8,7 +8,8 @@ from gzh.ebuild_parser import parse_ebuild
 from gzh.nvchecker_config import set_entry
 from gzh.repo import find_overlay_root
 
-_GITHUB_RE = re.compile(r'github\.com/([^/]+)/([^/)\."\'\s]+)')
+_GITHUB_RE = re.compile(r"github\.com/([^/]+)/([^/)\"'\s]+)")
+_GIT_URL_RE = re.compile(r'https?://[^\s"\']+\.git')
 
 
 def _clean_repo(repo: str) -> str:
@@ -28,8 +29,10 @@ def infer_source(parsed: dict, pn: str) -> tuple[str, dict | None]:
                           "use_latest_release": True}
     if "pypi.org" in text or "files.pythonhosted.org" in text or "pypi" in inherit:
         return "pypi", {"source": "pypi", "pypi": pn}
-    if "gitlab.com" in text or "codeberg.org" in text or ".git" in text:
-        return "git", {"source": "git", "use_max_tag": True}
+    m_git = _GIT_URL_RE.search(text)
+    if m_git or "gitlab.com" in text or "codeberg.org" in text or ".git" in text:
+        src = m_git.group(0) if m_git else (homepage or "")
+        return "git", {"source": "git", "src": src, "use_max_tag": True}
     return "unknown", None
 
 
@@ -71,8 +74,12 @@ def run_audit(apply: bool = False, filter_system: bool = True,
               overlay_root: Path | None = None, set_entry_fn=set_entry) -> dict:
     root = Path(overlay_root) if overlay_root else find_overlay_root()
     overlay_toml = root / ".github" / "workflows" / "overlay.toml"
-    configured = _load_configured(overlay_toml)
-    actual = _enumerate_actual(root)
+    try:
+        configured = _load_configured(overlay_toml)
+        actual = _enumerate_actual(root)
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        return {"ok": False, "error": f"failed to read {overlay_toml.name}: {e}",
+                "stale": [], "missing": [], "skipped_unknown": []}
     stale, missing = audit(configured, actual, filter_system=filter_system)
 
     out_missing: list[dict] = []
@@ -82,8 +89,12 @@ def run_audit(apply: bool = False, filter_system: bool = True,
         ebs = sorted((root / cat / pn).glob(f"{pn}-*.ebuild"))
         if not ebs:
             continue
-        parsed = parse_ebuild(ebs[-1])
-        source, entry = infer_source(parsed, pn)
+        try:
+            parsed = parse_ebuild(ebs[-1])
+            source, entry = infer_source(parsed, pn)
+        except (OSError, ValueError, UnicodeDecodeError) as e:
+            skipped_unknown.append(cat_pkg)
+            continue
         if source == "unknown" or entry is None:
             skipped_unknown.append(cat_pkg)
             continue
