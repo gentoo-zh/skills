@@ -28,23 +28,21 @@ def test_infer_pypi_from_inherit():
     assert entry["pypi"] == "foo"
 
 
-def test_infer_git_from_gitlab_url():
+def test_infer_gitlab_is_unknown():
+    # git source is not auto-inferred (src unreliable); left for manual setup
     parsed = {"HOMEPAGE": "https://gitlab.com/org/foo", "SRC_URI": "", "inherit": []}
     source, entry = infer_source(parsed, "foo")
-    assert source == "git"
-    assert entry["source"] == "git"
-    assert entry["use_max_tag"] is True
-    assert entry["src"]  # non-empty: gitlab URL or homepage
+    assert source == "unknown"
+    assert entry is None
 
 
-def test_infer_git_src_from_dot_git_url():
-    parsed = {"HOMEPAGE": "https://example.org/proj",
-              "SRC_URI": "https://example.org/proj-1.0.tar.gz", "inherit": []}
-    # explicit .git clone URL in HOMEPAGE wins the src
-    parsed2 = {"HOMEPAGE": "https://git.example.org/org/foo.git",
-               "SRC_URI": "", "inherit": []}
-    _, entry = infer_source(parsed2, "foo")
-    assert entry["src"] == "https://git.example.org/org/foo.git"
+def test_infer_dot_git_url_is_unknown():
+    # even explicit .git URLs are not auto-inferred as git source
+    parsed = {"HOMEPAGE": "https://git.example.org/org/foo.git",
+              "SRC_URI": "", "inherit": []}
+    source, entry = infer_source(parsed, "foo")
+    assert source == "unknown"
+    assert entry is None
 
 
 def test_infer_github_dotted_repo():

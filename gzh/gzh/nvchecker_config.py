@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import tomllib
-import tomli_w
 from pathlib import Path
+
+import tomlkit
 
 
 def _load(path: Path) -> dict:
@@ -14,6 +15,9 @@ def get_entry(overlay_toml: Path, cat_pkg: str) -> dict | None:
 
 
 def set_entry(overlay_toml: Path, cat_pkg: str, entry: dict) -> None:
-    data = _load(overlay_toml)
-    data[cat_pkg] = entry
-    Path(overlay_toml).write_text(tomli_w.dumps(data), encoding="utf-8")
+    # tomlkit preserves comments/formatting (tomli-w would drop them).
+    doc = tomlkit.parse(Path(overlay_toml).read_text(encoding="utf-8"))
+    if cat_pkg in doc:
+        del doc[cat_pkg]
+    doc[cat_pkg] = entry
+    Path(overlay_toml).write_text(tomlkit.dumps(doc), encoding="utf-8")

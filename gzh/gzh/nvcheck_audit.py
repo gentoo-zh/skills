@@ -9,7 +9,6 @@ from gzh.nvchecker_config import set_entry
 from gzh.repo import find_overlay_root
 
 _GITHUB_RE = re.compile(r"github\.com/([^/]+)/([^/)\"'\s]+)")
-_GIT_URL_RE = re.compile(r'https?://[^\s"\']+\.git')
 
 
 def _clean_repo(repo: str) -> str:
@@ -29,10 +28,8 @@ def infer_source(parsed: dict, pn: str) -> tuple[str, dict | None]:
                           "use_latest_release": True}
     if "pypi.org" in text or "files.pythonhosted.org" in text or "pypi" in inherit:
         return "pypi", {"source": "pypi", "pypi": pn}
-    m_git = _GIT_URL_RE.search(text)
-    if m_git or "gitlab.com" in text or "codeberg.org" in text or ".git" in text:
-        src = m_git.group(0) if m_git else (homepage or "")
-        return "git", {"source": "git", "src": src, "use_max_tag": True}
+    # git source is not auto-inferred: HOMEPAGE/SRC_URI patterns (gitlab/codeberg/.git)
+    # don't reliably yield a clone-able src; leave as unknown for manual setup.
     return "unknown", None
 
 

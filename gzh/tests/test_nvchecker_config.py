@@ -20,6 +20,18 @@ def test_set_entry_roundtrip(tmp_path):
     assert tomllib.loads(t.read_text())["__config__"]["newver"] == "n.json"
 
 
+def test_set_entry_preserves_comments(tmp_path):
+    t = tmp_path / "overlay.toml"
+    t.write_text(
+        '# top comment\n[__config__]\nnewver = "n.json"\n'
+        '# pkg comment\n["cat/foo"]\nsource = "github"\n', encoding="utf-8")
+    set_entry(t, "cat/bar", {"source": "pypi", "pypi": "bar"})
+    content = t.read_text()
+    assert "# top comment" in content
+    assert "# pkg comment" in content
+    assert get_entry(t, "cat/bar") == {"source": "pypi", "pypi": "bar"}
+
+
 from click.testing import CliRunner
 
 from gzh.cli import cli
