@@ -8,6 +8,7 @@ from gzh.bump import bump_scaffold, diff_ebuild, highest_ebuild
 from gzh.bump_issues import run_bump_issues, write_output
 from gzh.buildtest import run_build_test
 from gzh.commit import run_commit
+from gzh.drop_old import run_drop_old
 from gzh.ebuild_parser import parse_ebuild
 from gzh.lint import lint_ebuild
 from gzh.manifest import run_manifest
@@ -206,6 +207,24 @@ def notify_telegram_cmd(message, chat_id):
     res = send_telegram(message, chat_id=chat_id)
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
     # non-fatal: never exit non-zero (notification is auxiliary)
+
+
+@cli.command("drop-old")
+@click.option("--all", "all_", is_flag=True, default=False, help="scan all packages")
+@click.option("--pkg", default=None, help="single cat/pkg")
+@click.option("--keep", default=2, show_default=True, type=click.IntRange(min=1))
+@click.option("--apply", is_flag=True, default=False,
+              help="actually delete + recompute Manifest (default: dry-run)")
+def drop_old_cmd(all_, pkg, keep, apply):
+    """List or drop old ebuild versions (keep newest N non-liveup; *-9999 kept)."""
+    if all_ and pkg:
+        raise click.UsageError("--all and --pkg are mutually exclusive")
+    if not all_ and not pkg:
+        raise click.UsageError("specify --all or --pkg")
+    target = "all" if all_ else pkg
+    res = run_drop_old(target, keep=keep, apply=apply,
+                       overlay_root=find_overlay_root())
+    click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
 
 
 def main():

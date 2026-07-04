@@ -118,3 +118,38 @@ def test_run_drop_old_manifest_failure_recorded(tmp_path):
                        manifest_runner=fake_manifest_runner)
     by_pkg = {r["cat_pkg"]: r for r in res["results"]}
     assert by_pkg["cat/foo"]["manifest_ok"] is False
+
+
+from click.testing import CliRunner
+
+from gzh.cli import cli
+
+
+def test_drop_old_help_registered():
+    result = CliRunner().invoke(cli, ["drop-old", "--help"])
+    assert result.exit_code == 0
+    assert "keep" in result.output.lower()
+
+
+def test_drop_old_requires_all_or_pkg():
+    result = CliRunner().invoke(cli, ["drop-old"])
+    assert result.exit_code != 0  # mutual exclusion / required
+
+
+def test_drop_old_all_and_pkg_mutually_exclusive():
+    result = CliRunner().invoke(cli, ["drop-old", "--all", "--pkg", "a/b"])
+    assert result.exit_code != 0
+
+
+def test_drop_old_dry_run_via_cli(tmp_path, monkeypatch):
+    import gzh.cli as cli_mod
+    monkeypatch.setattr("gzh.cli.find_overlay_root", lambda: tmp_path)
+    foo = tmp_path / "cat" / "foo"
+    foo.mkdir(parents=True)
+    for v in ["1.0", "1.1", "1.2"]:
+        (foo / f"foo-{v}.ebuild").write_text("EAPI=8\n")
+    result = CliRunner().invoke(cli_mod.cli,
+                                ["drop-old", "--pkg", "cat/foo", "--keep", "2"])
+    assert result.exit_code == 0
+    assert "foo-1.0.ebuild" in result.output  # listed as dropped
+    assert (foo / "foo-1.0.ebuild").exists()  # dry-run: not deleted
