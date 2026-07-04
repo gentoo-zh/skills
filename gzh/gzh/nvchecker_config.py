@@ -50,6 +50,8 @@ def sort_overlay_toml(text: str) -> str:
         b = blk.copy()
         while b and b[0].strip() == "":
             b.pop(0)
+        while b and b[-1].strip() == "":
+            b.pop()
         out.append("")  # exactly one blank line between blocks
         out.extend(b)
     return "\n".join(out)
