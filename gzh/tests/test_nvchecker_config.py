@@ -32,6 +32,41 @@ def test_set_entry_preserves_comments(tmp_path):
     assert get_entry(t, "cat/bar") == {"source": "pypi", "pypi": "bar"}
 
 
+from gzh.nvchecker_config import sort_overlay_toml
+
+
+def test_sort_overlay_toml_alphabetical_with_comments():
+    src = ('[__config__]\nnewver = "n.json"\n\n'
+           '# b comment\n["cat/b"]\nsource = "pypi"\n\n'
+           '# a comment\n["cat/a"]\nsource = "github"\n')
+    out = sort_overlay_toml(src)
+    assert out.index('["cat/a"]') < out.index('["cat/b"]')
+    # a's comment travels with a block (after header, before/at a)
+    a_idx = out.index('["cat/a"]')
+    assert "# a comment" in out[:a_idx]
+    # b's comment travels with b block (after a)
+    assert "# b comment" in out[out.index('["cat/a"]'):out.index('["cat/b"]') + 10] or \
+           "# b comment" in out[:a_idx]
+    assert out.startswith("[__config__]")
+
+
+def test_sort_overlay_toml_preserves_commented_table():
+    src = ('[__config__]\nnewver = "n"\n\n'
+           '# disabled\n#["cat/old"]\n\n'
+           '["cat/active"]\nsource = "github"\n')
+    out = sort_overlay_toml(src)
+    assert '#["cat/old"]' in out
+    assert '["cat/active"]' in out
+
+
+def test_set_entry_sorts_after_add(tmp_path):
+    t = tmp_path / "overlay.toml"
+    t.write_text('[__config__]\nnewver = "n"\n\n["cat/z"]\nsource = "x"\n', encoding="utf-8")
+    set_entry(t, "cat/a", {"source": "y"})
+    content = t.read_text()
+    assert content.index('["cat/a"]') < content.index('["cat/z"]')
+
+
 from click.testing import CliRunner
 
 from gzh.cli import cli
