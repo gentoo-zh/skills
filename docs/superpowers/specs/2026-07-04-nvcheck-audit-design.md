@@ -28,7 +28,7 @@ gentoo-zh 的 nvchecker CI 依赖 `.github/workflows/overlay.toml`（248 个包�
 | dry-run 安全 | 默认只列；`--apply` 才写 overlay.toml |
 | 复用不造轮子 | `gzh ebuild-parse`（读 HOMEPAGE/SRC_URI）、`gzh nvchecker-config set`（写配置）、`gzh repo` |
 | 系统包过滤 | 默认排除 `acct-*`/`virtual/*` 等无上游包；`--no-filter-system` 含 |
-| overlay.toml 重写警告 | `nvchecker-config set` 重写丢注释，输出明确提示人工 review diff |
+| overlay.toml 更新提示 | `nvchecker-config set` 用 tomlkit **保注释**更新，输出提示人工 review diff |
 
 ---
 
@@ -79,7 +79,7 @@ gzh nvcheck-audit [--apply] [--no-filter-system]
 
 对 missing 且推断≠unknown 的包：
 - 调 `gzh nvchecker-config set <cat/pkg> --json '<entry>'`（复用现有命令，写 overlay.toml）。
-- `nvchecker-config set` 重写 overlay.toml（**丢注释**，已知行为），输出明确提示「overlay.toml rewritten, comments lost; review the diff」。
+- `nvchecker-config set` 用 **tomlkit 保注释**更新 overlay.toml，输出提示「overlay.toml updated. Review the diff」。
 - 每包一个 set 调用（或批量聚合后一次写——MVP 逐包调，简单）。
 - 推断=unknown 的包：跳过 set，列 `skipped_unknown`。
 
@@ -128,7 +128,7 @@ gzh nvcheck-audit [--apply] [--no-filter-system]
 
 **安全边界：**
 - **默认 dry-run**：不写 overlay.toml。
-- `--apply` 写 overlay.toml（`nvchecker-config set` 重写丢注释），输出醒目提示 + 建议人工 review diff。
+- `--apply` 写 overlay.toml（`nvchecker-config set` 用 tomlkit **保注释**），输出提示 + 建议人工 review diff。
 - 不碰 `/var/db/repos/gentoo-zh`（synced 副本）。
 - 推断不准的风险：`--apply` 前应 dry-run review 推断结果（entry 字段）。
 
