@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 import re
+import tomllib
+from pathlib import Path
+
+from gzh.ebuild_parser import parse_ebuild
+from gzh.nvchecker_config import set_entry
+from gzh.repo import find_overlay_root
 
 _GITHUB_RE = re.compile(r'github\.com/([^/]+)/([^/)\."\'\s]+)')
 
@@ -41,3 +47,51 @@ def audit(configured: set, actual: set, filter_system: bool = True) -> tuple[lis
     if filter_system:
         missing = [p for p in missing if not _is_system(p)]
     return stale, missing
+
+
+def _load_configured(overlay_toml: Path) -> set[str]:
+    data = tomllib.loads(Path(overlay_toml).read_text(encoding="utf-8"))
+    return {k for k in data if "/" in k and k != "__config__"}
+
+
+def _enumerate_actual(root: Path) -> set[str]:
+    out: set[str] = set()
+    for cat_d in Path(root).iterdir():
+        if not cat_d.is_dir() or cat_d.name.startswith("."):
+            continue
+        if cat_d.name in ("metadata", "profiles"):
+            continue
+        for pkg_d in cat_d.iterdir():
+            if pkg_d.is_dir() and any(pkg_d.glob("*.ebuild")):
+                out.add(f"{cat_d.name}/{pkg_d.name}")
+    return out
+
+
+def run_audit(apply: bool = False, filter_system: bool = True,
+              overlay_root: Path | None = None, set_entry_fn=set_entry) -> dict:
+    root = Path(overlay_root) if overlay_root else find_overlay_root()
+    overlay_toml = root / ".github" / "workflows" / "overlay.toml"
+    configured = _load_configured(overlay_toml)
+    actual = _enumerate_actual(root)
+    stale, missing = audit(configured, actual, filter_system=filter_system)
+
+    out_missing: list[dict] = []
+    skipped_unknown: list[str] = []
+    for cat_pkg in missing:
+        cat, pn = cat_pkg.split("/", 1)
+        ebs = sorted((root / cat / pn).glob(f"{pn}-*.ebuild"))
+        if not ebs:
+            continue
+        parsed = parse_ebuild(ebs[-1])
+        source, entry = infer_source(parsed, pn)
+        if source == "unknown" or entry is None:
+            skipped_unknown.append(cat_pkg)
+            continue
+        applied = False
+        if apply:
+            set_entry_fn(overlay_toml, cat_pkg, entry)
+            applied = True
+        out_missing.append({"cat_pkg": cat_pkg, "source": source,
+                            "entry": entry, "applied": applied})
+    return {"ok": True, "stale": stale, "missing": out_missing,
+            "skipped_unknown": skipped_unknown}

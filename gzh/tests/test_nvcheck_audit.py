@@ -77,3 +77,67 @@ def test_audit_empty_when_consistent():
     actual = {"cat/a"}
     stale, missing = audit(configured, actual)
     assert stale == [] and missing == []
+
+
+import tomllib
+from pathlib import Path
+
+from gzh.nvcheck_audit import _enumerate_actual, _load_configured, run_audit
+
+
+def _overlay(tmp_path: Path) -> Path:
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "overlay.toml").write_text(
+        '__config__ = {newver = "n.json"}\n["cat/cfg"]\nsource = "github"\n'
+        'github = "o/cfg"\n', encoding="utf-8")
+    # actual: cat/cfg (configured), cat/gh (missing, github), cat/pyp (missing, pypi),
+    # cat/unk (missing unknown), cat/cfg-rm not in actual (stale handled by set diff)
+    for pkg, homepage in [("cat/cfg", "https://github.com/o/cfg"),
+                          ("cat/gh", "https://github.com/o/gh"),
+                          ("cat/pyp", "https://pypi.org/pyp"),
+                          ("cat/unk", "https://example.org")]:
+        d = tmp_path / pkg
+        d.mkdir(parents=True)
+        pn = pkg.split("/")[1]
+        (d / f"{pn}-1.0.ebuild").write_text(
+            f'EAPI=8\nHOMEPAGE="{homepage}"\nSRC_URI=""\nSLOT="0"\n', encoding="utf-8")
+    return tmp_path
+
+
+def test_load_configured(tmp_path):
+    root = _overlay(tmp_path)
+    cfg = _load_configured(root / ".github" / "workflows" / "overlay.toml")
+    assert cfg == {"cat/cfg"}
+
+
+def test_enumerate_actual(tmp_path):
+    root = _overlay(tmp_path)
+    actual = _enumerate_actual(root)
+    assert actual == {"cat/cfg", "cat/gh", "cat/pyp", "cat/unk"}
+
+
+def test_run_audit_dry_run(tmp_path):
+    root = _overlay(tmp_path)
+    set_calls = []
+    res = run_audit(apply=False, overlay_root=root,
+                    set_entry_fn=lambda *a, **k: set_calls.append(a))
+    assert res["ok"] is True
+    assert res["stale"] == []  # cat/cfg exists in both
+    sources = {m["cat_pkg"]: m["source"] for m in res["missing"]}
+    assert sources["cat/gh"] == "github"
+    assert sources["cat/pyp"] == "pypi"
+    assert res["skipped_unknown"] == ["cat/unk"]
+    assert all(m["applied"] is False for m in res["missing"])
+    assert set_calls == []  # dry-run: no set calls
+
+
+def test_run_audit_apply_sets_entries(tmp_path):
+    root = _overlay(tmp_path)
+    set_calls = []
+    res = run_audit(apply=True, overlay_root=root,
+                    set_entry_fn=lambda toml, cat_pkg, entry: set_calls.append((cat_pkg, entry)))
+    applied_pkgs = [c[0] for c in set_calls]
+    assert "cat/gh" in applied_pkgs and "cat/pyp" in applied_pkgs
+    assert "cat/unk" not in applied_pkgs  # unknown skipped
+    assert all(m["applied"] is True for m in res["missing"])
