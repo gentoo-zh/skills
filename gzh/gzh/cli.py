@@ -221,10 +221,14 @@ def drop_old_cmd(all_, pkg, keep, apply):
         raise click.UsageError("--all and --pkg are mutually exclusive")
     if not all_ and not pkg:
         raise click.UsageError("specify --all or --pkg")
+    if pkg and "/" not in pkg:
+        raise click.UsageError("--pkg must be cat/pkg (e.g. app-misc/foo)")
     target = "all" if all_ else pkg
     res = run_drop_old(target, keep=keep, apply=apply,
                        overlay_root=find_overlay_root())
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
+    if not res["ok"]:
+        raise SystemExit(1)
 
 
 def main():

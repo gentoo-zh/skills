@@ -76,7 +76,10 @@ def run_drop_old(target: str, keep: int = 2, apply: bool = False,
                 mres = run_manifest(pkg_dir / kept[0].name, cwd=root,
                                     runner=manifest_runner)
                 entry["manifest_ok"] = mres["ok"]
+                if not mres["ok"]:
+                    entry["needs_manual_recovery"] = True
             else:
                 entry["manifest_ok"] = True
         results.append(entry)
-    return {"ok": True, "results": results}
+    any_manifest_fail = any(r.get("manifest_ok") is False for r in results)
+    return {"ok": not any_manifest_fail, "results": results}
