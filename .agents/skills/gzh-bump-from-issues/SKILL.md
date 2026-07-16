@@ -23,8 +23,9 @@ description: "Orchestrate batch version-bump from nvchecker bump-reminder issues
 看每个剩余 issue，输出 bump/skip + 理由：
 - **maintainer**：body `CC: @<name>` 是否当前 `gh api user --jq .login`。非自己的不强制 skip（gentoo-zh 允许协作），但识别责任边界。
 - **comments 阻塞信号**：扫 `comments[].body` 关键词（`crash`/`broken`/`regression`/`build fail`/`不要升级`/`don't bump`）→ 强 skip。
-- **版本跨度**：`target_version` vs 当前 ebuild PV（`gzh ebuild-parse`）。major 跨跃 → 标记「需查上游 changelog」，A5 加权。
-- **包类型**：`-bin`（SRC_URI 为主）/ 源码（依赖+patch 风险，A5/A6 加权）。
+- **版本跨度**：`target_version` vs 当前 ebuild PV（`gzh ebuild-parse`）。major 跨跃 → 标记「需查上游 changelog」，A5 加权。例外：YYYYMMDD[.N] 日期版号首段单调递增，更新日期是常规 bump，不算 major；只有日期倒退才可疑。
+- **包类型**：`-bin`/预编译（SRC_URI + 预编译 QA：unresolved-soname/pre-stripped/.desktop，见 gzh-version-bump/references/prebuilt-qa.md）/ 源码（依赖+patch，A5/A6 加权）。
+- **不可离线复现类 (escalate)**：metadata 重生成（haskell-cabal/hackport、CABAL_HACKAGE_REVISION）或 DEPEND/RDEPEND/IUSE 须随上游生成器改变的包 → 不盲试，`gzh triage skip <issue> --cat-pkg <p> --target-version <v> --reason "需上游 metadata，非离线可复现"`，留取数据/人工路径；信号见 gzh-version-bump/references/escalate-classes.md。
 
 ### 阶段 3：循环处理
 - **skip 的** → `gzh triage skip <issue> --cat-pkg <p> --target-version <v> --reason "<理由>"`。
@@ -34,7 +35,7 @@ description: "Orchestrate batch version-bump from nvchecker bump-reminder issues
   - 重试上限 3 次：同包同错重复 2 次即停、记失败、继续下一个。
 
 ### 阶段 4：汇总 + 回报
-1. 写汇总到 `.gzh/bump-batch-<时间戳>.md`：成功（cat/pkg-ver + 分支 + issue）/ 失败（cat/pkg + phase + error + 分支）/ 跳过（cat/pkg + issue + reason，已记 triage）+「下一步：手动 PR」命令模板（`gh pr create --repo Gentoo-zh/gentoo-zh --base master --head $(gh api user --jq .login):<branch>`）。
+1. 写汇总到 `.gzh/bump-batch-<时间戳>.md`：成功（cat/pkg-ver + 分支 + issue）/ 失败（cat/pkg + phase + error + 分支）/ 跳过（cat/pkg + issue + reason，已记 triage）+「下一步：手动 PR」命令模板（`gh pr create --repo gentoo-zh/overlay --base master --head $(gh api user --jq .login):<branch>`）。
 2. 若 `TELEGRAM_BOT_TOKEN` env 配置：`gzh notify telegram --message "<成功N/失败N/跳过N + 分支列表>"`；否则跳过。
 
 ## 排除

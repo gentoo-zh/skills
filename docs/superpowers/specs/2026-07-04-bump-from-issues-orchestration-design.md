@@ -115,7 +115,7 @@ bump 过程中硬门失败（manifest fetch 失败 / patch 不适用 / build-tes
 
 ## 下一步
 手动 PR（每个成功分支）:
-  gh pr create --repo Gentoo-zh/gentoo-zh --base master --head $(gh api user --jq .login):<branch>
+  gh pr create --repo gentoo-zh/overlay --base master --head $(gh api user --jq .login):<branch>
 ```
 
 ---
