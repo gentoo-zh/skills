@@ -44,7 +44,8 @@ def _pv_subs(ebuild_name: str) -> dict:
 
 
 def _expand(tok: str, subs: dict) -> str:
-    for k, v in subs.items():
+    # longest key first: a bare `$P` must not eat the prefix of `$PF`/`$PN`/`$PV`/`$PVR`.
+    for k, v in sorted(subs.items(), key=lambda kv: len(kv[0]), reverse=True):
         tok = tok.replace("${%s}" % k, v).replace("$%s" % k, v)
     return tok
 

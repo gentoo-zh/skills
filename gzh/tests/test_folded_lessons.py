@@ -103,6 +103,18 @@ def test_reverify_confirmed_vs_transient():
     assert rv["checked"] == 2
 
 
+def test_reverify_403_429_go_to_needs_human():
+    # auth-gated / rate-limited codes are inconclusive, not "dead" (would wrongly block)
+    results = [{"__class__": "DeadUrl", "msg": "SRC_URI: https://example.com/gated.tar.gz"}]
+
+    def fake_run(args, **kw):
+        return subprocess.CompletedProcess(args, 0, stdout="403", stderr="")
+
+    rv = reverify_url_findings(results, runner=fake_run)
+    assert rv["confirmed"] == [] and rv["transient"] == []
+    assert rv["needs_human"][0]["url"] == "https://example.com/gated.tar.gz"
+
+
 # ---- P1-21: truncated-distfile size guard ----
 def test_parse_manifest_dist():
     text = ("DIST foo-1.2.3.tar.gz 1048576 BLAKE2B ab SHA512 cd\n"
