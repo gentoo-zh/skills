@@ -96,7 +96,7 @@ def _check_gh_auth(runner) -> bool:
         return False
 
 
-def run_bump_issues(repo: str = "Gentoo-zh/gentoo-zh", state: str = "open",
+def run_bump_issues(repo: str = "gentoo-zh/overlay", state: str = "open",
                     maintainer: str | None = None, pkg: str | None = None,
                     with_comments: bool = True, limit: int = 100,
                     runner=None) -> dict:
