@@ -11,11 +11,13 @@ from gzh.commit import run_commit
 from gzh.drop_old import run_drop_old
 from gzh.ebuild_parser import parse_ebuild
 from gzh.lint import lint_ebuild
-from gzh.manifest import run_manifest
+from gzh.manifest import (run_manifest, verify_manifest_sizes,
+                          extract_src_uri_map, _pv_subs)
 from gzh.notify import send_telegram
 from gzh.nvcheck_audit import run_audit
 from gzh.nvchecker_config import get_entry, set_entry
-from gzh.pkgcheck import run_pkgcheck
+from gzh.pkgcheck import (run_pkgcheck, run_pkgcheck_commits,
+                          reverify_url_findings)
 from gzh.repo import find_overlay_root
 from gzh.triage import list_skipped, skip_issue
 from gzh.upstream import get_latest_version
@@ -120,9 +122,48 @@ def manifest_cmd(ebuild):
 @click.argument("path", type=click.Path(exists=True, path_type=Path))
 @click.option("--min-severity", default="warning",
               type=click.Choice(["error", "warning", "info", "style"]))
-def pkgcheck_cmd(path, min_severity):
+@click.option("--net", is_flag=True, default=False,
+              help="enable network keychecks (DeadUrl/RedirectedUrl)")
+def pkgcheck_cmd(path, min_severity, net):
     """Run pkgcheck scan and print structured results filtered by severity."""
-    res = run_pkgcheck(path, min_severity=min_severity)
+    res = run_pkgcheck(path, min_severity=min_severity, net=net)
+    click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
+    if not res["ok"]:
+        raise SystemExit(1)
+
+
+@cli.command("pkgcheck-commits")
+@click.option("--reverify/--no-reverify", default=True, show_default=True,
+              help="re-verify flagged SRC_URI DeadUrls per-URL (drop rate-limit FPs)")
+def pkgcheck_commits_cmd(reverify):
+    """Reproduce the pre-PR CI gate `pkgcheck scan --commits --net`, then re-verify any
+    DeadUrl/RedirectedUrl SRC_URI findings (GitHub rate-limiting over-reports these)."""
+    root = find_overlay_root()
+    scan = run_pkgcheck_commits(root, net=True)
+    out = {"scan_ok": scan["ok"], "results": scan["results"]}
+    confirmed_dead = []
+    if reverify:
+        rv = reverify_url_findings(scan["results"])
+        out["url_recheck"] = rv
+        confirmed_dead = rv["confirmed"]
+    click.echo(_json.dumps(out, indent=2, ensure_ascii=False))
+    if not scan["ok"] or confirmed_dead:
+        raise SystemExit(1)
+
+
+@cli.command("manifest-verify")
+@click.argument("manifest", type=click.Path(exists=True, path_type=Path))
+@click.argument("ebuild", type=click.Path(exists=True, path_type=Path))
+def manifest_verify_cmd(manifest, ebuild):
+    """Cross-check large DIST sizes in a Manifest against upstream (truncation guard).
+
+    Best-effort: resolves SRC_URI with simple ${P}/${PV}/... expansion; entries whose URL
+    still holds a computed var are skipped (reported in 'checked'). For a definitive check
+    of a huge blob, compare the release asset size manually (e.g. gh api ... .assets[].size).
+    """
+    subs = _pv_subs(Path(ebuild).name)
+    src_map = extract_src_uri_map(Path(ebuild).read_text(encoding="utf-8"), subs)
+    res = verify_manifest_sizes(Path(manifest).read_text(encoding="utf-8"), src_map)
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
     if not res["ok"]:
         raise SystemExit(1)
@@ -154,7 +195,7 @@ def commit_cmd(paths, message):
 
 
 @cli.command("bump-issues")
-@click.option("--repo", default="Gentoo-zh/gentoo-zh", show_default=True)
+@click.option("--repo", default="gentoo-zh/overlay", show_default=True)
 @click.option("--state", default="open", show_default=True,
               type=click.Choice(["open", "all", "closed"]))
 @click.option("--maintainer", default=None, help="filter by issue body 'CC: @<name>'")
@@ -184,10 +225,12 @@ def triage_group():
 
 @triage_group.command("list")
 @click.option("--pkg", default=None, help="filter by cat/pkg")
-def triage_list_cmd(pkg):
-    """List skipped issues from the skip log."""
+@click.option("--kind", type=click.Choice(["skip", "escalate"]), default=None,
+              help="filter by kind (skip=sticky block, escalate=revisit)")
+def triage_list_cmd(pkg, kind):
+    """List skipped/escalated issues from the log."""
     root = find_overlay_root()
-    records = list_skipped(root / "triage" / "skip-log.jsonl", pkg=pkg)
+    records = list_skipped(root / "triage" / "skip-log.jsonl", pkg=pkg, kind=kind)
     click.echo(_json.dumps(records, indent=2, ensure_ascii=False))
 
 
@@ -196,11 +239,14 @@ def triage_list_cmd(pkg):
 @click.option("--cat-pkg", required=True)
 @click.option("--target-version", required=True)
 @click.option("--reason", required=True)
-def triage_skip_cmd(issue, cat_pkg, target_version, reason):
-    """Append a skip record to the skip log."""
+@click.option("--kind", type=click.Choice(["skip", "escalate"]), default="skip",
+              show_default=True,
+              help="skip=sticky (blocked); escalate=revisit when upstream data arrives")
+def triage_skip_cmd(issue, cat_pkg, target_version, reason, kind):
+    """Append a skip/escalate record to the log."""
     root = find_overlay_root()
     rec = skip_issue(root / "triage" / "skip-log.jsonl", issue, cat_pkg,
-                     target_version, reason)
+                     target_version, reason, kind=kind)
     click.echo(_json.dumps(rec, indent=2, ensure_ascii=False))
 
 

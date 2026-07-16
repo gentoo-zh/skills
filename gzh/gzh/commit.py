@@ -9,7 +9,11 @@ def run_commit(paths: list[Path], cwd: Path,
                runner=subprocess.run) -> dict:
     for p in paths:
         runner(["git", "add", str(p)], cwd=cwd, capture_output=True, text=True)
-    args = ["pkgdev", "commit"]
+    # gentoo-zh commit policy requires DCO sign-off (overlay AGENTS.md). GPG signing
+    # is intentionally NOT forced here: the environment may lack a key, and the overlay
+    # policy itself defines a no-GPG fallback. gzh pkgcheck is a separate hard gate, so
+    # --scan is left at pkgdev's default.
+    args = ["pkgdev", "commit", "--signoff"]
     if message:
         args += ["--message", message]
     args += [str(p) for p in paths]
