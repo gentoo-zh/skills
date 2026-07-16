@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **平台**：运行于已 `gh auth login` 的环境（gh 是运行时依赖）。
-- **去个人化**：仓库默认 `Gentoo-zh/gentoo-zh`（组织固定名）+ `--repo` 覆盖；无个人路径/owner 硬编码。
+- **去个人化**：仓库默认 `gentoo-zh/overlay`（组织固定名）+ `--repo` 覆盖；无个人路径/owner 硬编码。
 - **纯只读**：仅 `gh api graphql` 查询；不修改 issue、不 push、不 PR、不碰 `/var/db/repos`。
 - **TDD**：每步先写失败测试 → 实现 → 通过 → commit；gh 输出全 mock。
 - **GitHub issue 状态**：只有 OPEN/CLOSED（无 MERGED）；`--state all` 不传 `states` 参数。
@@ -271,7 +271,7 @@ git commit -m "feat(gzh): map graphql issue nodes to bump queue with filters"
 - Consumes: `graphql_to_queue`, `apply_filters`（Task 2）
 - Produces:
   - `build_query(owner: str, name: str, state: str | None, limit: int, with_comments: bool) -> str`（`state` 为 `"OPEN"`/`"CLOSED"`/`None`，`None` 表示不传 `states`）
-  - `run_bump_issues(repo: str = "Gentoo-zh/gentoo-zh", state: str = "open", maintainer: str | None = None, pkg: str | None = None, with_comments: bool = True, limit: int = 200, runner=subprocess.run) -> dict`（返回 `{"ok": bool, "results": [...], "skipped": int, "exit_code": int, ...}`；失败时含 `error`/`stderr`）
+  - `run_bump_issues(repo: str = "gentoo-zh/overlay", state: str = "open", maintainer: str | None = None, pkg: str | None = None, with_comments: bool = True, limit: int = 200, runner=subprocess.run) -> dict`（返回 `{"ok": bool, "results": [...], "skipped": int, "exit_code": int, ...}`；失败时含 `error`/`stderr`）
 
 - [ ] **Step 1: 写失败测试**
 
@@ -383,7 +383,7 @@ def _check_gh_auth(runner) -> bool:
     return runner(["gh", "auth", "status"], capture_output=True, text=True).returncode == 0
 
 
-def run_bump_issues(repo: str = "Gentoo-zh/gentoo-zh", state: str = "open",
+def run_bump_issues(repo: str = "gentoo-zh/overlay", state: str = "open",
                     maintainer: str | None = None, pkg: str | None = None,
                     with_comments: bool = True, limit: int = 200,
                     runner=subprocess.run) -> dict:
@@ -479,7 +479,7 @@ from gzh.bump_issues import run_bump_issues
 - 在 `commit_cmd` 定义之后、`def main():` 之前追加：
 ```python
 @cli.command("bump-issues")
-@click.option("--repo", default="Gentoo-zh/gentoo-zh", show_default=True)
+@click.option("--repo", default="gentoo-zh/overlay", show_default=True)
 @click.option("--state", default="open", show_default=True,
               type=click.Choice(["open", "all", "closed"]))
 @click.option("--maintainer", default=None, help="filter by issue body 'CC: @<name>'")
@@ -553,7 +553,7 @@ Expected: `exit=0`。
 - 验收#3（`--no-comments`）：Task 2 `test_graphql_to_queue_no_comments_option` + Task 5 Step 2 ✅
 - 验收#4（`--pkg` 单包）：Task 2 过滤测试 + Task 5 Step 2 ✅
 - 验收#5（L1 全绿、退出码）：Task 1-4 全 mock 测试 + cli 退出码测试 ✅
-- 验收#6（去个人化、`--repo` 可覆盖）：`build_query`/`run_bump_issues` 接收任意 `owner/name`，Task 3 `test_build_query_*` 用任意 owner 验证；默认值 `Gentoo-zh/gentoo-zh` 非个人路径 ✅
+- 验收#6（去个人化、`--repo` 可覆盖）：`build_query`/`run_bump_issues` 接收任意 `owner/name`，Task 3 `test_build_query_*` 用任意 owner 验证；默认值 `gentoo-zh/overlay` 非个人路径 ✅
 - §7 错误处理（未认证=2 / gh 失败=1 / 标题不匹配跳过 / comments 截断）：Task 3 `test_run_bump_issues_not_authenticated`/`_gh_failure_after_auth`、Task 2 `_skips_unmatched`/`_truncates_over_50_comments` ✅
 - §8 测试列表逐条覆盖：Task 1-4 测试名与 spec §8 表对应 ✅
 

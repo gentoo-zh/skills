@@ -23,7 +23,7 @@ gentoo-zh 已有完整上游检测基础设施：nvchecker CI（`.github/workflo
 | 原则 | 落实 |
 |---|---|
 | 脚本给数据，agent 做判断 | `gzh bump-issues` 仅列队列（只读），不触发 bump；bump 由 gzh-version-bump skill 编排 |
-| 去个人化 | 仓库默认 `Gentoo-zh/gentoo-zh`（组织固定名）+ `--repo` 覆盖；不硬编码任何个人路径/owner |
+| 去个人化 | 仓库默认 `gentoo-zh/overlay`（组织固定名）+ `--repo` 覆盖；不硬编码任何个人路径/owner |
 | 纯只读、零副作用 | 仅 `gh api graphql` 查询，不改 issue、不 push、不 PR、不碰 `/var/db/repos` |
 | 确定性可单测 | gh 输出全 mock，pytest 覆盖解析/过滤/错误路径 |
 | 减调用、抗增长 | GraphQL 单次批量（issues + comments 一次拿），N+1 压成 1 |
@@ -33,14 +33,14 @@ gentoo-zh 已有完整上游检测基础设施：nvchecker CI（`.github/workflo
 ## 3. 命令接口
 
 ```
-gzh bump-issues [--repo Gentoo-zh/gentoo-zh] [--state open|all|closed]
+gzh bump-issues [--repo gentoo-zh/overlay] [--state open|all|closed]
                 [--maintainer <name>] [--pkg <cat/pkg>]
                 [--comments/--no-comments] [--limit 100]
 ```
 
 | 选项 | 默认 | 用途 |
 |---|---|---|
-| `--repo` | `Gentoo-zh/gentoo-zh` | 目标仓库（owner/repo），可覆盖 |
+| `--repo` | `gentoo-zh/overlay` | 目标仓库（owner/repo），可覆盖 |
 | `--state` | `open` | issue 状态过滤 |
 | `--maintainer` | （不过滤） | 按 issue body 的 `CC: @<name>` 过滤（去 `@`） |
 | `--pkg` | （不过滤） | 按 `<cat/pkg>` 精确过滤 |
@@ -170,7 +170,7 @@ gh 输出全部用 fixtures + `runner=` 注入（同 MVP 的 `run_manifest`/`run
 ## 9. 去个人化与安全边界
 
 **去个人化：**
-- `--repo` 默认 `Gentoo-zh/gentoo-zh`（组织仓库固定名，非个人路径），可覆盖。
+- `--repo` 默认 `gentoo-zh/overlay`（组织仓库固定名，非个人路径），可覆盖。
 - 无任何 `liangyongxiang` / 个人 fork owner 硬编码。
 - 认证复用 gh（用户自己 `gh auth login`），gzh 不持有 token。
 
