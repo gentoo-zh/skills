@@ -1,7 +1,8 @@
 import difflib
 from pathlib import Path
 
-from gzh.bump import bump_scaffold, diff_ebuild, highest_ebuild
+from gzh.bump import (bump_scaffold, diff_ebuild, highest_ebuild,
+                      refresh_copyright_year)
 
 
 def _pkgdir(tmp_path: Path) -> Path:
@@ -62,3 +63,47 @@ def test_diff_ebuild(tmp_path):
     diff = diff_ebuild(old, new)
     assert "PV_OLD" in diff
     assert diff.startswith("---")
+
+
+def _write(tmp_path, first_line):
+    eb = tmp_path / "foo-1.0.ebuild"
+    eb.write_text(f"{first_line}\n# Distributed under the terms of the GNU GPL v2\n\nEAPI=8\n")
+    return eb
+
+
+def test_refresh_copyright_extends_a_range(tmp_path):
+    eb = _write(tmp_path, "# Copyright 1999-2024 Gentoo Authors")
+    assert refresh_copyright_year(eb, year=2026) is True
+    assert eb.read_text().startswith("# Copyright 1999-2026 Gentoo Authors\n")
+
+
+def test_refresh_copyright_turns_a_single_year_into_a_range(tmp_path):
+    eb = _write(tmp_path, "# Copyright 2024 Gentoo Authors")
+    assert refresh_copyright_year(eb, year=2026) is True
+    assert eb.read_text().startswith("# Copyright 2024-2026 Gentoo Authors\n")
+
+
+def test_refresh_copyright_leaves_the_current_year_alone(tmp_path):
+    eb = _write(tmp_path, "# Copyright 2026 Gentoo Authors")
+    assert refresh_copyright_year(eb, year=2026) is False
+
+
+def test_refresh_copyright_keeps_a_custom_holder(tmp_path):
+    eb = _write(tmp_path, "# Copyright 2020-2024 Some Person")
+    refresh_copyright_year(eb, year=2026)
+    assert eb.read_text().startswith("# Copyright 2020-2026 Some Person\n")
+
+
+def test_refresh_copyright_ignores_an_unrecognized_first_line(tmp_path):
+    eb = _write(tmp_path, "# not a copyright line")
+    assert refresh_copyright_year(eb, year=2026) is False
+    assert eb.read_text().startswith("# not a copyright line\n")
+
+
+def test_bump_scaffold_refreshes_the_copied_copyright_year(tmp_path):
+    from datetime import date
+    d = tmp_path / "dev-python" / "foo"
+    d.mkdir(parents=True)
+    (d / "foo-1.0.0.ebuild").write_text("# Copyright 1999-2024 Gentoo Authors\nEAPI=8\n")
+    new = bump_scaffold(d, "foo", "1.1.0")
+    assert new.read_text().startswith(f"# Copyright 1999-{date.today().year} Gentoo Authors\n")
