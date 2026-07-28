@@ -28,7 +28,7 @@
 - **pytest 缺 hermetic plugin 列表** — 有 `distutils_enable_tests pytest` 却全 ebuild 无 `EPYTEST_PLUGINS=`（空数组 `()` 才是正确 opt-out）。无显式列表 pytest 自动加载系统 plugin，bump 时非确定性/伪测试失败。 _[d0452a5]_
 - **预编译包 KEYWORDS 未锚 -*** — ebuild 设 QA_PREBUILT 或装 /opt 下二进制 distfile，但 KEYWORDS 未以 `-*` 开头；也 `grep -L QA_PREBUILT` 扫 *-bin。**策略（已采纳）**：私有预编译 blob 用 `KEYWORDS="-* <只列上游确实发布二进制的 arch>"`，每 arch 配自己的条件 SRC_URI 块。缺 `-*` 暗示了二进制没有的可移植性，在其它 keyword arch 上会坏。 _[cfc72a0, 255becc]_
 - **单 arch SRC_URI 无 arch 条件** — SRC_URI 含 arch 标记名（linux_amd64/x86_64/arm64/aarch64）却无对应 `amd64?( )`/`arm64?( )` 块、各自 Manifest 条目。无条件的 arch 专属 fetch 在别的 keyword arch 上取到错/缺的产物，bump 对那些 arch 就坏。 _[4fd355e]_
-- **想压 unresolved-soname 而非真修** — 扫 -bin ebuild 里的 QA_SONAME/QA_FLAGS_IGNORED 赋值（想 gag soname 的信号）。实则**没有变量能真正屏蔽 soname 检查**（`QA_PREBUILT="*"` 也不行），这类赋值只掩盖 bundled 组件解析不了私有库；正解 `patchelf --set-rpath '$ORIGIN/...'`（+ 对真系统库的真 RDEPEND）。详见 [prebuilt-qa.md](prebuilt-qa.md)。 _[13a7a9d, f9a2b99]_
+- **soname 与 flags 是两套 QA，别当成一回事** — 扫 `-bin` ebuild 里想压 unresolved-soname 的写法：**没有变量能真正屏蔽 soname 检查**（`QA_PREBUILT="*"` 也不行），这类赋值只掩盖 bundled 组件解析不了私有库；正解 `patchelf --set-rpath '$ORIGIN/...'` 加上对真系统库的真 RDEPEND，详见 [prebuilt-qa.md](prebuilt-qa.md)。`QA_FLAGS_IGNORED` 不属这一类：它只被 `install-qa-check.d/10ignored-flags` 读，对应 Files built without respecting CFLAGS/LDFLAGS。因为 CFLAGS 那半要求 CFLAGS/CXXFLAGS/FFLAGS/FCFLAGS 全带 `-frecord-gcc-switches`、LDFLAGS 那半要求 LDFLAGS 带 `--defsym=__gentoo_check_ldflags__`（只有 developer profile 有），而 CI 的 stage3 是 desktop profile，所以这道门在 CI 上不触发：cargo ebuild 里已有的 `QA_FLAGS_IGNORED` 是上游惯例（rustc 不把 LDFLAGS 交给链接器），照留不动、也别当坏味道删，同样别为过 CI 新加。Go 一般不需要，静态二进制没有 `.dynsym`，这条检查直接跳过。 _[13a7a9d, f9a2b99]_
 - **rpm.eclass payload 类型不符** — 对比声明的 RPM_COMPRESS_TYPE 与 `strings <rpm> | grep -o 'PayloadIs[a-zA-Z]*'`；不符/错类型 unpack 失败（lzma payload 只有 rpm2targz 可用即硬错）。RPM_COMPRESS_TYPE 是 @PRE_INHERIT，须在 `inherit rpm` 之前设。 _[035e309]_
 - **java：硬编码 --add-opens 无 JVM 探测** — grep JAVA_TEST_EXTRA_ARGS 的 `--add-opens`，同 ebuild 内无 `java-config -g PROVIDES_VERSION`/ver_test 探测即错。JDK 17+ 反射 flag 要按活动 JVM 版本 gate，硬编码在老 JVM 上坏或误导。 _[f93b836, 34e121c]_
 - **perl：DIST_VERSION / PV 规范化不符** — 对每个 dev-perl ebuild 套 eclass 的 CPAN float→dotted 规范化，要求 `normalize(DIST_VERSION) == PV`；PV 无法 round-trip 又缺 DIST_VERSION 的，SRC_URI 是坏的。CPAN float（0.08→0.80.0）不匹配 tarball 名，假设 PV==tarball 会 fetch 不存在的 distfile。 _[aa70e3d, e58a386]_
@@ -52,3 +52,14 @@
 - **仍 inherit 已删的 linux-mod** — `grep -rE 'inherit.*\blinux-mod\b'` 排除 linux-mod-r1，命中现在就坏。linux-mod.eclass 已从 ::gentoo 删除，out-of-tree 模块 ebuild 仍 inherit 就 unknown-eclass；bump 必须迁到 linux-mod-r1（且 pkg_postinst/src_compile/src_install override 要调对应 `linux-mod-r1_<phase>`）。 _[39b122a]_
 - **模块内核上限/依赖滞后** — MODULES_KERNEL_MAX 对比树里最高 sys-kernel/gentoo-kernel 分支，天花板低于它即标记（抬前先 build-test）；内核 provider 须 `PDEPEND` on `>=virtual/dist-kernel-${PV}`（别用派生变量、别放 RDEPEND/DEPEND，否则 virtual 落后于已装内核）。 _[7f7461b, cc1f450]_
 - **新加 ebuild 带稳定 keyword** — 对每个 `git diff --diff-filter=A` 新增的 *.ebuild，标出不以 `~` 或 `-` 开头的 KEYWORDS token。为 bump 复制 ebuild 会带过来稳定 keyword，等于把未测新版直接 stable；overlay 新增 ebuild 应 `~arch`。 _[c548fa4]_
+
+## 源码包的 elog 分类（补 [finish-pipeline.md](finish-pipeline.md) 步骤 4）
+
+那里和 [prebuilt-qa.md](prebuilt-qa.md) 第 6 节列的是预编译路径的 triage。源码包另有几类，都出自 portage 扫构建日志，离线 pkgcheck 一条都看不出来：
+
+- `QA Notice: setuptools warnings detected` — portage 匹配日志里 `.../setuptools/...: *Warning: ` 的行（`Normalizing ...` 与 `setup.py install is deprecated` 已内建忽略）。在 `python_prepare_all` 里改源：`License ::` trove classifier 常是跨行拼接，单行 sed 匹配不到、要整块删；`[project] license = { file = ... }` 改成 PEP 639 字符串。不 merge 也能复现：`gpep517 build-wheel --backend <backend> --wheel-dir <dir> --output-fd 1`，看 stderr。
+- `QA Notice: Unrecognized configure options` — 就是上面那条 `use_enable`/`use_with` 选项改名在 emerge 期现形：那个 USE flag 现在是空操作。照解压后 `configure --help` 改对，不按良性放行。
+- `QA Notice: Found the following implicit function declarations in configure logs` — 逐个符号判：目标平台上确实不存在的（其它 OS 的 API、已删的调用）写进 `QA_CONFIG_IMPL_DECL_SKIP=( sym )`，每个符号配一行注释；其余是真缺 include 或真缺依赖探测，要修。
+- `QA Notice: Package triggers severe warnings ...` — 因为 portage 是拿 `warning: ` 文本去 grep 构建日志（`install-qa-check.d/90gcc-warnings` 的 pattern 表），所以 `-Wno-error=` 没用，得让警告本身消失：用 include-only 的 `files/*.patch`；只有 C23 关键字那类（`bool`/`true`/`false` 当标识符）可以 `-std=gnu17`。
+
+elog 会叠加，一次扫到的全部修完再收工。CI 只 emerge 本次改动的包、树里旧版本不重编，所以同类问题在旧版本上不会红，别顺手改。判环境假阳性先做基线对照：同条件构建改动前那版，一样红就不是本次引入，注明放行别改 ebuild。
