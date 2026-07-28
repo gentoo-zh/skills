@@ -14,9 +14,9 @@
 - 预剥离过的 ELF 加 `RESTRICT="strip"`：挡住 portage 再 strip 的是 `RESTRICT`，不是 `QA_PREBUILT`。`splitdebug` 是另一件事，只在 debug 分离对 blob 失败时才加。
 - rpm blob：`RPM_COMPRESS_TYPE` **必须在 `inherit rpm` 之前**设（它是 `@PRE_INHERIT` 变量）——gzip/zlib payload 用 `"none"`，zstd payload 用 `"zstd"`；设晚了 `rpm_unpack` 会解不开。
 
-## 3. Unresolved soname 三路排查（真修，不糊）
+## 3. Unresolved soname 四路排查（真修，不糊）
 
-关键认知：`QA_PREBUILT` 对这条检查无效——它喂的是 `install-qa-check.d` 里缺 SONAME、缺 DT_NEEDED 那几个检查，以及 `Unrecognized ELF file(s)` 的白名单；而这条 elog 出自 `FEATURES=qa-unresolved-soname-deps`（默认开），拿本包 build-info 的 `REQUIRES` 比对已装包的 `PROVIDES` 得出，唯一能消音的是 `REQUIRES_EXCLUDE`，而 overlay AGENTS.md 禁止拿它消音。原则：**不能为过 QA 而糊 QA，库必须真解析**。portage 的静态检查对每个 ELF **孤立**解析 `DT_NEEDED`，够不到兄弟目录里的库就报——这正是 CI 的失败集。三种修法按 elog 里 soname 的类型对号入座：
+关键认知：`QA_PREBUILT` 对这条检查无效——它喂的是 `install-qa-check.d` 里缺 SONAME、缺 DT_NEEDED 那几个检查，以及 `Unrecognized ELF file(s)` 的白名单；而这条 elog 出自 `FEATURES=qa-unresolved-soname-deps`（默认开），拿本包 build-info 的 `REQUIRES` 比对已装包的 `PROVIDES` 得出，唯一能消音的是 `REQUIRES_EXCLUDE`，而 overlay AGENTS.md 禁止拿它消音。原则：**不能为过 QA 而糊 QA，库必须真解析**。portage 的静态检查对每个 ELF **孤立**解析 `DT_NEEDED`，够不到兄弟目录里的库就报——这正是 CI 的失败集。前三种修法按 elog 里 soname 的类型对号入座；第四种是换系统库，它不修某一行 elog，默认不做：
 
 **(1) RPATH reach** —— 把库路径加回 ELF 的 RPATH，让它够得到同包 blob 里的库。对 blob 下每个 ELF：
 
@@ -35,13 +35,34 @@
 - 依赖 Gentoo 上根本不存在的库的组件永远跑不起来，直接删掉。
 - Node 原生 addon（koffi FFI、sharp/@img 之类）blob 里往往打包了多 os/arch 的预编译产物；`src_install` 只留 host 这一份、`rm -rf` 其它，否则非 host 那些会触发 unresolved-soname。
 
-**RDEPEND**：只对**真正被系统链接**的 NEEDED soname 加 RDEPEND；bundled 进 blob 的那些不加。
+**(4) 换成系统库（默认不做）** —— 删掉 blob 自带的那份、改用系统库。三件事都拿到证据才做：ABI 对得上（系统库的 soname 与符号版本覆盖 blob 各 ELF 的 `NEEDED` 和 `.gnu.version_r`，`readelf -dV` 逐个核）；功能不缺（blob 用到的接口系统库都有，反例是自带 freetype 带了系统版没有的新接口）；启动器与配置里写死的路径跟着改（wrapper 脚本、`LD_LIBRARY_PATH`、`.desktop` 的 `Exec`、应用自带的配置）。三条有一条没证据就保留 bundled 的那份。
 
-## 4. 真验证（两个真相都要过）
+**RDEPEND**：只对真正被系统链接的 NEEDED soname 加 RDEPEND，bundled 进 blob 的那些不加。NEEDED 只覆盖链接的那一半，运行时 `dlopen` 的库和 `exec` 出去的外部程序都扫不出来，要另找：`strings -a <主二进制> | grep -oE 'lib[A-Za-z0-9_.+-]*\.so[0-9.]*' | sort -u` 列 dlopen 候选，`strings -a <主二进制> | grep -oE '\b(xdg-open|bwrap|pkexec|ffmpeg|notify-send)\b' | sort -u` 列会被拉起的助手程序，逐个确认确实被调用再加。因为这类依赖缺了照样装得上、只在用户点到那个功能时才报错，所以 emerge 和 elog 两道门都兜不住。预编译包别拿 `:=` 当 ABI 保险：因为 subslot 变了触发的只是重装同一份 blob、字节一模一样、照样链不上新 ABI，所以直接钉验证过的 provider SLOT 或版本上界（写法如 `dev-libs/openssl:0/3`），上游换了 blob 的 ABI 再改这条。
 
+**BDEPEND**：ebuild 里调了 `patchelf` 就写 `BDEPEND="dev-util/patchelf"`，因为构建机上不保证装着它、漏写只在别人的机器上炸。
+
+## 4. 真验证（四个真相都要过）
+
+- **对象真相（逐 ELF 静态审）**：`ebuild <eb> clean install` 后取 image 里全部 ELF，逐个过下面几项，异常的当场判去留、结论写进交付报告。
+  - class 与 machine：`readelf -hW <f> | grep -E 'Class|Machine'`。产物 arch 与该 `SRC_URI` 块声明的 arch 不符是上游打包错，回 A4 逐块重核 URL；因为读 ELF 头不需要执行，所以手上没有 arm 机器也能这样静态核 arm64 blob。
+  - interpreter：`readelf -lW <f> | grep interpreter`。amd64 的系统 loader 是 `/lib64/ld-linux-x86-64.so.2`；指向 musl loader 的直接判不可用，指向 blob 自带 loader 的要确认该 loader 真被装到了那条绝对路径，因为 interpreter 路径不存在时内核直接拒绝执行。
+  - libc 与 libstdc++ 符号下限：三个前缀分开取最高值，混在一起排序会把 libstdc++ 那格吃掉。
+
+    ```bash
+    for v in GLIBC GLIBCXX CXXABI; do
+        printf '%s: ' "$v"
+        readelf --dyn-syms -W "$f" | grep -o "${v}_[0-9.]*" | sort -uV | tail -1
+    done
+    ```
+
+    三条都写进交付报告；因为同一份预编译字节不会自己适配旧 ABI，所以下限高于目标 profile 现有 provider 时要按核实结果收紧 `RDEPEND` 的 slot 或版本，不能指望用户重装解决。
+  - SONAME：`patchelf --print-soname <f>`，无输出即没有。私有模块本来就允许没有，别用 `--set-soname` 造一个；真被判红时按精确安装路径写进 `QA_SONAME` 并在报告说明理由。注意缺 SONAME 那个检查只 glob `{,usr/}lib*/lib*.so*` 且不递归，所以装在 `/opt/<pn>/` 下的私有模块根本不触发它。
+  - CPU ISA 基线：`readelf -nW <f> | grep -o 'x86 ISA needed: [^,]*'`。不是 `x86-64-baseline` 就写进交付报告，因为 portage 没有对应检查，所以问题只会以 SIGILL 的形式落到老 CPU 用户身上；没有这条 note 就是没结论，别据此下判断。
+  - RPATH：审到非 `$ORIGIN` 相对的绝对 RPATH，按第 3 节改写；确实改不掉的逐个写明是哪个对象、为什么必须这么写。
 - **CI 真相（elog）**：`gzh build-test` 不读 elog，手动跑一次真 emerge 抓——`PORTAGE_ELOG_CLASSES="qa warn error" PORTAGE_ELOG_SYSTEM=save`（两个**一起**设：只设 `save` 不设 `PORTAGE_ELOG_CLASSES` 抓不到 QA notice），扫 elog 文件 = 0 saved elog 才算过。elog 列出的就是 CI 会红的确切集合。
 - **运行时真相（ldd）**：`ebuild <eb> clean install` 后，对 image 里每个 `.so` 跑 `ldd`（**不带 LD_LIBRARY_PATH**）→ 0 个 `not found`。portage 静态检查会把“同包内另一 ELF 按 SONAME 提供”的库算作已解析，但跨插件引用（addon A 需要 addon B 的库）能过 QA 却仍在运行时炸——靠这个 ldd 扫补上。
 - 循环 `emerge → 修 → 再扫`，直到 elog 空且 ldd 干净。install phase 会因 portage chown 需要 root/chroot。
+- **启动真相（smoke，amd64）**：elog 空、ldd 干净之后，跑一次已经装进系统的主程序（`--version`/`--help`；GUI 包至少确认进程起得来、不是立刻退出）。因为 `ebuild install` 只到 image、CI 从头到尾只 emerge 不启动任何程序，所以 soname 全绿也可能一启动就缺资源文件、缺 locale、缺 helper 的 exec 位。要图形会话或要登录账号跑不了的，在交付报告写明未 smoke，和本机未验的 arch 列在一起。
 
 ## 5. 其它反复踩的 QA
 

@@ -36,12 +36,15 @@
 - **多 arch**：KEYWORDS 有 >1 个 `~arch` → PR 走 draft，注明本机未测的 arch。CI 会真编 amd64，包 keyword 了 arm64 时也真编 arm64，其余 arch 无人验。
 - **GUI 应用**：`inherit` 含 `desktop`/`xdg` → smoke 只能证「**装上了**」，证不了能启动/渲染；交付说明里提请人工实跑。
 
-## 超出 autobump.sh 的补充（来源：replay-eval）
+## 超出 autobump.sh 的补充
 
-下面两条**不在** autobump.sh stage-2 里，一并纳入 escalate：
+下面三条**不在** autobump.sh stage-2 里，一并纳入 escalate（前两条来源 replay-eval，第三条来源 overlay 历史）：
 
 - **生成器驱动的 metadata（编辑数据非离线可复现）**：ebuild 的 DEPEND/RDEPEND/IUSE 由**上游生成器产物**决定，而非 ebuild 自身可推。典型是 `.cabal` 经 hackport 重生成（`inherit haskell-cabal`、`CABAL_HACKAGE_REVISION`，依赖边界 / ghc 版本 / flag 改名都随上游 `.cabal` 变）。这类 bump 的正确结果要从**上游 metadata 重新生成**，离线照抄旧 ebuild 几乎必错（replay-eval 里 edit-bump exact% = 0，瓶颈是缺 **DATA** 不是缺经验）→ escalate 到取上游 metadata 或人工。
   overlay 里 Haskell 包极少，但同理适用于**任何「依赖/IUSE 随生成器产物变」的包**。
   （`CABAL_HACKAGE_REVISION` 会额外把 `-revN.cabal` 作为 DIST 拉取。）
 
 - **live-only 包**：包目录下只有 `9999` ebuild、没有发布版。因为 live ebuild 用 `EGIT_REPO_URI` 取代 `SRC_URI`、也没有 `KEYWORDS`，所以没有可离线照抄的底稿，`gzh bump-scaffold` 会直接报错 → escalate。overlay 里 74 个 live ebuild 有 20 个与发布版同目录，这些照常用发布版当底稿，不受影响。
+
+- **上游改名到新项目**：新版本发布在另一个上游项目名下，包名要跟着变。这是包改名不是普通 bump：因为改名要在同一个 commit 里落齐 `profiles/updates/<n>Q-<YYYY>` 的 `move <old> <new>` 行、`git mv` 包目录与 `Manifest`、`metadata.xml` 的 `remote-id`、`.github/workflows/overlay.toml` 里那条 nvchecker 条目的 key、以及所有引用旧原子的依赖，而 `gzh bump-scaffold` 只在原包目录里复制最高版 ebuild、给不出这些，所以别在 bump 里顺手改目录名或 `SRC_URI` 的 repo 段 → escalate 给维护者，确认改名后再按上面这套一次改齐。
+  两种情况不属此列：一是 forge 上只有 org/repo 重定向而项目名没变，按 ecosystem-checks 的上游位置过期一条更新 `HOMEPAGE`/`SRC_URI`/`remote-id`/nvchecker URL；二是上游归档、后继是另一套实现，因为那不是同一个包换名字，所以走 `profiles/package.mask` 排期移除加另立新包，同样 escalate、不在 bump 里做。
