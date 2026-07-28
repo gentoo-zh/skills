@@ -38,7 +38,7 @@ gentoo-zh 维护**优先使用 `gzh` 工具集**（确定性、可单测），�
 ## 与 CI 门对齐（验收权威）
 `gzh` 是 bump 契约的一个实现；**权威验收门是 overlay 自身的 CI**：
 - `.github/workflows/pkgcheck.yml`：**离线** pkgcheck（`pkgcore/pkgcheck-action`，args 无 `--net`，`--exit=NonexistentDeps`），只做元数据/依赖类检查，**不做联网 URL 复查**。
-- `.github/workflows/emerge-on-pr.yml`：多 profile（amd64-desktop-openrc/systemd）emerge + **elog 硬门**：`PORTAGE_ELOG_CLASSES="qa warn error"`、`PORTAGE_ELOG_SYSTEM="save"`，post-emerge 步骤扫 `/var/log/portage/elog/*` **文件**（非 stdout），任一 qa/warn/error elog 即 `exit 1`。
+- `.github/workflows/emerge-on-pr.yml`：每个包在 `amd64-desktop-openrc`、`amd64-desktop-systemd` 两个 profile 上各 emerge 一次；`KEYWORDS` 含 `arm64` 或 `~arm64` 的包，因为 arm64 没有 desktop-openrc 的 stage3，所以另在 `ubuntu-24.04-arm` runner 上补跑 `arm64-desktop-systemd` 一条腿。每条腿都判 **elog 硬门**：`PORTAGE_ELOG_CLASSES="qa warn error"`、`PORTAGE_ELOG_SYSTEM="save"`，post-emerge 步骤扫 `/var/log/portage/elog/*` **文件**（非 stdout），任一 qa/warn/error elog 即 `exit 1`。上游支持或发布了 arm64 就加 `~arm64`，不要因为手上没有 arm 机器而不加：CI 那条腿会真编、elog 门照判，出了 arch 相关的问题按报告修。手上有 arm 设备的一定要自己先验过再加。
 
 `gzh` 尚未覆盖的门，收尾阶段须手动补跑：
 - **install 后 elog 检查**：`buildtest.py` 只看 returncode，QA notice 走 elog 不进 stdout，本地全绿仍可能踩 CI elog 硬门 → 用 CI 同款配置（`PORTAGE_ELOG_CLASSES="qa warn error"` + 隔离 LOGDIR）本地复检 elog 文件。

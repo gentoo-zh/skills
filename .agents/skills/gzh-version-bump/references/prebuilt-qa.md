@@ -10,13 +10,13 @@
 
 ## 2. 声明与 eclass
 
-- `QA_PREBUILT="*"` 声明预编译 blob（惯用写法）。
-- 预剥离过的 ELF 加 `RESTRICT="strip"`。
+- `QA_PREBUILT` 只用于人工审过的不可变上游 blob，值写精确安装路径（`opt/${PN}/*`、`usr/bin/${MY_PN}`），不要写 `*`：因为它会一次展开进 `QA_DT_NEEDED`/`QA_SONAME`/`QA_SONAME_NO_SYMLINK`/`QA_PRESTRIPPED`/`QA_EXECSTACK`/`QA_TEXTRELS`/`QA_WX_LOAD`/`QA_FLAGS_IGNORED`，所以 `*` 等于把整包这些检查全关掉。overlay 里存量的 `QA_PREBUILT="*"` 是历史写法，别照抄。
+- 预剥离过的 ELF 加 `RESTRICT="strip"`：挡住 portage 再 strip 的是 `RESTRICT`，不是 `QA_PREBUILT`。`splitdebug` 是另一件事，只在 debug 分离对 blob 失败时才加。
 - rpm blob：`RPM_COMPRESS_TYPE` **必须在 `inherit rpm` 之前**设（它是 `@PRE_INHERIT` 变量）——gzip/zlib payload 用 `"none"`，zstd payload 用 `"zstd"`；设晚了 `rpm_unpack` 会解不开。
 
 ## 3. Unresolved soname 三路排查（真修，不糊）
 
-关键认知：`QA_PREBUILT="*"` 只是声明，**不会**关掉 unresolved-soname 检查（portage 里没有哪个变量能屏蔽它；经验上它会一直红到 RPATH 真修好为止）。原则：**不能为过 QA 而糊 QA，库必须真解析**。portage 的静态检查对每个 ELF **孤立**解析 `DT_NEEDED`，够不到兄弟目录里的库就报——这正是 CI 的失败集。三种修法按 elog 里 soname 的类型对号入座：
+关键认知：`QA_PREBUILT` 对这条检查无效——它喂的是 `install-qa-check.d` 里缺 SONAME、缺 DT_NEEDED 那几个检查，以及 `Unrecognized ELF file(s)` 的白名单；而这条 elog 出自 `FEATURES=qa-unresolved-soname-deps`（默认开），拿本包 build-info 的 `REQUIRES` 比对已装包的 `PROVIDES` 得出，唯一能消音的是 `REQUIRES_EXCLUDE`，而 overlay AGENTS.md 禁止拿它消音。原则：**不能为过 QA 而糊 QA，库必须真解析**。portage 的静态检查对每个 ELF **孤立**解析 `DT_NEEDED`，够不到兄弟目录里的库就报——这正是 CI 的失败集。三种修法按 elog 里 soname 的类型对号入座：
 
 **(1) RPATH reach** —— 把库路径加回 ELF 的 RPATH，让它够得到同包 blob 里的库。对 blob 下每个 ELF：
 
@@ -62,4 +62,4 @@
 
 ## 8. 多 arch
 
-patchelf / `--replace-needed` / 按文件名删组件都是**按名字**操作、arch 无关，同一套 `src_install` 代码在各 arch 复用，多 arch ebuild 只需相同代码 + 对应 `KEYWORDS` + per-arch `SRC_URI`。CI 通常只 build amd64，故 amd64 的 0-elog 是硬门；其它 arch 静态核验即可（patchelf 读跨 arch 的 ELF 头不需执行，只有 arch loader 会显示为 external，不算真 unresolved）。多 arch 未在本机跑过的开 draft PR、标注“未测”。
+patchelf / `--replace-needed` / 按文件名删组件都是**按名字**操作、arch 无关，同一套 `src_install` 代码在各 arch 复用，多 arch ebuild 只需相同代码 + 对应 `KEYWORDS` + per-arch `SRC_URI`。CI 除两个 amd64 profile 外，对 `KEYWORDS` 含 `arm64`/`~arm64` 的包还会在 `ubuntu-24.04-arm` 上以 `arm64-desktop-systemd` 真编、elog 门照判，所以上游发布了 arm64 产物就加 `~arm64`，没有 arm 机器也加、由 CI 那条腿去验；但它不是免费的：blob 缺 arm64 组件、patchelf 漏改那一格照样红，出问题按报告修。手上有 arm 设备的自己先验。本机没跑过的 arch 静态核验即可（patchelf 读跨 arch 的 ELF 头不需执行，只有 arch loader 会显示为 external，不算真 unresolved）。多 arch 未在本机跑过的开 draft PR、标注“未测”。
