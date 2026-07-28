@@ -4,16 +4,24 @@ import subprocess
 from pathlib import Path
 
 
+def has_signing_key(cwd: Path, runner=subprocess.run) -> bool:
+    """True when git has a signing key configured, so --gpg-sign can succeed."""
+    proc = runner(["git", "config", "--get", "user.signingkey"],
+                  cwd=cwd, capture_output=True, text=True)
+    return proc.returncode == 0 and bool(proc.stdout.strip())
+
+
 def run_commit(paths: list[Path], cwd: Path,
                message: str | None = None,
                runner=subprocess.run) -> dict:
     for p in paths:
         runner(["git", "add", str(p)], cwd=cwd, capture_output=True, text=True)
-    # gentoo-zh commit policy requires DCO sign-off (overlay AGENTS.md). GPG signing
-    # is intentionally NOT forced here: the environment may lack a key, and the overlay
-    # policy itself defines a no-GPG fallback. gzh pkgcheck is a separate hard gate, so
-    # --scan is left at pkgdev's default.
-    args = ["pkgdev", "commit", "--signoff"]
+    # overlay AGENTS.md: pkgdev commit --scan false --signoff --gpg-sign, and omit
+    # --gpg-sign where GPG is unavailable. --scan false because gzh pkgcheck already
+    # ran as its own hard gate.
+    args = ["pkgdev", "commit", "--scan", "false", "--signoff"]
+    if has_signing_key(cwd, runner=runner):
+        args.append("--gpg-sign")
     if message:
         args += ["--message", message]
     args += [str(p) for p in paths]
