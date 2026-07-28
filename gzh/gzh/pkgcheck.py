@@ -5,6 +5,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from gzh.repo import find_canonical_remote
+
 # pkgcheck severities, highest to lowest. Used to scope the pass/fail gate via `--exit`
 # (JsonStream output carries no severity field, so the gate cannot be derived from the
 # result objects; pkgcheck's own exit status is the source of truth).
@@ -55,14 +57,34 @@ def run_pkgcheck(path: Path, min_severity: str = "warning",
             "raw_returncode": proc.returncode}
 
 
-def run_pkgcheck_commits(cwd: Path, net: bool = True,
+def run_pkgcheck_commits(cwd: Path, net: bool = True, remote: str | None = None,
                          runner=subprocess.run) -> dict:
-    """Reproduce the pre-PR gate `pkgcheck scan --commits --net` (overlay AGENTS.md /
-    autobump.sh:661): NO path target -- --commits derives its atoms from the git diff of
-    the uncommitted/unpushed commit -- run from the overlay root. `--exit error` makes the
-    exit status the gate. Pair with reverify_url_findings() to drop rate-limit false
-    positives."""
-    args = ["pkgcheck", "scan", "--commits", "-R", "JsonStream", "--exit", "error"]
+    """Run the pre-PR networked gate the overlay AGENTS.md prescribes.
+
+    This is not a CI reproduction: the overlay's pkgcheck workflow runs offline, so this
+    covers the segment CI never does. The merge-base range selects the targets, because a
+    bare `--commits` compares against a fork's lagging `origin` and drags in unrelated
+    packages; `--git-remote` only names the canonical source for the commit-only checks.
+    Run from the overlay root. `--exit error` makes the exit status the gate. Pair with
+    reverify_url_findings() to drop rate-limit false positives.
+    """
+    remote = remote or find_canonical_remote(cwd, runner=runner)
+    # pkgcheck's git checks build their own cache from `<remote>/HEAD..HEAD`, independently
+    # of any explicit range, so `<remote>/HEAD` has to resolve first.
+    if runner(["git", "symbolic-ref", "-q", f"refs/remotes/{remote}/HEAD"],
+              cwd=str(cwd), capture_output=True, text=True).returncode != 0:
+        runner(["git", "remote", "set-head", remote, "master"],
+               cwd=str(cwd), capture_output=True, text=True)
+    proc = runner(["git", "merge-base", f"{remote}/master", "HEAD"],
+                  cwd=str(cwd), capture_output=True, text=True)
+    base = (proc.stdout or "").strip()
+    # An empty base yields `..HEAD`, which git reads as `HEAD..HEAD`: pkgcheck then finds
+    # no changed path, exits 0, and a red gate reports green. Fail loudly instead.
+    if proc.returncode != 0 or not base:
+        raise RuntimeError(
+            f"no merge-base with {remote}/master; fetch {remote} before running the gate")
+    args = ["pkgcheck", "scan", "--git-remote", remote, f"--commits={base}..HEAD",
+            "-R", "JsonStream", "--exit", "error"]
     if net:
         args.append("--net")
     proc = runner(args, cwd=str(cwd), capture_output=True, text=True)
