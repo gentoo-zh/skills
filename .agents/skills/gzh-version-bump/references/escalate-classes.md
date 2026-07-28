@@ -16,10 +16,11 @@
 
 3. **pin / 版本耦合变量**
    ebuild 含 `GIT_CRATES` / `*_COMMIT=` / `*_TAG=` / `[A-Z_]+_VER=`（非注释行）。这些没有可自动展开的产物，须逐一**对上游新版本 diff 核定**（重新确认 commit / tag / crates 版本），绝不照抄旧值。
+   `GIT_CRATES` 与 `[patch.crates-io]` 的 git URL 是例外：它必须与新版 `Cargo.lock` 里那条 `git+<url>` 一字不差，因为 cargo 在 `--offline` 下按 URL 字串精确匹配已 vendor 的 git crate，所以 github 那种 org 改名的 301 跳转对它无效。pkgcheck 报在这类 URL 上的 `RedirectedUrl` 不修，收尾步骤 7 的 URL 门与 ecosystem-checks 的上游位置过期一条对它例外；同一个 ebuild 里两条 `GIT_CRATES` 指向不同 org 也可能都是对的，各自对齐自己在 `Cargo.lock` 里的那条。改过 pin 或这类 URL 一律重跑 `gzh build-test`，因为 pkgcheck 只做静态扫描，offline 解析不到 crate 只有真编才暴露。
 
 4. **per-version 外部依赖产物**
    SRC_URI 里的 URL 文件名命中 `-deps` / `-vendor` / `-crates` / `node_modules` 且带 `.tar.`——**按文件名识别，不认 host**（这类产物散落在多个 deps 仓库，host allowlist 会漏，如 v2rayA 的 `${P}-deps.tar.xz`）。
-   bump 前把 URL 里的 `${P}` / `${PV}` / `${PN}` 展开到新版本、并把硬编码旧版号一并替换，再 `curl -sIL --max-time 30 -o /dev/null -w '%{http_code}'` 确认新版产物已发布：
+   bump 前把 URL 里的 `${P}` / `${PV}` / `${PN}` 展开到新版本、并把硬编码旧版号一并替换，再 `curl -sL -r 0-1 -o /dev/null -w '%{http_code}' --max-time 30 <url>` 确认新版产物已发布（带 range 的 GET，因为 HEAD 不走真正的取回路径）：
    - `200` → 存在，放行；
    - **仅确定性 `404`** → 上游依赖包还没打 → escalate；
    - 网络 `5xx`/`000` → 不下终局结论（inconclusive，留给收尾 `gzh manifest` fetch 阶段复检，属 transient）。
@@ -32,7 +33,7 @@
 
 信息类信号：这些**不阻断**、也不是 escalate，只在交付里注明：
 
-- **多 arch**：KEYWORDS 有 >1 个 `~arch` → PR 走 draft，注明非 amd64 arch 未测。
+- **多 arch**：KEYWORDS 有 >1 个 `~arch` → PR 走 draft，注明本机未测的 arch。CI 会真编 amd64，包 keyword 了 arm64 时也真编 arm64，其余 arch 无人验。
 - **GUI 应用**：`inherit` 含 `desktop`/`xdg` → smoke 只能证「**装上了**」，证不了能启动/渲染；交付说明里提请人工实跑。
 
 ## 超出 autobump.sh 的补充（来源：replay-eval）
