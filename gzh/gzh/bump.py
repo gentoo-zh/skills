@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import difflib
+import re
 import shutil
+from datetime import date
 from functools import cmp_to_key
 from pathlib import Path
 
@@ -31,6 +33,34 @@ def highest_ebuild(pkg_dir: Path, pn: str) -> Path | None:
     return ebs[-1] if ebs else None
 
 
+# Same shape pkgcheck's header check matches, so a refreshed line still parses there.
+_COPYRIGHT_RE = re.compile(
+    r"^# Copyright (?:(?P<begin>\d{4})-)?(?P<end>\d{4}) (?P<holder>.+)$")
+
+
+def refresh_copyright_year(path: Path, year: int | None = None) -> bool:
+    """Move an ebuild's copyright end year to `year`, keeping the original start.
+
+    pkgcheck reports EbuildIncorrectCopyright for any changed file whose end year is
+    not the current one, but only as a warning, so neither the pre-PR gate (--exit
+    error) nor the overlay's CI (--exit=NonexistentDeps) stops on it. Scaffolding
+    copies the file verbatim, so without this every bump would carry the old year.
+    Returns whether the file changed.
+    """
+    year = year or date.today().year
+    lines = path.read_text().splitlines(keepends=True)
+    if not lines:
+        return False
+    m = _COPYRIGHT_RE.match(lines[0].rstrip("\n"))
+    if m is None or m.group("end") == str(year):
+        return False
+    begin = m.group("begin") or m.group("end")
+    span = str(year) if begin == str(year) else f"{begin}-{year}"
+    lines[0] = f"# Copyright {span} {m.group('holder')}\n"
+    path.write_text("".join(lines))
+    return True
+
+
 def bump_scaffold(pkg_dir: Path, pn: str, new_pv: str) -> Path:
     src = highest_ebuild(pkg_dir, pn)
     if src is None:
@@ -41,6 +71,7 @@ def bump_scaffold(pkg_dir: Path, pn: str, new_pv: str) -> Path:
     if dst.exists():
         raise FileExistsError(f"target already exists: {dst}")
     shutil.copy2(src, dst)
+    refresh_copyright_year(dst)
     return dst
 
 
