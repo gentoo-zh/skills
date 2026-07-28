@@ -37,8 +37,10 @@
 
 ## 超出 autobump.sh 的补充（来源：replay-eval）
 
-下面这条**不在** autobump.sh stage-2 里，是 replay-eval 观测到的独立类别，一并纳入 escalate：
+下面两条**不在** autobump.sh stage-2 里，一并纳入 escalate：
 
 - **生成器驱动的 metadata（编辑数据非离线可复现）**：ebuild 的 DEPEND/RDEPEND/IUSE 由**上游生成器产物**决定，而非 ebuild 自身可推。典型是 `.cabal` 经 hackport 重生成（`inherit haskell-cabal`、`CABAL_HACKAGE_REVISION`，依赖边界 / ghc 版本 / flag 改名都随上游 `.cabal` 变）。这类 bump 的正确结果要从**上游 metadata 重新生成**，离线照抄旧 ebuild 几乎必错（replay-eval 里 edit-bump exact% = 0，瓶颈是缺 **DATA** 不是缺经验）→ escalate 到取上游 metadata 或人工。
   overlay 里 Haskell 包极少，但同理适用于**任何「依赖/IUSE 随生成器产物变」的包**。
   （`CABAL_HACKAGE_REVISION` 会额外把 `-revN.cabal` 作为 DIST 拉取。）
+
+- **live-only 包**：包目录下只有 `9999` ebuild、没有发布版。因为 live ebuild 用 `EGIT_REPO_URI` 取代 `SRC_URI`、也没有 `KEYWORDS`，所以没有可离线照抄的底稿，`gzh bump-scaffold` 会直接报错 → escalate。overlay 里 74 个 live ebuild 有 20 个与发布版同目录，这些照常用发布版当底稿，不受影响。
