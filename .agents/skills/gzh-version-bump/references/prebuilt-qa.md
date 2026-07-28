@@ -66,7 +66,7 @@
 
 ## 5. 其它反复踩的 QA
 
-- **.desktop（desktop-file-validate 门）**：删掉废弃的 freedesktop category（如 `Application`）；加主 category（如 `Office`）**前先看** blob 里的 `.desktop` 是否已经有——已有还加 → `X more than once` 红 CI，只在缺失的版本加、别重复。每次 bump 重新核对安装的 `.desktop` **basename**（升级可能把它改成 app-id 命名如 `com.vendor.App.desktop`，`domenu` 的引用要跟着改）。
+- **.desktop**：这道门的机制与通用两条见 [ecosystem-checks.md](ecosystem-checks.md)，它对源码包和预编译包一样判。blob 特有的是：补 category 之前先看 blob 里的 `.desktop` 是否已经带了，别重复；每次 bump 重新核对装出来的 **basename**，升级可能把它改成 app-id 命名如 `com.vendor.App.desktop`，`domenu` 的引用要跟着改。
 - **exec 位**：`doins` 装成 0644，会把 helper 二进制的 `+x` 剥掉；用 `find <blobdir> -type f -perm -u+x` 找全再 `fperms 0755`，别只硬写那几个。
 - **Electron flag**：不要把 GPU/ozone/wayland flag 焊进 Electron 的 `Exec=`（GPU 崩溃多是环境问题、非打包 bug）；出上游默认 `Exec`，让用户自己加（照 google-chrome）。
 - **edition/locale 陷阱（中文 overlay 尤其）**：bump 前查 bundled 的 locale/语言目录里有没有 `zh_CN`，确认新版没换 edition、没丢语言——官方“国际版” blob 可能只有 en/... 不含 `zh_CN`，盲升会把中文用户的语言弄没。

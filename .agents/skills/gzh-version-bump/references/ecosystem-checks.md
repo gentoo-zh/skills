@@ -56,6 +56,8 @@
 - **模块内核上限/依赖滞后** — MODULES_KERNEL_MAX 对比树里最高 sys-kernel/gentoo-kernel 分支，天花板低于它即标记（抬前先 build-test）；内核 provider 须 `PDEPEND` on `>=virtual/dist-kernel-${PV}`（别用派生变量、别放 RDEPEND/DEPEND，否则 virtual 落后于已装内核）。 _[7f7461b, cc1f450]_
 - **新加 ebuild 带稳定 keyword** — 对每个 `git diff --diff-filter=A` 新增的 *.ebuild，标出不以 `~` 或 `-` 开头的 KEYWORDS token。为 bump 复制 ebuild 会带过来稳定 keyword，等于把未测新版直接 stable；overlay 新增 ebuild 应 `~arch`。 _[c548fa4]_
 
+- **装了 `.desktop` 却没核过校验** — 只要 ebuild 往 `${XDG_DATA_DIRS}` 下的 `applications/` 装 `.desktop`（`domenu`、`make_desktop_entry`、或上游 `make install` 自己装的），portage 在 `src_install` 收尾就逐个跑 `desktop-file-validate`，输出走 `eqawarn`，也就是 qa 类 elog、CI 直接判红。源码包和预编译包一视同仁，`QA_PREBUILT` 与它无关。两条最常踩：废弃的 freedesktop category（`Application`）要删；补主 category（`Office` 之类）之前先看装出来的文件里有没有，已有还补就是 `X more than once`。因为这道检查以 `desktop-file-validate` 在不在 PATH 上为前提（`dev-util/desktop-file-utils` 提供），所以本机没装它就整段静默跳过、本地全绿而 CI 照红，验之前先确认本机装了。真要放行某个文件用 `QA_DESKTOP_FILE`，值是相对 `${ED}` 的精确路径、不是通配。 _[portage doebuild.py `_post_src_install_uid_fix`]_
+
 ## 源码包的 elog 分类（补 [finish-pipeline.md](finish-pipeline.md) 步骤 4）
 
 那里和 [prebuilt-qa.md](prebuilt-qa.md) 第 6 节列的是预编译路径的 triage。源码包另有几类，都出自 portage 扫构建日志，离线 pkgcheck 一条都看不出来：
