@@ -8,7 +8,7 @@ description: "Orchestrate batch version-bump from nvchecker bump-reminder issues
 编排 `gzh bump-issues`（发现）与 `gzh-version-bump`（执行），产出每包独立分支的本地 commit + 持久决策记录 + 汇总报告。**不自动 push/PR**。
 
 ## 前置约束（见 AGENTS.md）
-- `~arch` only、一包一分支一 commit、commit 无 AI 署名。
+- `~arch` only、默认一包一分支一 commit（多包共用 PR 的三种例外见 AGENTS.md）、commit 无 AI 署名。
 - ebuild 写法权威：`docs/devmanual.md`。
 - 用 `gzh` 工具，不现想 bash。重试上限 3 次。
 
