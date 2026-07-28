@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-SUPPORTED_EAPI = {"7", "8"}
+SUPPORTED_EAPI = {"7", "8", "9"}
 REQUIRED_VARS = ("DESCRIPTION", "HOMEPAGE", "LICENSE", "SRC_URI", "SLOT")
 # eclasses that provide SRC_URI themselves, so an ebuild inheriting them need
 # not set SRC_URI explicitly.

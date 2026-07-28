@@ -13,6 +13,12 @@ def test_clean_ebuild_no_issues():
     assert lint_ebuild(_good()) == []
 
 
+def test_eapi_9_is_supported():
+    ok = _good()
+    ok["EAPI"] = "9"
+    assert not any(i["rule"] == "eapi-unsupported" for i in lint_ebuild(ok))
+
+
 def test_stable_keyword_is_error():
     bad = _good()
     bad["KEYWORDS"] = "amd64 ~arm64"
