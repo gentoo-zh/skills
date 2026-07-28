@@ -135,11 +135,14 @@ def pkgcheck_cmd(path, min_severity, net):
 @cli.command("pkgcheck-commits")
 @click.option("--reverify/--no-reverify", default=True, show_default=True,
               help="re-verify flagged SRC_URI DeadUrls per-URL (drop rate-limit FPs)")
-def pkgcheck_commits_cmd(reverify):
-    """Reproduce the pre-PR CI gate `pkgcheck scan --commits --net`, then re-verify any
-    DeadUrl/RedirectedUrl SRC_URI findings (GitHub rate-limiting over-reports these)."""
+@click.option("--remote", default=None,
+              help="canonical remote name; discovered from the remote URLs by default")
+def pkgcheck_commits_cmd(reverify, remote):
+    """Run the pre-PR networked gate over this branch's commits, then re-verify any
+    DeadUrl/RedirectedUrl SRC_URI findings (GitHub rate-limiting over-reports these).
+    The overlay's own pkgcheck workflow runs offline, so this is not a CI reproduction."""
     root = find_overlay_root()
-    scan = run_pkgcheck_commits(root, net=True)
+    scan = run_pkgcheck_commits(root, net=True, remote=remote)
     out = {"scan_ok": scan["ok"], "results": scan["results"]}
     confirmed_dead = []
     if reverify:

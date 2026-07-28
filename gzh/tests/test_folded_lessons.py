@@ -70,18 +70,57 @@ def test_pkgcheck_net_flag(tmp_path):
     assert "--net" in seen["args"]
 
 
-def test_pkgcheck_commits_has_no_path_target(tmp_path):
-    seen = {}
-
+def _git_faker(seen, *, merge_base="abc123", remote_url="git@github.com:gentoo-zh/overlay.git"):
+    """Fake runner answering the git probes run_pkgcheck_commits makes before scanning."""
     def fake_run(args, **kw):
+        if args[:2] == ["git", "remote"] and args[2] == "-v":
+            return subprocess.CompletedProcess(args, 0, stdout=f"upstream\t{remote_url} (fetch)\n", stderr="")
+        if args[:2] == ["git", "symbolic-ref"]:
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        if args[:2] == ["git", "merge-base"]:
+            return subprocess.CompletedProcess(args, 0 if merge_base else 1, stdout=merge_base, stderr="")
         seen["args"] = args
         seen["cwd"] = kw.get("cwd")
-        return subprocess.CompletedProcess(args, 0, stdout="[]", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+    return fake_run
 
-    run_pkgcheck_commits(tmp_path, net=True, runner=fake_run)
-    assert "--commits" in seen["args"] and "--net" in seen["args"]
-    assert str(tmp_path) not in seen["args"]  # --commits derives targets from git diff
+
+def test_pkgcheck_commits_scopes_to_the_branch(tmp_path):
+    """A bare --commits compares against a fork's lagging origin, so the range and the
+    canonical remote both have to be explicit (overlay AGENTS.md, Commands and QA)."""
+    seen = {}
+    run_pkgcheck_commits(tmp_path, net=True, runner=_git_faker(seen))
+    args = seen["args"]
+    assert args[args.index("--git-remote") + 1] == "upstream"
+    assert "--commits=abc123..HEAD" in args
+    assert "--net" in args
+    assert str(tmp_path) not in args  # the range selects the targets, not a path
     assert seen["cwd"] == str(tmp_path)
+
+
+def test_pkgcheck_commits_refuses_an_empty_merge_base(tmp_path):
+    """git reads `..HEAD` as `HEAD..HEAD`, so pkgcheck would scan nothing and exit 0."""
+    seen = {}
+    try:
+        run_pkgcheck_commits(tmp_path, net=True, runner=_git_faker(seen, merge_base=""))
+    except RuntimeError as exc:
+        assert "merge-base" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError instead of a silently green gate")
+    assert "args" not in seen  # never reached pkgcheck
+
+
+def test_pkgcheck_commits_needs_an_unambiguous_canonical_remote(tmp_path):
+    def fake_run(args, **kw):
+        if args[:3] == ["git", "remote", "-v"]:
+            return subprocess.CompletedProcess(args, 0, stdout="origin\tgit@github.com:someone/other.git (fetch)\n", stderr="")
+        raise AssertionError(f"should not run {args}")
+    try:
+        run_pkgcheck_commits(tmp_path, net=True, runner=fake_run)
+    except RuntimeError as exc:
+        assert "gentoo-zh/overlay" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError when no canonical remote matches")
 
 
 def test_reverify_confirmed_vs_transient():
