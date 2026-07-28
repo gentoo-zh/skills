@@ -35,7 +35,7 @@ description: "Orchestrate batch version-bump from nvchecker bump-reminder issues
   - 重试上限 3 次：同包同错重复 2 次即停、记失败、继续下一个。
 
 ### 阶段 4：汇总 + 回报
-1. 写汇总到 `.gzh/bump-batch-<时间戳>.md`：成功（cat/pkg-ver + 分支 + issue）/ 失败（cat/pkg + phase + error + 分支）/ 跳过（cat/pkg + issue + reason，已记 triage）+「下一步：手动 PR」命令模板（`gh pr create --repo gentoo-zh/overlay --base master --head $(gh api user --jq .login):<branch>`）。
+1. 写汇总到 `.gzh/bump-batch-<时间戳>.md`：成功（cat/pkg-ver + 分支 + issue）/ 失败（cat/pkg + phase + error + 分支）/ 跳过（cat/pkg + issue + reason，已记 triage）+「下一步：手动 PR」命令模板（`gh pr create --repo gentoo-zh/overlay --base master --head $(gh api user --jq .login):<branch>`；每个 PR 开之前都要把标题、正文、文件清单给人逐个确认，见 AGENTS.md）。
 2. 若 `TELEGRAM_BOT_TOKEN` env 配置：`gzh notify telegram --message "<成功N/失败N/跳过N + 分支列表>"`；否则跳过。
 
 ## 排除
