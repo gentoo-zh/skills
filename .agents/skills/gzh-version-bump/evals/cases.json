@@ -72,7 +72,7 @@
         "fix the URL from verified upstream evidence",
         "rerun invalidated local gates",
         "use gzh recommit instead of a raw amend or second package commit",
-        "rerun gzh pkgcheck-commits"
+        "rerun gzh urls"
       ]
     },
     {
@@ -82,7 +82,7 @@
       "expected": [
         "inspect the failing CI job log before changing the package",
         "rerun every invalidated local gate",
-        "use gzh recommit and rerun gzh pkgcheck-commits",
+        "use gzh recommit and rerun gzh urls",
         "force-push with lease only to the same personal topic branch",
         "renew exact PR confirmation when the title body or file list changes"
       ]

@@ -94,24 +94,38 @@ python3 .agents/skills/gentoo-overlay-development/scripts/qa_runner.py \
 
 runner 记录仓库 revision、命令、pkgcheck 版本、来源 lock、完整 finding 和网络检查状态，并限制运行时间和输出大小。只有实时仓库政策要求联网扫描时才添加 `--net`。调用方提供的 adapter 和仓库身份在报告中标记为尚未验证，因此报告不能替代仓库能力解析或发布程序。
 
-gentoo-zh 的常用确定性命令：
+gentoo-zh 的常用确定性命令优先使用短名称：
 
 ```bash
 export GZH_OVERLAY_DIR=/path/to/overlay
 gzh repo
 gzh state-dir
-gzh upstream-version category/package
-gzh bump-scaffold category/package 1.2.3
+gzh latest category/package
+gzh bump category/package 1.2.3
 gzh lint category/package/package-1.2.3.ebuild
 gzh manifest category/package/package-1.2.3.ebuild --distdir /writable/distfiles
-gzh pkgcheck category/package --min-severity error
-gzh build-test category/package/package-1.2.3.ebuild
-gzh verify-install category/package/package-1.2.3.ebuild
+gzh qa category/package --min-severity error
+gzh build category/package/package-1.2.3.ebuild
+gzh merge category/package/package-1.2.3.ebuild
+gzh diff category/package/package-1.2.2.ebuild category/package/package-1.2.3.ebuild
 gzh commit category/package/package-1.2.3.ebuild
-gzh pkgcheck-commits
+gzh urls
 ```
 
 `gzh lint` 只执行已实现的快速结构检查，不代替 Gentoo Devmanual、eclass reference、`pkgcheck` 或实际安装。
+
+旧名称继续兼容现有脚本，但 `gzh --help` 和 shell completion 只显示短名称：
+
+| 短名称 | 兼容的旧名称 |
+| --- | --- |
+| `latest` | `upstream-version` |
+| `bump` | `bump-scaffold` |
+| `diff` | `diff-ebuild` |
+| `parse` | `ebuild-parse` |
+| `qa` | `pkgcheck` |
+| `urls` | `pkgcheck-commits` |
+| `build` | `build-test` |
+| `merge` | `verify-install` |
 
 队列快照、批次报告和 triage 记录位于 `${GZH_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/gentoo-zh-skills}`。自定义路径必须是绝对路径，且不能位于 overlay 工作树内。队列结果只有在整体和每个项目的截断字段均为 `false` 时才完整。
 

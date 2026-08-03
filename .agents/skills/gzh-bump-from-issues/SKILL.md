@@ -47,7 +47,7 @@ For each **Process** item:
 
 1. Process packages sequentially in one checkout. When delegates run concurrently, give each package a separate Git worktree and topic branch; never let concurrent agents switch branches in one worktree.
 2. Start each independent package from the freshly fetched canonical `master`, or resume its unambiguous existing topic branch. Never base the next package on the preceding package branch.
-3. Invoke `gzh-version-bump` and follow its package-specific work and finish pipeline through `gzh commit` and `gzh pkgcheck-commits`.
+3. Invoke `gzh-version-bump` and follow its package-specific work and finish pipeline through `gzh commit` and `gzh urls`.
 4. Stop at the locally committed and network-checked branch. Do not push and do not create or edit a PR.
 5. On failure, record the package, branch, failed command or phase, error, and attempts. Do not convert an attempted bump into a persistent skip merely because a command failed.
 6. Continue to another independent queue item only when doing so preserves the retry and branch-isolation rules.

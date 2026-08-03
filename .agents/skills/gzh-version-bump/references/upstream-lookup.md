@@ -4,9 +4,9 @@ Version discovery produces a candidate, not an approved bump target. Verify the 
 against upstream primary material, Gentoo version rules, the live overlay policy, and the
 package history before creating an ebuild.
 
-## Current `gzh upstream-version` behavior
+## Current `gzh latest` behavior
 
-`gzh upstream-version <category/package>` currently:
+`gzh latest <category/package>` currently:
 
 1. Reads the package entry from `.github/workflows/overlay.toml` and runs `nvchecker` on
    an isolated temporary configuration.

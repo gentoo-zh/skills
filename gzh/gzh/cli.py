@@ -29,7 +29,33 @@ from gzh.upstream import get_latest_version
 from gzh.verify_install import run_verify_install
 
 
-@click.group()
+PREFERRED_COMMAND_ALIASES = {
+    "build": "build-test",
+    "bump": "bump-scaffold",
+    "diff": "diff-ebuild",
+    "latest": "upstream-version",
+    "merge": "verify-install",
+    "parse": "ebuild-parse",
+    "qa": "pkgcheck",
+    "urls": "pkgcheck-commits",
+}
+
+
+class GzhGroup(click.Group):
+    """Expose concise command names while accepting legacy command names."""
+
+    def get_command(self, ctx, cmd_name):
+        command_name = PREFERRED_COMMAND_ALIASES.get(cmd_name, cmd_name)
+        return super().get_command(ctx, command_name)
+
+    def list_commands(self, ctx):
+        commands = super().list_commands(ctx)
+        legacy_names = set(PREFERRED_COMMAND_ALIASES.values())
+        preferred = [name for name in commands if name not in legacy_names]
+        return sorted([*preferred, *PREFERRED_COMMAND_ALIASES])
+
+
+@click.group(cls=GzhGroup)
 @click.version_option(package_name="gzh")
 def cli():
     """gzh — deterministic tooling for gentoo-zh overlay maintenance."""

@@ -37,7 +37,7 @@ def test_commit_without_message(monkeypatch, tmp_path):
 
 
 def test_commit_disables_pkgdev_scan(tmp_path):
-    """gzh pkgcheck is the hard gate, so pkgdev must not scan a second time."""
+    """gzh qa is the hard gate, so pkgdev must not scan a second time."""
     seen = {}
 
     def fake_run(args, **kw):

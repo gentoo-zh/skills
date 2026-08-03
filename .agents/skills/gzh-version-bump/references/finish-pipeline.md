@@ -46,7 +46,7 @@ threshold as proof of integrity or provenance.
 ## 4. Run Package QA
 
 ```bash
-gzh pkgcheck <package-directory> --min-severity error
+gzh qa <package-directory> --min-severity error
 ```
 
 Resolve every error. Record warnings and review whether the change introduced them. This
@@ -58,16 +58,16 @@ request.
 Use the phase runner for focused build diagnosis:
 
 ```bash
-gzh build-test <changed-ebuild>
+gzh build <changed-ebuild>
 ```
 
 Then run the install and elog helper:
 
 ```bash
-gzh verify-install <changed-ebuild> [--logdir <evidence-directory>]
+gzh merge <changed-ebuild> [--logdir <evidence-directory>]
 ```
 
-`gzh verify-install` derives an exact repository-qualified atom, disables binary package
+`gzh merge` derives an exact repository-qualified atom, disables binary package
 selection so the changed ebuild is built from source, emerges its dependencies, clears
 dependency elog files from an isolated `PORTAGE_LOGDIR`, requests the target with
 `PORTAGE_ELOG_CLASSES="qa warn error"`, and fails when the merge fails or the target
@@ -86,15 +86,15 @@ Exercise every USE state affected by the change. Run supported upstream tests wi
 libraries, notices, and licenses against the current upstream release rather than relying
 only on a successful command.
 
-If the environment cannot perform a real merge, record `gzh verify-install` as skipped,
+If the environment cannot perform a real merge, record `gzh merge` as skipped,
 state the exact limitation, and report the untested install and elog behavior as remaining
-risk. Do not claim the branch is fully verified. A successful `gzh build-test` does not
+risk. Do not claim the branch is fully verified. A successful `gzh build` does not
 replace this gate.
 
 ## 6. Review the Change
 
 ```bash
-gzh diff-ebuild <old-ebuild> <new-ebuild>
+gzh diff <old-ebuild> <new-ebuild>
 git status --short
 git diff --stat
 git diff
@@ -138,7 +138,7 @@ git status --short
 Run the required network check over the explicit canonical merge-base range:
 
 ```bash
-gzh pkgcheck-commits
+gzh urls
 ```
 
 Review all URL findings. Resolve confirmed dead URLs and redirects. Retry or escalate
@@ -152,7 +152,7 @@ fix it, rerun every invalidated local gate, and rebuild the sole local commit th
 
 ```bash
 gzh recommit <every-owned-path-required-by-the-change>
-gzh pkgcheck-commits
+gzh urls
 ```
 
 `gzh recommit` requires a clean index and exactly one commit above canonical `master`. It
@@ -174,7 +174,7 @@ Before preparing the final pull request text:
 
 1. Fetch the canonical remote and rebase the topic branch onto its current `master`.
 2. Re-run every gate invalidated by the rebase.
-3. Re-run `gzh pkgcheck-commits` when the rebase changed its commit range or inputs.
+3. Re-run `gzh urls` when the rebase changed its commit range or inputs.
 4. Build the pull request body above the live template marker. Preserve the template and
    tick only checks that actually ran. Follow the live `AGENTS.md` for the description;
    do not turn broader checklist wording into routine passing-test or tested-architecture

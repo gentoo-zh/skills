@@ -53,7 +53,7 @@ format is inconvenient.
    every change from primary evidence.
 2. Query the current main-tree path with Portage rather than assuming its location, then
    check both repositories for the selected license names and groups.
-3. Run `gzh lint`, regenerate the Manifest, and run `gzh pkgcheck`. Treat
+3. Run `gzh lint`, regenerate the Manifest, and run `gzh qa`. Treat
    `UnknownLicense` as a name or repository defect, not proof that the selected terms are
    correct.
 4. Inspect the installed image for every license or notice that the terms require the

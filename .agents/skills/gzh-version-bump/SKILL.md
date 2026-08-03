@@ -28,9 +28,9 @@ Complete the package-specific work, then run the full verification and local com
 
 ## Perform the package-specific work
 
-1. **Select and verify the release.** Run `gzh upstream-version <category/package>`, then verify the actual upstream release or tag and compare it with the highest current ebuild. Before editing, confirm every required source, generated dependency archive, and per-architecture artifact against upstream primary data. Never substitute an unverified host or unpublished file. Follow [upstream-lookup.md](references/upstream-lookup.md) when discovery is incomplete and [prebuilt-qa.md](references/prebuilt-qa.md) for prebuilt packages.
+1. **Select and verify the release.** Run `gzh latest <category/package>`, then verify the actual upstream release or tag and compare it with the highest current ebuild. Before editing, confirm every required source, generated dependency archive, and per-architecture artifact against upstream primary data. Never substitute an unverified host or unpublished file. Follow [upstream-lookup.md](references/upstream-lookup.md) when discovery is incomplete and [prebuilt-qa.md](references/prebuilt-qa.md) for prebuilt packages.
 2. **Normalize the version.** Convert the upstream version to a valid Gentoo version without changing the upstream identifier used in URLs or tags. Use an ebuild variable when the two forms differ.
-3. **Create or resume the topic branch.** Create `category-package-version` from the freshly synchronized local `master`, then run `gzh bump-scaffold <category/package> <version>`. Reuse the correct existing topic branch when resuming. Stop if the remote, branch, or ownership of existing changes is ambiguous.
+3. **Create or resume the topic branch.** Create `category-package-version` from the freshly synchronized local `master`, then run `gzh bump <category/package> <version>`. Reuse the correct existing topic branch when resuming. Stop if the remote, branch, or ownership of existing changes is ambiguous.
 4. **Reassess metadata.** Compare the new release's dependencies, build requirements, options, installed layout, licenses, and redistribution terms with the current ebuild. Follow [license-validation.md](references/license-validation.md) for license and redistribution evidence, and use [ecosystem-checks.md](references/ecosystem-checks.md) for ecosystem-specific questions.
 5. **Reassess patches and workarounds.** Verify each referenced patch and Gentoo-side workaround against the new source. Preserve files still used by another ebuild and record upstream provenance for new backports.
 6. **Decide whether to retain old versions.** Follow the package's established history and the live overlay policy. Check reverse dependencies and slots before removing anything; default to add-only when the evidence does not support a removal.
@@ -45,11 +45,11 @@ After the package-specific work, run every applicable step in [finish-pipeline.m
 
 1. `gzh lint`
 2. `gzh manifest`
-3. `gzh pkgcheck`
-4. `gzh build-test` and `gzh verify-install`
-5. `gzh diff-ebuild`
+3. `gzh qa`
+4. `gzh build` and `gzh merge`
+5. `gzh diff`
 6. `gzh commit`
-7. `gzh pkgcheck-commits`
+7. `gzh urls`
 
 Run the additional tests, installed-file review, network checks, and per-ebuild validation required by the live overlay policy and the finish pipeline. Use `gzh commit`, never a bare `git commit`. The normal result is a locally committed topic branch that has also passed the networked commit gate.
 
