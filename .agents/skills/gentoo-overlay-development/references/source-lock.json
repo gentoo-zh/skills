@@ -143,8 +143,8 @@
     },
     "gentoo-tree": {
       "kind": "git",
-      "revision": "72f93b784a56eccf2c5ad6e139da4ef2661b96dd",
-      "checked_at": "2026-08-03T20:17:54Z"
+      "revision": "e08eba179768b276aefe351ba13e523ba7eb819a",
+      "checked_at": "2026-08-03T22:29:22Z"
     },
     "guru": {
       "kind": "git",
@@ -318,5 +318,5 @@
       "checked_at": "2026-08-03T21:31:32Z"
     }
   },
-  "updated_at": "2026-08-03T21:31:32Z"
+  "updated_at": "2026-08-03T22:29:22Z"
 }
