@@ -855,9 +855,18 @@ def refresh_installed() -> int:
     return int(failed)
 
 
+def client_name(value: str) -> str:
+    if value not in CLIENT_NAMES:
+        choices = ", ".join(sorted(CLIENT_NAMES))
+        raise argparse.ArgumentTypeError(f"must be one of: {choices}")
+    return value
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("clients", nargs="*", choices=("claude", "codex", "opencode"))
+    parser.add_argument(
+        "clients", nargs="*", type=client_name,
+        metavar="{claude,codex,opencode}")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--copy", action="store_const", const="copy", dest="mode")
     mode.add_argument("--link", action="store_const", const="link", dest="mode")
