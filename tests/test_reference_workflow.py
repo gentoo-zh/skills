@@ -25,6 +25,7 @@ def test_maintenance_workflow_restores_authenticated_state_and_open_plan():
     assert text.index("- name: Run maintenance cycle") < text.index(
         "- name: Run durable maintenance queue")
     assert '"$(cat maintenance-output/cycle.status)" != "0"' in text
+    assert "jq -n --slurpfile contract" in text
 
 
 def test_maintenance_workflow_compacts_before_sealing_separate_state():
@@ -55,6 +56,9 @@ def test_maintenance_workflow_preserves_evidence_before_final_failure():
     assert "state-seal.status" in text
     assert "STATE_UPLOAD_OUTCOME" in text
     assert ".state_persistence" in text
+    assert "maintenance-output/queue-enqueue.log" in text
+    assert "maintenance-output/queue-run.log" in text
+    assert "maintenance-output/queue-status.log" in text
 
 
 def test_queue_failure_marks_existing_cycle_report_incomplete():

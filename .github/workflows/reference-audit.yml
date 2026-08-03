@@ -177,7 +177,7 @@ jobs:
           else
             plan_id="maintenance-${GITHUB_SHA}-${cursor}"
           fi
-          jq --slurpfile contract .agents/skills/gzh-maintain-skills/references/unattended-objective.json --arg repository "$GITHUB_REPOSITORY" --arg workflow ".github/workflows/reference-audit.yml" --arg head_sha "$GITHUB_SHA" --arg cursor "$cursor" '
+          jq -n --slurpfile contract .agents/skills/gzh-maintain-skills/references/unattended-objective.json --arg repository "$GITHUB_REPOSITORY" --arg workflow ".github/workflows/reference-audit.yml" --arg head_sha "$GITHUB_SHA" --arg cursor "$cursor" '
                 $contract[0] + {iteration: {
                   repository: $repository, workflow: $workflow,
                   head_sha: $head_sha,
@@ -373,9 +373,14 @@ jobs:
             maintenance-output/queue-report.json
             maintenance-output/queue-report.md
             maintenance-output/maintenance-context.json
+            maintenance-output/after-revision.txt
             maintenance-output/state-restore.log
             maintenance-output/state-seal.log
+            maintenance-output/open-plan.json
             maintenance-output/open-plan.log
+            maintenance-output/queue-enqueue.log
+            maintenance-output/queue-run.log
+            maintenance-output/queue-status.log
             maintenance-output/queue-compact.log
             maintenance-output/evidence-compact.log
             maintenance-output/*.status
