@@ -1,0 +1,4 @@
+interface:
+  display_name: "gentoo-zh Version Bump"
+  short_description: "Bump and verify an existing gentoo-zh package"
+  default_prompt: "Use $gzh-version-bump to update an existing gentoo-zh package and stop at the required review gates."

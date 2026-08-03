@@ -1,50 +1,93 @@
-# escalate 类别（不可离线机械 bump 的确定性信号）
+# Escalation Conditions
 
-`autobump.sh` 是真值源：下面的信号逐条对应它 stage-2 的确定性分类。命中任一即 **escalate**——出证据、升级到人工判断或去取上游数据，**不 abort、也不盲改**（对应引擎 `exit 3`；区别于 `exit 2` 那种 fetch/网络 transient defer）。
+Escalation means stopping automatic edits and collecting the evidence needed for a
+maintainer decision. It is not a package rejection. Use the live overlay policy first,
+then the PMS, Devmanual, current eclass and tool documentation, package history, and
+upstream primary metadata.
 
-两个 bump skill 共用本表，确保用**同一组具体信号**决定要不要升级：gzh-version-bump 的 A0 分类闸、gzh-bump-from-issues 阶段 2。escalate ≠ 放弃，是把「离线照抄旧 ebuild + 重算 Manifest」搞不定的那部分交给人/数据。
+## Escalate immediately
 
-## autobump.sh stage-2 确定性信号
+Escalate when any of the following conditions prevents a verified version bump:
 
-1. **预发布 vs release-only 历史**
-   目标版本含 `alpha`/`beta`/`rc[0-9]*`/`pre`/`nightly`/`dev`（以 `._-` 或结尾为边界），而 PKGDIR 现有 ebuild 里**没有**任何 `_alpha`/`_beta`/`_rc`/`_pre` 版本。
-   与 SKILL.md A1 对齐：目标是预发布**仍可 bump**（A1「预发布处理」不过滤上游发布流）。此信号只在**历史只有正式版**却突然要上预发布时触发——是提请人工确认「跨界到预发布」这一步，**不等于跳过预发布**。
+- The package has no versioned ebuild, the request is actually for a new package, or the
+  change requires a package move, split, merge, or replacement.
+- The requested version cannot be matched unambiguously to an upstream release or tag,
+  including a prerelease from a package history that has only followed final releases.
+- The source artifact, signature, checksum provenance, license, or redistribution terms
+  cannot be verified from current upstream material.
+- The new release requires generated dependency or package metadata, but the documented
+  generator, input data, or reproducible output is unavailable.
+- A version-specific vendor, dependency, crate, module, or `node_modules` archive is
+  required but no matching artifact exists or its provenance is unclear.
+- An applied patch cannot be rebased or its purpose cannot be confirmed for the new
+  release.
+- The release changes the build system, source layout, dependency model, ABI, package
+  identity, or installation layout beyond what the package history and current official
+  documentation can support safely.
+- A required eclass is removed, deprecated, or incompatible with the target EAPI and the
+  migration requires decisions outside the version bump.
+- A source package would gain an architecture that has not been built as required by the
+  live overlay policy, or a prebuilt ebuild would retain or add a keyword without the
+  corresponding upstream artifact.
+- Required local or CI verification cannot run and the missing result changes whether the
+  ebuild is correct.
 
-2. **major 跨度**
-   首个版本号分量变化（dae 1→2、mkinitcpio 39→41、tsukimi 0.21→26.7）算大跳。
-   **例外**：`YYYYMMDD[.N]` 日期版号（`^20[0-9]{6}([._-][0-9]+)*$`）首段本就每次 bump 递增，**更新到更晚日期算常规 bump，不 escalate**；只有日期**倒退**才可疑。
+## Heuristic signals
 
-3. **pin / 版本耦合变量**
-   ebuild 含 `GIT_CRATES` / `*_COMMIT=` / `*_TAG=` / `[A-Z_]+_VER=`（非注释行）。这些没有可自动展开的产物，须逐一**对上游新版本 diff 核定**（重新确认 commit / tag / crates 版本），绝不照抄旧值。
-   `GIT_CRATES` 与 `[patch.crates-io]` 的 git URL 是例外：它必须与新版 `Cargo.lock` 里那条 `git+<url>` 一字不差，因为 cargo 在 `--offline` 下按 URL 字串精确匹配已 vendor 的 git crate，所以 github 那种 org 改名的 301 跳转对它无效。pkgcheck 报在这类 URL 上的 `RedirectedUrl` 不修，收尾步骤 7 的 URL 门与 ecosystem-checks 的上游位置过期一条对它例外；同一个 ebuild 里两条 `GIT_CRATES` 指向不同 org 也可能都是对的，各自对齐自己在 `Cargo.lock` 里的那条。改过 pin 或这类 URL 一律重跑 `gzh build-test`，因为 pkgcheck 只做静态扫描，offline 解析不到 crate 只有真编才暴露。
+The following signals request closer review. They do not prove that escalation is
+necessary:
 
-4. **per-version 外部依赖产物**
-   SRC_URI 里的 URL 文件名命中 `-deps` / `-vendor` / `-crates` / `node_modules` 且带 `.tar.`——**按文件名识别，不认 host**（这类产物散落在多个 deps 仓库，host allowlist 会漏，如 v2rayA 的 `${P}-deps.tar.xz`）。
-   bump 前把 URL 里的 `${P}` / `${PV}` / `${PN}` 展开到新版本、并把硬编码旧版号一并替换，再 `curl -sL -r 0-1 -o /dev/null -w '%{http_code}' --max-time 30 <url>` 确认新版产物已发布（带 range 的 GET，因为 HEAD 不走真正的取回路径）：
-   - `200` → 存在，放行；
-   - **仅确定性 `404`** → 上游依赖包还没打 → escalate；
-   - 网络 `5xx`/`000` → 不下终局结论（inconclusive，留给收尾 `gzh manifest` fetch 阶段复检，属 transient）。
+- A change in the leading version component or release channel.
+- Version, commit, tag, crate, module, or toolchain pins in the ebuild.
+- Versioned dependency archives or generated source lists in `SRC_URI`.
+- Applied files under `files/`.
+- Large changes in the upstream lock files, build metadata, bundled libraries, or
+  installed file list.
+- A project transfer, forge redirect, repository rename, or changed release publisher.
 
-5. **实际应用的 patch**
-   `PKGDIR/files/*.patch` 存在**且** ebuild 真的引用它（`eapply` / `epatch` / `PATCHES+=` / `FILESDIR.*\.patch`）→ 新版须验证 patch 仍适用。
-   未被任何 `eapply`/`epatch`/`PATCHES`/`FILESDIR` 引用的**死 patch** 是残留，**不 escalate**（如 archlinux-keyring 里没被引用的 `01_adapt_to_sequoia`）。
+Inspect the matched data in the target release. Continue only when the current value can
+be derived and verified without guessing.
 
-## 信息类（不 escalate，仅标注 / 交付说明）
+## Conditions that do not escalate by themselves
 
-信息类信号：这些**不阻断**、也不是 escalate，只在交付里注明：
+- Multiple testing keywords. Verify and report each architecture according to the live
+  overlay policy.
+- A GUI package. Record any smoke test that cannot run, but continue with the available
+  install and metadata checks.
+- An unused historical patch. Confirm that no surviving ebuild references it before
+  considering cleanup.
+- A pin that is unchanged and independently verified against the new upstream metadata.
+- A prebuilt release that omits an architecture supported by an older retained ebuild,
+  when the new ebuild can correctly omit that keyword under the live overlay policy.
+  Escalate instead when removing the keyword changes the requested scope or a maintainer
+  decision is otherwise required.
 
-- **多 arch**：KEYWORDS 有 >1 个 `~arch` → PR 走 draft，注明本机未测的 arch。CI 会真编 amd64，包 keyword 了 arm64 时也真编 arm64，其余 arch 无人验。
-- **GUI 应用**：`inherit` 含 `desktop`/`xdg` → smoke 只能证「**装上了**」，证不了能启动/渲染；交付说明里提请人工实跑。
+## Transient failures
 
-## 超出 autobump.sh 的补充
+Treat timeouts, rate limits, and server errors as inconclusive. Retry within the
+repository limit. Escalate after the retry limit only when the missing remote evidence is
+required to continue; otherwise report the skipped check and its effect.
 
-下面三条**不在** autobump.sh stage-2 里，一并纳入 escalate（前两条来源 replay-eval，第三条来源 overlay 历史）：
+Do not interpret an HTTP `404` alone as proof that a release asset will never exist.
+Confirm the expected asset name and release state using the upstream release API or page.
 
-- **生成器驱动的 metadata（编辑数据非离线可复现）**：ebuild 的 DEPEND/RDEPEND/IUSE 由**上游生成器产物**决定，而非 ebuild 自身可推。典型是 `.cabal` 经 hackport 重生成（`inherit haskell-cabal`、`CABAL_HACKAGE_REVISION`，依赖边界 / ghc 版本 / flag 改名都随上游 `.cabal` 变）。这类 bump 的正确结果要从**上游 metadata 重新生成**，离线照抄旧 ebuild 几乎必错（replay-eval 里 edit-bump exact% = 0，瓶颈是缺 **DATA** 不是缺经验）→ escalate 到取上游 metadata 或人工。
-  overlay 里 Haskell 包极少，但同理适用于**任何「依赖/IUSE 随生成器产物变」的包**。
-  （`CABAL_HACKAGE_REVISION` 会额外把 `-revN.cabal` 作为 DIST 拉取。）
+## Escalation record
 
-- **live-only 包**：包目录下只有 `9999` ebuild、没有发布版。因为 live ebuild 用 `EGIT_REPO_URI` 取代 `SRC_URI`、也没有 `KEYWORDS`，所以没有可离线照抄的底稿，`gzh bump-scaffold` 会直接报错 → escalate。overlay 里 74 个 live ebuild 有 20 个与发布版同目录，这些照常用发布版当底稿，不受影响。
+Report:
 
-- **上游改名到新项目**：新版本发布在另一个上游项目名下，包名要跟着变。这是包改名不是普通 bump：因为改名要在同一个 commit 里落齐 `profiles/updates/<n>Q-<YYYY>` 的 `move <old> <new>` 行、`git mv` 包目录与 `Manifest`、`metadata.xml` 的 `remote-id`、`.github/workflows/overlay.toml` 里那条 nvchecker 条目的 key、以及所有引用旧原子的依赖，而 `gzh bump-scaffold` 只在原包目录里复制最高版 ebuild、给不出这些，所以别在 bump 里顺手改目录名或 `SRC_URI` 的 repo 段 → escalate 给维护者，确认改名后再按上面这套一次改齐。
-  两种情况不属此列：一是 forge 上只有 org/repo 重定向而项目名没变，按 ecosystem-checks 的上游位置过期一条更新 `HOMEPAGE`/`SRC_URI`/`remote-id`/nvchecker URL；二是上游归档、后继是另一套实现，因为那不是同一个包换名字，所以走 `profiles/package.mask` 排期移除加另立新包，同样 escalate、不在 bump 里做。
+1. The package and requested version.
+2. The exact blocking condition.
+3. The commands, files, and primary URLs checked.
+4. The current ebuild or package-history evidence.
+5. The smallest maintainer decision or missing datum needed to continue.
+
+Do not edit the ebuild, create a commit, or mark a persistent skip unless the governing
+workflow explicitly authorizes that action.
+
+## Primary references
+
+- [Gentoo Package Manager Specification](https://projects.gentoo.org/pms/latest/pms.html)
+- [Gentoo Development Guide](https://devmanual.gentoo.org/)
+- [Gentoo eclass reference](https://devmanual.gentoo.org/eclass-reference/index.html)
+- The live overlay `AGENTS.md`, package history, and CI workflows
+- Upstream release pages, tags, source archives, build metadata, and license text

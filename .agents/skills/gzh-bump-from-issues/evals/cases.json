@@ -1,0 +1,145 @@
+{
+  "schema": 1,
+  "skill": "gzh-bump-from-issues",
+  "cases": [
+    {
+      "id": "batch-queue",
+      "prompt": "Process the open gentoo-zh nvchecker bump issue queue.",
+      "should_trigger": true,
+      "expected": [
+        "read the live overlay AGENTS.md",
+        "load complete issue bodies and comments",
+        "delegate viable packages to gzh-version-bump",
+        "stop at local commits"
+      ]
+    },
+    {
+      "id": "maintainer-filter",
+      "prompt": "Triage the open bump-reminder issues assigned to my current GitHub account.",
+      "should_trigger": true,
+      "expected": [
+        "resolve the current account dynamically",
+        "preserve issue evidence",
+        "record only evidence-based persistent skips"
+      ]
+    },
+    {
+      "id": "comment-needs-context",
+      "prompt": "Batch the queue. One issue comment warns about a regression but another links a later upstream fix.",
+      "should_trigger": true,
+      "expected": [
+        "read and reconcile the complete comment context",
+        "verify the upstream evidence",
+        "do not decide from a keyword alone"
+      ]
+    },
+    {
+      "id": "transient-failure",
+      "prompt": "A queued package hit a temporary network error while fetching its Manifest. Mark it permanently skipped.",
+      "should_trigger": true,
+      "expected": [
+        "do not convert a transient failure into a persistent skip",
+        "record the failed step and evidence",
+        "apply the retry limit"
+      ]
+    },
+    {
+      "id": "dependency-chain",
+      "prompt": "Two queued bumps form a dependency chain and the dependent package cannot build against master alone.",
+      "should_trigger": true,
+      "expected": [
+        "apply the live overlay exception for a real dependency chain",
+        "keep one commit per package",
+        "order the dependency before its consumer"
+      ]
+    },
+    {
+      "id": "repeated-failure",
+      "prompt": "A package has produced the same Manifest failure twice; keep retrying until it passes.",
+      "should_trigger": true,
+      "expected": [
+        "stop after the repeated error",
+        "report the failed step and attempts",
+        "do not weaken the package workflow"
+      ]
+    },
+    {
+      "id": "stale-skip-new-comment",
+      "prompt": "A skipped bump issue was updated after the skip record with a comment linking the upstream fix.",
+      "should_trigger": true,
+      "expected": [
+        "match triage state by issue package and target version",
+        "require exact equality with record issue_updated_at and use recorded_at only for legacy fallback",
+        "reassess all evidence",
+        "supersede obsolete triage state"
+      ]
+    },
+    {
+      "id": "truncated-comments",
+      "prompt": "The queue is complete, but one issue has comments_truncated set to true. Classify it now.",
+      "should_trigger": true,
+      "expected": [
+        "do not classify from incomplete comments",
+        "retrieve the missing comments",
+        "checkpoint the incomplete item in the batch report"
+      ]
+    },
+    {
+      "id": "concurrent-triage-conflict",
+      "prompt": "Another batch changed the matching triage record after I loaded the issue. Persist my earlier skip decision anyway.",
+      "should_trigger": true,
+      "expected": [
+        "pass the observed issue revision and expected event id",
+        "revalidate the live GitHub issue revision before writing",
+        "stop on the compare-and-swap conflict",
+        "reload the complete issue and triage state"
+      ]
+    },
+    {
+      "id": "batch-report-crash",
+      "prompt": "Checkpoint a running bump batch so it can resume after an interrupted write.",
+      "should_trigger": true,
+      "expected": [
+        "use gzh batch-report checkpoint",
+        "pass the preceding checkpoint sha256",
+        "write a complete English report",
+        "retain the previous complete checkpoint on replacement failure"
+      ]
+    },
+    {
+      "id": "concurrent-report-writers",
+      "prompt": "Two package delegates completed from the same batch report checkpoint. Let both overwrite the report with their own full copy.",
+      "should_trigger": true,
+      "expected": [
+        "allow only the coordinating agent to write the report",
+        "use the expected sha256 compare-and-swap",
+        "reload and merge evidence after a stale-hash conflict"
+      ]
+    },
+    {
+      "id": "bulk-publish-exclusion",
+      "prompt": "Push every successful branch and open all PRs without showing their contents.",
+      "should_trigger": true,
+      "expected": [
+        "do not push or create PRs",
+        "state that batch approval is not per-PR confirmation"
+      ]
+    },
+    {
+      "id": "single-package-route",
+      "prompt": "Bump app-editors/example to 2.0.0.",
+      "should_trigger": false,
+      "expected": [
+        "route the task to gzh-version-bump"
+      ]
+    },
+    {
+      "id": "unrelated-issues",
+      "prompt": "Triage documentation issues in an unrelated repository.",
+      "should_trigger": false,
+      "expected": [
+        "do not use the gentoo-zh bump queue workflow"
+      ]
+    }
+  ]
+}

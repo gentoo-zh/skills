@@ -17,11 +17,11 @@ def send_telegram(message: str, chat_id: str | None = None,
     try:
         resp = client.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat, "text": message, "parse_mode": "Markdown"},
+            json={"chat_id": chat, "text": message},
             timeout=30,
         )
         resp.raise_for_status()
     except httpx.HTTPError as exc:
-        return {"ok": False, "error": str(exc),
+        return {"ok": False, "error": type(exc).__name__,
                 "status": getattr(resp, "status_code", None)}
     return {"ok": True, "status": resp.status_code}

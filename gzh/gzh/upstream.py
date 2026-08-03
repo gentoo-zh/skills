@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import tempfile
 import tomllib
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import httpx
 import tomli_w
+
+
+_PYPI_PROJECT_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
 
 
 class VersionProvider:
@@ -25,6 +30,9 @@ class NvcheckerProvider(VersionProvider):
     def _entry(self, cat_pkg: str) -> dict | None:
         data = tomllib.loads(self.overlay_toml.read_text(encoding="utf-8"))
         return data.get(cat_pkg)
+
+    def has_entry(self, cat_pkg: str) -> bool:
+        return self._entry(cat_pkg) is not None
 
     def latest(self, cat_pkg: str) -> str | None:
         entry = self._entry(cat_pkg)
@@ -57,15 +65,32 @@ class NvcheckerProvider(VersionProvider):
 
 
 class PyPIProvider(VersionProvider):
-    def latest(self, cat_pkg: str) -> str | None:
-        pn = cat_pkg.rsplit("/", 1)[-1]
+    def latest(self, project: str) -> str | None:
         try:
-            resp = httpx.get(f"https://pypi.org/pypi/{pn}/json", timeout=30)
+            resp = httpx.get(f"https://pypi.org/pypi/{project}/json", timeout=30)
             resp.raise_for_status()
         except httpx.HTTPError:
-            # not a python package (e.g. *-bin); fall through to "none"
             return None
         return resp.json().get("info", {}).get("version")
+
+
+def pypi_project(overlay_root: Path, cat_pkg: str) -> str | None:
+    category, separator, package = cat_pkg.partition("/")
+    if not separator or not category or not package:
+        return None
+    metadata = Path(overlay_root) / category / package / "metadata.xml"
+    if not metadata.is_file():
+        return None
+    try:
+        root = ET.parse(metadata).getroot()
+    except ET.ParseError:
+        return None
+    for remote_id in root.findall(".//upstream/remote-id"):
+        if remote_id.get("type") == "pypi" and remote_id.text:
+            project = remote_id.text.strip()
+            if _PYPI_PROJECT_RE.fullmatch(project):
+                return project
+    return None
 
 
 def get_latest_version(cat_pkg: str, overlay_root: Path,
@@ -75,14 +100,19 @@ def get_latest_version(cat_pkg: str, overlay_root: Path,
     overlay_toml = Path(overlay_toml) if overlay_toml else (
         overlay_root / ".github" / "workflows" / "overlay.toml")
     nvp = NvcheckerProvider(overlay_toml, keyfile=keyfile)
-    ver = nvp.latest(cat_pkg)
-    if ver:
-        return {"cat_pkg": cat_pkg, "upstream": ver, "source": "nvchecker",
-                "advisory": None}
-    pypi = PyPIProvider().latest(cat_pkg)
+    if nvp.has_entry(cat_pkg):
+        ver = nvp.latest(cat_pkg)
+        if ver:
+            return {"cat_pkg": cat_pkg, "upstream": ver, "source": "nvchecker",
+                    "advisory": None}
+        return {"cat_pkg": cat_pkg, "upstream": None, "source": "nvchecker",
+                "advisory": "the configured nvchecker entry returned no recognized version"}
+    project = pypi_project(overlay_root, cat_pkg)
+    pypi = PyPIProvider().latest(project) if project else None
     if pypi:
         return {"cat_pkg": cat_pkg, "upstream": pypi, "source": "pypi",
-                "advisory": f"no overlay.toml entry for {cat_pkg}; "
-                            f"consider adding one (see gzh nvchecker-config set)"}
+                "project": project,
+                "advisory": f"no overlay.toml entry for {cat_pkg}; verify the "
+                            "release and decide whether tracking is appropriate"}
     return {"cat_pkg": cat_pkg, "upstream": None, "source": "none",
             "advisory": "could not determine upstream version"}

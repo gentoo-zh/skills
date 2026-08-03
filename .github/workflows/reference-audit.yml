@@ -1,0 +1,64 @@
+name: Source drift audit
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: source-drift-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Compare registered sources with the reviewed lock
+        id: audit
+        shell: bash
+        run: |
+          set +e
+          python .agents/skills/gzh-version-bump/scripts/source_manager.py \
+            audit --fail-on-drift > reference-report.json
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Open or update the review issue
+        if: steps.audit.outputs.status != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          number=$(gh issue list --state open --json number,title \
+            --jq '.[] | select(.title == "Registered source drift detected") | .number' \
+            | head -n 1)
+          if [[ -n "$number" ]]; then
+            gh issue comment "$number" --body-file reference-report.json
+          else
+            gh issue create --title "Registered source drift detected" \
+              --body-file reference-report.json
+          fi
+      - name: Close the resolved review issue
+        if: steps.audit.outputs.status == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          number=$(gh issue list --state open --json number,title \
+            --jq '.[] | select(.title == "Registered source drift detected") | .number' \
+            | head -n 1)
+          if [[ -n "$number" ]]; then
+            gh issue close "$number" \
+              --comment "All registered sources match the reviewed lock."
+          fi
+      - name: Fail after recording drift
+        if: steps.audit.outputs.status != '0'
+        run: exit 1

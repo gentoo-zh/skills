@@ -5,15 +5,15 @@ import re
 import subprocess
 from pathlib import Path
 
-from gzh.repo import find_canonical_remote
+from gzh.repo import find_canonical_remote, validate_canonical_remote
 
 # pkgcheck severities, highest to lowest. Used to scope the pass/fail gate via `--exit`
 # (JsonStream output carries no severity field, so the gate cannot be derived from the
 # result objects; pkgcheck's own exit status is the source of truth).
 SEVERITIES = ("error", "warning", "style", "info")
 
-# a real browser UA: bare curl gets rate-limited/403'd by GitHub far more than a browser,
-# which is a big source of the DeadUrl false positives this reverify exists to filter.
+# Use a browser user agent so a follow-up request is less likely to be rejected solely
+# because of a generic command-line client identifier.
 _BROWSER_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 _URL_RE = re.compile(r"https?://[^\s\"'<>]+")
@@ -66,9 +66,12 @@ def run_pkgcheck_commits(cwd: Path, net: bool = True, remote: str | None = None,
     bare `--commits` compares against a fork's lagging `origin` and drags in unrelated
     packages; `--git-remote` only names the canonical source for the commit-only checks.
     Run from the overlay root. `--exit error` makes the exit status the gate. Pair with
-    reverify_url_findings() to drop rate-limit false positives.
+    reverify_url_findings() to classify individual URL responses for manual review.
     """
-    remote = remote or find_canonical_remote(cwd, runner=runner)
+    if remote is None:
+        remote = find_canonical_remote(cwd, runner=runner)
+    else:
+        remote = validate_canonical_remote(cwd, remote, runner=runner)
     # pkgcheck's git checks build their own cache from `<remote>/HEAD..HEAD`, independently
     # of any explicit range, so `<remote>/HEAD` has to resolve first.
     if runner(["git", "symbolic-ref", "-q", f"refs/remotes/{remote}/HEAD"],
@@ -83,7 +86,17 @@ def run_pkgcheck_commits(cwd: Path, net: bool = True, remote: str | None = None,
     if proc.returncode != 0 or not base:
         raise RuntimeError(
             f"no merge-base with {remote}/master; fetch {remote} before running the gate")
-    args = ["pkgcheck", "scan", "--git-remote", remote, f"--commits={base}..HEAD",
+    range_spec = f"{base}..HEAD"
+    proc = runner(["git", "rev-list", "--count", range_spec], cwd=str(cwd),
+                  capture_output=True, text=True)
+    try:
+        commit_count = int((proc.stdout or "").strip())
+    except ValueError:
+        commit_count = 0
+    if proc.returncode != 0 or commit_count < 1:
+        raise RuntimeError(
+            f"no local commits in {range_spec}; the network gate cannot scan an empty range")
+    args = ["pkgcheck", "scan", "--git-remote", remote, f"--commits={range_spec}",
             "-R", "JsonStream", "--exit", "error"]
     if net:
         args.append("--net")
@@ -93,13 +106,14 @@ def run_pkgcheck_commits(cwd: Path, net: bool = True, remote: str | None = None,
 
 
 def reverify_url_findings(results: list[dict], runner=subprocess.run) -> dict:
-    """Re-check DeadUrl/RedirectedUrl findings that reference SRC_URI, because a
-    rate-limited `pkgcheck --net` over-reports GitHub (memory dead-upstream-audit:
-    78/88 flagged were false positives). Only SRC_URI matters -- a HOMEPAGE DeadUrl does
-    not block install. Three buckets: transient (alive, 2xx/3xx), confirmed (genuinely
-    gone, 404/410), needs_human (401/403/429/000: auth-gated by design, e.g. RESTRICT=fetch,
-    or rate-limited; a fetch-restricted package emits MissingUri, not DeadUrl)."""
-    confirmed, transient, needs_human = [], [], []
+    """Classify follow-up responses for SRC_URI DeadUrl and RedirectedUrl findings.
+
+    A successful response is transient, 404 or 410 is confirmed, and authentication,
+    rate-limit, transport, or other responses require human review. HOMEPAGE findings do
+    not establish whether a package distfile can be fetched and are left to the original
+    pkgcheck result.
+    """
+    confirmed, redirected, transient, needs_human = [], [], [], []
     for r in results:
         cls = r.get("__class__") or r.get("code")
         if cls not in ("DeadUrl", "RedirectedUrl"):
@@ -113,13 +127,20 @@ def reverify_url_findings(results: list[dict], runner=subprocess.run) -> dict:
                  "--max-time", "30", "-o", "/dev/null", "-w", "%{http_code}", url],
                 capture_output=True, text=True)
             code = (proc.stdout or "").strip()[-3:]
-            entry = {"url": url, "http_code": code, "finding": cls}
-            if code.startswith(("2", "3")):
+            entry = {"url": url, "http_code": code, "finding": cls,
+                     "transport_returncode": proc.returncode}
+            if proc.returncode != 0:
+                needs_human.append(entry)
+            elif cls == "RedirectedUrl" and code.startswith(("2", "3")):
+                redirected.append(entry)
+            elif code.startswith(("2", "3")):
                 transient.append(entry)
             elif code in _TRULY_DEAD:
                 confirmed.append(entry)
             else:
                 needs_human.append(entry)
-    return {"confirmed": confirmed, "transient": transient,
+    return {"confirmed": confirmed, "redirected": redirected,
+            "transient": transient,
             "needs_human": needs_human,
-            "checked": len(confirmed) + len(transient) + len(needs_human)}
+            "checked": (len(confirmed) + len(redirected) + len(transient)
+                        + len(needs_human))}

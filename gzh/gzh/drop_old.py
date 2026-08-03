@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import subprocess
 from functools import cmp_to_key
 from pathlib import Path
 
 from portage.versions import vercmp
 
 from gzh.ebuild_parser import is_live, pv_from_name
-from gzh.manifest import run_manifest
 from gzh.repo import find_overlay_root
 
 
@@ -47,8 +45,11 @@ def _enumerate_pkgs(root: Path, target: str) -> list[str]:
 
 
 def run_drop_old(target: str, keep: int = 2, apply: bool = False,
-                 overlay_root: Path | None = None,
-                 manifest_runner=subprocess.run) -> dict:
+                 overlay_root: Path | None = None) -> dict:
+    if apply:
+        raise ValueError(
+            "drop-old --apply is disabled: version retention requires package-history "
+            "and reverse-dependency review")
     root = Path(overlay_root) if overlay_root else find_overlay_root()
     results = []
     for cat_pkg in _enumerate_pkgs(root, target):
@@ -61,17 +62,5 @@ def run_drop_old(target: str, keep: int = 2, apply: bool = False,
         entry = {"cat_pkg": cat_pkg,
                  "dropped": [p.name for p in dropped],
                  "kept": [p.name for p in kept]}
-        if apply and dropped:
-            for p in dropped:
-                (pkg_dir / p.name).unlink()
-            if kept:
-                mres = run_manifest(pkg_dir / kept[0].name, cwd=root,
-                                    runner=manifest_runner)
-                entry["manifest_ok"] = mres["ok"]
-                if not mres["ok"]:
-                    entry["needs_manual_recovery"] = True
-            else:
-                entry["manifest_ok"] = True
         results.append(entry)
-    any_manifest_fail = any(r.get("manifest_ok") is False for r in results)
-    return {"ok": not any_manifest_fail, "results": results}
+    return {"ok": True, "results": results}

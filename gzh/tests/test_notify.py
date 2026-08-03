@@ -44,7 +44,7 @@ def test_send_success(monkeypatch):
     assert res["status"] == 200
     assert "/bot" in captured["url"] and "sendMessage" in captured["url"]
     assert captured["json"]["text"] == "hello"
-    assert captured["json"]["parse_mode"] == "Markdown"
+    assert "parse_mode" not in captured["json"]
 
 
 def test_send_api_error(monkeypatch):
@@ -66,8 +66,23 @@ def test_send_network_error_returns_not_ok(monkeypatch):
     monkeypatch.setattr("gzh.notify.httpx.post", boom)
     res = send_telegram("hi")
     assert res["ok"] is False
-    assert "conn refused" in res["error"]
+    assert res["error"] == "ConnectError"
     assert res["status"] is None
+
+
+def test_error_never_exposes_telegram_token(monkeypatch):
+    token = "secret-token-value"
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", token)
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "123")
+
+    def boom(url, **kwargs):
+        request = httpx.Request("POST", url)
+        response = httpx.Response(401, request=request)
+        raise httpx.HTTPStatusError("bad request", request=request, response=response)
+
+    monkeypatch.setattr("gzh.notify.httpx.post", boom)
+    res = send_telegram("hi")
+    assert token not in str(res)
 
 
 from click.testing import CliRunner

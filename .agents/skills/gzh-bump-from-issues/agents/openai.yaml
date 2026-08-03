@@ -1,0 +1,4 @@
+interface:
+  display_name: "gentoo-zh Bump Queue"
+  short_description: "Triage and process gentoo-zh bump issues"
+  default_prompt: "Use $gzh-bump-from-issues to triage the current nvchecker bump queue and process viable packages locally."

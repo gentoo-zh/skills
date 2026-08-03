@@ -4,17 +4,18 @@ import re
 import subprocess
 from pathlib import Path
 
-# pkgdev/ebuild manifest hashes whatever bytes are on disk, so a truncated download yields
-# a self-consistent Manifest that installs locally yet fails CI's independent re-fetch
-# VERIFY (memory ci-elog-gate-bump-qa: conty 1.97GB blob cut to 1.29GB). Cross-check the
-# recorded size of large distfiles against the upstream URL before trusting the Manifest.
+# This threshold selects large files for an advisory remote-size comparison. It is not a
+# Gentoo policy limit and a matching size does not establish artifact provenance.
 _LARGE_DISTFILE = 50 * 1024 * 1024  # 50 MiB; the bigger the file the more it matters
 _URL_SCHEMES = ("http://", "https://", "ftp://", "mirror://")
 
 
 def run_manifest(ebuild: Path, cwd: Path | None = None,
+                 distdir: Path | None = None,
                  runner=subprocess.run) -> dict:
     args = ["pkgdev", "manifest", "--force", str(ebuild)]
+    if distdir is not None:
+        args[2:2] = ["--distdir", str(Path(distdir))]
     proc = runner(args, cwd=cwd, capture_output=True, text=True)
     return {"ok": proc.returncode == 0,
             "returncode": proc.returncode,

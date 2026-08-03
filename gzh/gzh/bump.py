@@ -7,9 +7,26 @@ from datetime import date
 from functools import cmp_to_key
 from pathlib import Path
 
-from portage.versions import vercmp
+from portage.versions import vercmp, ververify
 
 from gzh.ebuild_parser import is_live, pv_from_name
+
+
+_CATEGORY_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9+_.-]*")
+_PACKAGE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9+_-]*")
+
+
+def resolve_package_directory(root: Path, cat_pkg: str) -> tuple[str, str, Path]:
+    parts = cat_pkg.split("/")
+    if (len(parts) != 2 or not _CATEGORY_RE.fullmatch(parts[0])
+            or not _PACKAGE_RE.fullmatch(parts[1])):
+        raise ValueError(f"invalid category/package: {cat_pkg}")
+    root = Path(root).resolve()
+    category, package = parts
+    pkg_dir = (root / category / package).resolve()
+    if root not in pkg_dir.parents or not pkg_dir.is_dir():
+        raise ValueError(f"package directory does not exist in the overlay: {cat_pkg}")
+    return category, package, pkg_dir
 
 
 def _ebuilds(pkg_dir: Path, pn: str) -> list[Path]:
@@ -62,6 +79,10 @@ def refresh_copyright_year(path: Path, year: int | None = None) -> bool:
 
 
 def bump_scaffold(pkg_dir: Path, pn: str, new_pv: str) -> Path:
+    if not _PACKAGE_RE.fullmatch(pn) or pkg_dir.name != pn:
+        raise ValueError(f"invalid package name for directory: {pn}")
+    if not ververify(new_pv) or is_live(new_pv):
+        raise ValueError(f"invalid released Gentoo version: {new_pv}")
     src = highest_ebuild(pkg_dir, pn)
     if src is None:
         raise FileNotFoundError(

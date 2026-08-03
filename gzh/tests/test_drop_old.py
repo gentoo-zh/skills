@@ -55,7 +55,7 @@ def test_drop_nothing_when_within_keep(tmp_path):
 
 
 def _overlay(tmp_path):
-    # 两个包：foo 多版本（会 drop），bar 单版本（不 drop）
+    # foo has multiple versions; bar has only one.
     foo = tmp_path / "cat" / "foo"
     foo.mkdir(parents=True)
     for v in ["1.0", "1.1", "1.2"]:
@@ -88,64 +88,19 @@ def test_run_drop_old_dry_run_does_not_delete(tmp_path):
     assert (root / "cat" / "foo" / "foo-1.0.ebuild").exists()
 
 
-def test_run_drop_old_apply_deletes_and_manifests(tmp_path):
+def test_run_drop_old_apply_is_disabled_without_deleting(tmp_path):
     root = _overlay(tmp_path)
-    manifest_calls = []
-
-    def fake_manifest_runner(args, **kw):
-        manifest_calls.append(args)
-        return subprocess.CompletedProcess(args, 0, "", "")
-
-    res = run_drop_old("all", keep=2, apply=True, overlay_root=root,
-                       manifest_runner=fake_manifest_runner)
-    by_pkg = {r["cat_pkg"]: r for r in res["results"]}
-    # foo had a drop -> file deleted + manifest called
-    assert not (root / "cat" / "foo" / "foo-1.0.ebuild").exists()
-    assert by_pkg["cat/foo"]["manifest_ok"] is True
-    # bar had no drop -> no manifest call for it
-    assert "manifest_ok" not in by_pkg["cat/bar"]
-    # manifest called once (for foo only)
-    assert len(manifest_calls) == 1
-
-
-def test_run_drop_old_manifest_failure_recorded(tmp_path):
-    root = _overlay(tmp_path)
-
-    def fake_manifest_runner(args, **kw):
-        return subprocess.CompletedProcess(args, 1, "", "fetch fail")
-
-    res = run_drop_old("all", keep=2, apply=True, overlay_root=root,
-                       manifest_runner=fake_manifest_runner)
-    by_pkg = {r["cat_pkg"]: r for r in res["results"]}
-    assert by_pkg["cat/foo"]["manifest_ok"] is False
-
-
-def test_run_drop_old_marks_recovery_on_manifest_fail(tmp_path):
-    # I-3: ebuild already deleted but Manifest not updated -> flag for recovery
-    root = _overlay(tmp_path)
-
-    def fake_manifest_runner(args, **kw):
-        return subprocess.CompletedProcess(args, 1, "", "fetch fail")
-
-    res = run_drop_old("all", keep=2, apply=True, overlay_root=root,
-                       manifest_runner=fake_manifest_runner)
-    by_pkg = {r["cat_pkg"]: r for r in res["results"]}
-    assert by_pkg["cat/foo"]["manifest_ok"] is False
-    assert by_pkg["cat/foo"]["needs_manual_recovery"] is True
-
-
-def test_run_drop_old_ok_false_when_manifest_fails(tmp_path):
-    # I-1: manifest failure propagates to top-level ok=False; dry-run stays ok=True
-    root = _overlay(tmp_path)
-
-    def fake_manifest_runner(args, **kw):
-        return subprocess.CompletedProcess(args, 1, "", "fetch fail")
-
-    res = run_drop_old("all", keep=2, apply=True, overlay_root=root,
-                       manifest_runner=fake_manifest_runner)
-    assert res["ok"] is False
-    dry = run_drop_old("all", keep=2, apply=False, overlay_root=root)
-    assert dry["ok"] is True
+    before = {path.relative_to(root): path.read_bytes()
+              for path in root.rglob("*") if path.is_file()}
+    try:
+        run_drop_old("all", keep=2, apply=True, overlay_root=root)
+    except ValueError as exc:
+        assert "disabled" in str(exc)
+    else:
+        raise AssertionError("expected destructive apply mode to be disabled")
+    after = {path.relative_to(root): path.read_bytes()
+             for path in root.rglob("*") if path.is_file()}
+    assert after == before
 
 
 from click.testing import CliRunner
@@ -183,18 +138,16 @@ def test_drop_old_dry_run_via_cli(tmp_path, monkeypatch):
     assert (foo / "foo-1.0.ebuild").exists()  # dry-run: not deleted
 
 
-def test_cli_apply_manifest_fail_exits_1(tmp_path, monkeypatch):
-    # I-1: apply + manifest failure must surface as non-zero exit
+def test_cli_apply_is_disabled(tmp_path, monkeypatch):
     monkeypatch.setattr("gzh.cli.find_overlay_root", lambda: tmp_path)
     foo = tmp_path / "cat" / "foo"
     foo.mkdir(parents=True)
     for v in ["1.0", "1.1", "1.2"]:
         (foo / f"foo-{v}.ebuild").write_text("EAPI=8\n")
-    monkeypatch.setattr("gzh.drop_old.run_manifest",
-                        lambda *a, **k: {"ok": False, "returncode": 1,
-                                         "stdout": "", "stderr": "fetch fail"})
     result = CliRunner().invoke(cli, ["drop-old", "--pkg", "cat/foo", "--apply"])
-    assert result.exit_code == 1
+    assert result.exit_code == 2
+    assert "disabled" in result.output
+    assert (foo / "foo-1.0.ebuild").exists()
 
 
 def test_cli_pkg_format_validation():

@@ -8,6 +8,7 @@ dist/
 
 # Testing / tooling
 .pytest_cache/
+.venv/
 .coverage
 .mypy_cache/
 

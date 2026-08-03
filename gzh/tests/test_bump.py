@@ -1,8 +1,11 @@
 import difflib
 from pathlib import Path
 
+from click.testing import CliRunner
+
+import gzh.cli as cli_mod
 from gzh.bump import (bump_scaffold, diff_ebuild, highest_ebuild,
-                      refresh_copyright_year)
+                      refresh_copyright_year, resolve_package_directory)
 
 
 def _pkgdir(tmp_path: Path) -> Path:
@@ -54,6 +57,55 @@ def test_bump_scaffold_copies_highest(tmp_path):
     assert new.exists()
     # content copied from highest (1.1.0), filename changed
     assert 'PV_OLD="1.1.0"' in new.read_text()
+
+
+def test_bump_scaffold_rejects_invalid_or_live_version(tmp_path):
+    d = _pkgdir(tmp_path)
+    for version in ("../2", "9999"):
+        try:
+            bump_scaffold(d, "foo", version)
+        except ValueError as exc:
+            assert "released Gentoo version" in str(exc)
+        else:
+            raise AssertionError(f"expected version {version!r} to be rejected")
+
+
+def test_resolve_package_directory_rejects_traversal_and_missing(tmp_path):
+    _pkgdir(tmp_path)
+    for cat_pkg in ("../outside", "dev-python/missing", "dev-python/foo/extra"):
+        try:
+            resolve_package_directory(tmp_path, cat_pkg)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"expected {cat_pkg!r} to be rejected")
+
+
+def test_resolve_package_directory_rejects_symlink_outside_overlay(tmp_path):
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    category = tmp_path / "dev-python"
+    category.mkdir()
+    (category / "foo").symlink_to(outside, target_is_directory=True)
+    try:
+        resolve_package_directory(tmp_path, "dev-python/foo")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected an escaping package symlink to be rejected")
+
+
+def test_bump_scaffold_cli_rejects_traversal_before_write(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli_mod, "find_overlay_root", lambda: tmp_path)
+    outside = tmp_path.parent / "outside"
+    outside.mkdir(exist_ok=True)
+
+    result = CliRunner().invoke(
+        cli_mod.cli, ["bump-scaffold", "../outside", "2"])
+
+    assert result.exit_code == 1
+    assert "invalid category/package" in result.output
+    assert list(outside.iterdir()) == []
 
 
 def test_diff_ebuild(tmp_path):

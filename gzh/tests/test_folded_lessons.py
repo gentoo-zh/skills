@@ -1,6 +1,4 @@
-"""Tests for the validated-lesson code changes folded into gzh:
-elog/QA-notice surfacing, DeadUrl reverify + --net/--commits, truncated-distfile size
-guard, DCO sign-off, and the triage skip/escalate distinction."""
+"""Regression tests for cross-module maintenance safeguards."""
 import subprocess
 from pathlib import Path
 
@@ -16,13 +14,21 @@ from gzh.pkgcheck import (reverify_url_findings, run_pkgcheck,
 from gzh.triage import list_skipped, skip_issue
 
 
+TRIAGE_UPDATED = "2026-08-01T12:00:00Z"
+
+
+def _skip(log, issue, cat_pkg, version, reason, *, kind="skip"):
+    return skip_issue(
+        log, issue, cat_pkg, version, reason, kind=kind,
+        issue_updated_at=TRIAGE_UPDATED, expected_event_id="none")
+
+
 def _eb(tmp_path):
     eb = tmp_path / "foo-1.0.0.ebuild"
     eb.write_text("EAPI=8\n")
     return eb
 
 
-# ---- P1-24: DCO sign-off ----
 def test_commit_adds_signoff(tmp_path):
     seen = {}
 
@@ -32,11 +38,10 @@ def test_commit_adds_signoff(tmp_path):
 
     run_commit([tmp_path / "foo-1.0.0.ebuild"], cwd=tmp_path,
                message="cat/foo: add 1", runner=fake_run)
-    assert "--signoff" in seen["args"]
+    assert "--signoff=true" in seen["args"]
     assert "--gpg-sign" not in seen["args"]  # not forced
 
 
-# ---- P2-29: QA-notice surfacing from the combined stream, deferring sonames ----
 def test_scan_qa_notices_filters_deferred():
     text = ("QA Notice: Pre-stripped files found\n"
             "QA Notice: Unresolved soname dependencies: libfoo.so.1\n"
@@ -58,7 +63,6 @@ def test_build_test_surfaces_stderr_qa(tmp_path):
     assert any("Pre-stripped" in n for n in res["qa_notices"])
 
 
-# ---- P1-22: pkgcheck --net / --commits + DeadUrl reverify ----
 def test_pkgcheck_net_flag(tmp_path):
     seen = {}
 
@@ -70,7 +74,8 @@ def test_pkgcheck_net_flag(tmp_path):
     assert "--net" in seen["args"]
 
 
-def _git_faker(seen, *, merge_base="abc123", remote_url="git@github.com:gentoo-zh/overlay.git"):
+def _git_faker(seen, *, merge_base="abc123", commit_count="1",
+               remote_url="git@github.com:gentoo-zh/overlay.git"):
     """Fake runner answering the git probes run_pkgcheck_commits makes before scanning."""
     def fake_run(args, **kw):
         if args[:2] == ["git", "remote"] and args[2] == "-v":
@@ -79,6 +84,8 @@ def _git_faker(seen, *, merge_base="abc123", remote_url="git@github.com:gentoo-z
             return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
         if args[:2] == ["git", "merge-base"]:
             return subprocess.CompletedProcess(args, 0 if merge_base else 1, stdout=merge_base, stderr="")
+        if args[:3] == ["git", "rev-list", "--count"]:
+            return subprocess.CompletedProcess(args, 0, stdout=f"{commit_count}\n", stderr="")
         seen["args"] = args
         seen["cwd"] = kw.get("cwd")
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
@@ -110,6 +117,33 @@ def test_pkgcheck_commits_refuses_an_empty_merge_base(tmp_path):
     assert "args" not in seen  # never reached pkgcheck
 
 
+def test_pkgcheck_commits_refuses_an_empty_commit_range(tmp_path):
+    seen = {}
+    try:
+        run_pkgcheck_commits(
+            tmp_path, net=True, runner=_git_faker(seen, commit_count="0"))
+    except RuntimeError as exc:
+        assert "empty range" in str(exc)
+    else:
+        raise AssertionError("expected RuntimeError instead of a zero-target gate")
+    assert "args" not in seen
+
+
+def test_pkgcheck_commits_rejects_explicit_personal_remote(tmp_path):
+    def fake_run(args, **kw):
+        if args[:3] == ["git", "remote", "get-url"]:
+            return subprocess.CompletedProcess(
+                args, 0, stdout="git@github.com:someone/overlay.git\n", stderr="")
+        raise AssertionError(f"should not run {args}")
+
+    try:
+        run_pkgcheck_commits(tmp_path, remote="origin", runner=fake_run)
+    except RuntimeError as exc:
+        assert "does not point" in str(exc)
+    else:
+        raise AssertionError("expected an explicit personal remote to be rejected")
+
+
 def test_pkgcheck_commits_needs_an_unambiguous_canonical_remote(tmp_path):
     def fake_run(args, **kw):
         if args[:3] == ["git", "remote", "-v"]:
@@ -127,6 +161,7 @@ def test_reverify_confirmed_vs_transient():
     results = [
         {"code": "DeadUrl", "msg": "SRC_URI: https://example.com/dead.tar.gz"},
         {"code": "DeadUrl", "msg": "SRC_URI: https://example.com/alive.tar.gz"},
+        {"code": "RedirectedUrl", "msg": "SRC_URI: https://example.com/moved.tar.gz"},
         {"code": "DeadUrl", "msg": "HOMEPAGE: https://example.com/home"},
     ]
 
@@ -138,8 +173,9 @@ def test_reverify_confirmed_vs_transient():
     rv = reverify_url_findings(results, runner=fake_run)
     assert [c["url"] for c in rv["confirmed"]] == ["https://example.com/dead.tar.gz"]
     assert [t["url"] for t in rv["transient"]] == ["https://example.com/alive.tar.gz"]
+    assert [r["url"] for r in rv["redirected"]] == ["https://example.com/moved.tar.gz"]
     # HOMEPAGE finding is ignored (does not block install)
-    assert rv["checked"] == 2
+    assert rv["checked"] == 3
 
 
 def test_reverify_403_429_go_to_needs_human():
@@ -154,7 +190,47 @@ def test_reverify_403_429_go_to_needs_human():
     assert rv["needs_human"][0]["url"] == "https://example.com/gated.tar.gz"
 
 
-# ---- P1-21: truncated-distfile size guard ----
+def test_reverify_transport_failure_requires_human_review():
+    results = [{"__class__": "DeadUrl",
+                "msg": "SRC_URI: https://example.com/partial.tar.gz"}]
+
+    def fake_run(args, **kw):
+        return subprocess.CompletedProcess(args, 18, stdout="200", stderr="partial")
+
+    rv = reverify_url_findings(results, runner=fake_run)
+    assert rv["transient"] == []
+    assert rv["needs_human"] == [{
+        "url": "https://example.com/partial.tar.gz",
+        "http_code": "200",
+        "finding": "DeadUrl",
+        "transport_returncode": 18,
+    }]
+
+
+def test_pkgcheck_commits_cli_fails_on_inconclusive_url(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli_mod, "find_overlay_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        cli_mod, "run_pkgcheck_commits",
+        lambda *args, **kwargs: {"ok": True, "results": [], "raw_returncode": 0})
+    monkeypatch.setattr(
+        cli_mod, "reverify_url_findings",
+        lambda results: {"confirmed": [], "redirected": [], "transient": [],
+                         "needs_human": [{"http_code": "429"}], "checked": 1})
+    result = CliRunner().invoke(cli_mod.cli, ["pkgcheck-commits"])
+    assert result.exit_code == 1
+
+
+def test_pkgcheck_commits_cli_cannot_pass_without_url_recheck(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli_mod, "find_overlay_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        cli_mod, "run_pkgcheck_commits",
+        lambda *args, **kwargs: {"ok": True, "results": [], "raw_returncode": 0})
+    result = CliRunner().invoke(
+        cli_mod.cli, ["pkgcheck-commits", "--no-reverify"])
+    assert result.exit_code == 1
+    assert '"skipped": true' in result.output
+
+
 def test_parse_manifest_dist():
     text = ("DIST foo-1.2.3.tar.gz 1048576 BLAKE2B ab SHA512 cd\n"
             "EBUILD foo-1.2.3.ebuild 100 BLAKE2B ee SHA512 ff\n")
@@ -196,11 +272,10 @@ def test_verify_sizes_skips_small_and_matching():
     assert [c["name"] for c in res["checked"]] == ["big.deb"]
 
 
-# ---- P2-30: triage skip vs escalate ----
 def test_triage_kind_roundtrip_and_filter(tmp_path):
     log = tmp_path / "skip-log.jsonl"
-    skip_issue(log, 1, "a/b", "1", "blocked")                       # default skip
-    skip_issue(log, 2, "c/d", "2", "needs .cabal", kind="escalate")
+    _skip(log, 1, "a/b", "1", "blocked")
+    _skip(log, 2, "c/d", "2", "needs .cabal", kind="escalate")
     assert [r["issue"] for r in list_skipped(log, kind="escalate")] == [2]
     assert [r["issue"] for r in list_skipped(log, kind="skip")] == [1]
 
@@ -215,10 +290,14 @@ def test_triage_missing_kind_is_skip(tmp_path):
 
 def test_cli_triage_escalate_roundtrip(tmp_path, monkeypatch):
     import json
-    monkeypatch.setattr("gzh.cli.find_overlay_root", lambda: tmp_path)
+    monkeypatch.setenv("GZH_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        cli_mod, "get_issue_updated_at", lambda repo, issue: TRIAGE_UPDATED)
     r = CliRunner().invoke(cli_mod.cli, [
         "triage", "skip", "55", "--cat-pkg", "dev-haskell/foo",
-        "--target-version", "2.0", "--reason", "hackport regen", "--kind", "escalate"])
+        "--target-version", "2.0", "--issue-updated-at", TRIAGE_UPDATED,
+        "--expected-event-id", "none", "--reason", "hackport regen",
+        "--kind", "escalate"])
     assert r.exit_code == 0
     assert json.loads(r.output)["kind"] == "escalate"
     r2 = CliRunner().invoke(cli_mod.cli, ["triage", "list", "--kind", "escalate"])

@@ -1,0 +1,272 @@
+{
+  "schema": 1,
+  "sources": {
+    "overlay-policy": {
+      "kind": "http",
+      "sha256": "2d0b8551a72727c32b170e3a8efc6abec06138575fdfa91402096504c9161f33",
+      "bytes": 24864,
+      "final_url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/AGENTS.md",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "overlay-ci-pkgcheck": {
+      "kind": "http",
+      "sha256": "321a91b68c74cb37896f508e5b5f8bdf62acfd19879682887e37a73070f5392f",
+      "bytes": 4572,
+      "final_url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/.github/workflows/pkgcheck.yml",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "overlay-ci-emerge": {
+      "kind": "http",
+      "sha256": "4a20b54d5fbf770c108e8cff3d8b6ec39c887c0a8e46ccfb1c1383fc34537ccc",
+      "bytes": 8110,
+      "final_url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/.github/workflows/emerge-on-pr.yml",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "overlay-pr-template": {
+      "kind": "http",
+      "sha256": "f5a19117f36845b8b97d9ce75c86e94a5e024a0db0ba42f66cfc98eb26c653ec",
+      "bytes": 397,
+      "final_url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/.github/pull_request_template.md",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "pms-latest": {
+      "kind": "http",
+      "sha256": "0aa364715238d4f6b4a844c47805199e217f264bae874d36fa146634e7ed0f78",
+      "bytes": 777856,
+      "final_url": "https://projects.gentoo.org/pms/latest/pms.html",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "devmanual": {
+      "kind": "http",
+      "sha256": "369b436488a83ca28c8b02ccf2f3232aeedce0baf3b27b513f559cf3f8238e01",
+      "bytes": 24971,
+      "final_url": "https://devmanual.gentoo.org/",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "devmanual-dependencies": {
+      "kind": "http",
+      "sha256": "11783eeadb630a0760d4aef04913aad610bb8236d8da46517c81654d9eb973f4",
+      "bytes": 65355,
+      "final_url": "https://devmanual.gentoo.org/general-concepts/dependencies/",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "devmanual-revisions": {
+      "kind": "http",
+      "sha256": "69734c6867c88bff014d1415b3ec9cb8b0da21a733b09a7fd1152ed902475a37",
+      "bytes": 12818,
+      "final_url": "https://devmanual.gentoo.org/general-concepts/ebuild-revisions/",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "devmanual-versions": {
+      "kind": "http",
+      "sha256": "a70de88dbd6b3e33ead9c66fe6bddf31ed0420806ce4f61fb9a457febd7a8337",
+      "bytes": 17393,
+      "final_url": "https://devmanual.gentoo.org/ebuild-writing/file-format/index.html",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "devmanual-eclasses": {
+      "kind": "http",
+      "sha256": "a04593e02122b553deeaf9c30c5e2a9fc49ef3711ac7c1988923e19991479472",
+      "bytes": 27687,
+      "final_url": "https://devmanual.gentoo.org/eclass-reference/index.html",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "devmanual-tests": {
+      "kind": "http",
+      "sha256": "1113e95724eac44465a30f481075c09e386007eedb4bd38fc19d94aa49a11eac",
+      "bytes": 18929,
+      "final_url": "https://devmanual.gentoo.org/ebuild-writing/functions/src_test/index.html",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "devmanual-manifest": {
+      "kind": "http",
+      "sha256": "11282e8bee3b0e71641f1ea839a4759d22eae5fef1a30da8ecabb2b54c6e6fcd",
+      "bytes": 10878,
+      "final_url": "https://devmanual.gentoo.org/general-concepts/manifest/",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "devmanual-patches": {
+      "kind": "http",
+      "sha256": "cef28e8fa67d964f38a1facbe81bd6340d3d23f58be6ad182ac3414b49850265",
+      "bytes": 27666,
+      "final_url": "https://devmanual.gentoo.org/ebuild-writing/misc-files/patches/",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "devmanual-metadata": {
+      "kind": "http",
+      "sha256": "7beb669fe6081a22e437a5383fd40a17cab066e77270c453ed4338603d2c736b",
+      "bytes": 66268,
+      "final_url": "https://devmanual.gentoo.org/ebuild-writing/misc-files/metadata/",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "devmanual-package-moves": {
+      "kind": "http",
+      "sha256": "4698ec40b5c5139f50bad42ed77fe6799c422f83733e1179e932d12f03c4172a",
+      "bytes": 14143,
+      "final_url": "https://devmanual.gentoo.org/ebuild-maintenance/package-moves/",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "devmanual-common-problems": {
+      "kind": "http",
+      "sha256": "084df6d142019b1f761c004e62b3f4cc876e15ba62256beb6b9c1b7aa423f4d4",
+      "bytes": 15725,
+      "final_url": "https://devmanual.gentoo.org/appendices/common-problems/",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "glep-66": {
+      "kind": "http",
+      "sha256": "58452be49b7bf5a510af2f3d6a9f95062c3cce37cabacff248209af10a92773d",
+      "bytes": 20207,
+      "final_url": "https://gitweb.gentoo.org/data/glep.git/plain/glep-0066.rst",
+      "checked_at": "2026-08-03T16:43:33Z"
+    },
+    "glep-76": {
+      "kind": "http",
+      "sha256": "cc5f6be12a668ceb91dcb3191bc2c46c2bb047090c8c7f05b6f129be0411af85",
+      "bytes": 16532,
+      "final_url": "https://gitweb.gentoo.org/data/glep.git/plain/glep-0076.rst",
+      "checked_at": "2026-08-03T16:43:33Z"
+    },
+    "pkgcheck": {
+      "kind": "http",
+      "sha256": "f4718ef1cee8e19b29e0e45869e84e969fd9454dc23b6fe8df48cf71f5878d0c",
+      "bytes": 340163,
+      "final_url": "https://pkgcore.github.io/pkgcheck/man/pkgcheck.html",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "pkgdev": {
+      "kind": "http",
+      "sha256": "bd818e23870acf01730921734548605e7ca87222de39d2eb9405cc5e6e980ec0",
+      "bytes": 69523,
+      "final_url": "https://pkgcore.github.io/pkgdev/man/pkgdev.html",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "gentoo-tree": {
+      "kind": "git",
+      "revision": "336e549b0098b6711fafd33da69723479fad8136",
+      "checked_at": "2026-08-03T17:26:54Z"
+    },
+    "guru": {
+      "kind": "git",
+      "revision": "eff578ebcfcf8bc6327ed78c6222c07ae41e8a7b",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "guru-contributors": {
+      "kind": "mediawiki",
+      "revision": "1444325",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "gentoo-tree-lessons": {
+      "kind": "git",
+      "revision": "b878472b793e5e95b42718419de2a66b516d9a79",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "chinese-skill": {
+      "kind": "git",
+      "revision": "4693ee2a7ec9d1c2a713d8f2e6b2d9bbba2aae7e",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "agent-skills-spec": {
+      "kind": "http",
+      "sha256": "da5ba3dab834bb009c139d5ece5ab5278e73671376644c5df1eb685c2b5f85bf",
+      "bytes": 401702,
+      "final_url": "https://agentskills.io/specification",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "openai-skills": {
+      "kind": "git",
+      "revision": "49f948faa9258a0c61caceaf225e179651397431",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "codex-build-skills": {
+      "kind": "http",
+      "sha256": "190e29385af1d57d22fad85fe41a1676f6fe60c562b5234efc37d929c2d79009",
+      "bytes": 11074,
+      "final_url": "https://learn.chatgpt.com/docs/build-skills.md",
+      "checked_at": "2026-08-03T16:55:52Z"
+    },
+    "anthropic-skills": {
+      "kind": "git",
+      "revision": "b29e7cf65e5cb78a5ac33d582270551bc74a14eb",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "claude-skills": {
+      "kind": "http",
+      "sha256": "aa66a89a12b406a089b3afd6212a2a48ebed80f9a5b2476c0591178fa066b6e4",
+      "bytes": 943476,
+      "final_url": "https://code.claude.com/docs/en/skills",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "opencode-skills": {
+      "kind": "http",
+      "sha256": "7856d744ef01c0604f255b6f449b737960f6d04a36ea27005fbc89b8f19cc3cd",
+      "bytes": 71324,
+      "final_url": "https://opencode.ai/docs/skills",
+      "checked_at": "2026-08-03T15:48:54Z"
+    },
+    "ebuild-manual": {
+      "kind": "http",
+      "sha256": "3c15abaa9903b344e8faf0de8142afd3f4de5fb0ddf7f90bd409163d004e78ff",
+      "bytes": 75228,
+      "final_url": "https://devmanual.gentoo.org/eclass-reference/ebuild/index.html",
+      "checked_at": "2026-08-03T15:51:50Z"
+    },
+    "gentoo-qa-policy": {
+      "kind": "http",
+      "sha256": "21c1ec0e6a458d0a4cc991e65947e7af16219a4f260f6e0ab2d1bda44c7e963b",
+      "bytes": 24993,
+      "final_url": "https://projects.gentoo.org/qa/policy-guide/",
+      "checked_at": "2026-08-03T15:51:50Z"
+    },
+    "portage-emerge": {
+      "kind": "http",
+      "sha256": "50f7277be53409233cdd573e32619de583f664ec8fa8c592e1ae242e01b2104c",
+      "bytes": 77501,
+      "final_url": "https://dev.gentoo.org/~zmedico/portage/doc/man/emerge.1.html",
+      "checked_at": "2026-08-03T15:51:50Z"
+    },
+    "nvchecker-usage": {
+      "kind": "http",
+      "sha256": "17298bcc651da97a4f5033ff3e07a4181648f169e1272c4f2d65ce6b65ef1775",
+      "bytes": 118154,
+      "final_url": "https://nvchecker.readthedocs.io/en/latest/usage.html",
+      "checked_at": "2026-08-03T15:51:50Z"
+    },
+    "github-graphql-pagination": {
+      "kind": "http",
+      "sha256": "a1e48bc53dcea31e1b25db4a21836e8be19e30ad4651b6b955762818aba38d81",
+      "bytes": 4401,
+      "final_url": "https://docs.github.com/en/graphql/guides/using-pagination-in-the-graphql-api.md",
+      "checked_at": "2026-08-03T17:28:25Z"
+    },
+    "python-venv": {
+      "kind": "http",
+      "sha256": "1cafb7fbd131e28eafedb59026c525f8dae5417c931a72ca14627a89acdad2e2",
+      "bytes": 103685,
+      "final_url": "https://docs.python.org/3/library/venv.html",
+      "checked_at": "2026-08-03T15:51:50Z"
+    },
+    "overlay-readme": {
+      "kind": "http",
+      "sha256": "46ec37f601d8ddbc984c42c0e8129c9db3555613ed6c624176d4a0d8d6ff2ee2",
+      "bytes": 4893,
+      "final_url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/README.en.md",
+      "checked_at": "2026-08-03T16:43:33Z"
+    },
+    "overlay-license-groups": {
+      "kind": "http",
+      "sha256": "9eb8c6c75ebd520314daa73ce10beb491c8aa051f694453db3a0e923e0892045",
+      "bytes": 1057,
+      "final_url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/profiles/license_groups",
+      "checked_at": "2026-08-03T16:43:33Z"
+    },
+    "devmanual-licenses": {
+      "kind": "http",
+      "sha256": "cb6acb82ffeb8fa0e29d553404f921f84a9be471645544f057645d9f41cc179d",
+      "bytes": 18894,
+      "final_url": "https://devmanual.gentoo.org/general-concepts/licenses/",
+      "checked_at": "2026-08-03T16:43:33Z"
+    }
+  },
+  "updated_at": "2026-08-03T17:28:25Z"
+}

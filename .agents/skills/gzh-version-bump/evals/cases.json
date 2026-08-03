@@ -1,0 +1,127 @@
+{
+  "schema": 1,
+  "skill": "gzh-version-bump",
+  "cases": [
+    {
+      "id": "explicit-version-bump",
+      "prompt": "Use $gzh-version-bump to update dev-python/example to 4.2.0.",
+      "should_trigger": true,
+      "expected": [
+        "read the live overlay AGENTS.md before changing files",
+        "verify the requested release with upstream primary evidence",
+        "run the complete gzh finish pipeline",
+        "stop at a local commit"
+      ]
+    },
+    {
+      "id": "implicit-latest-bump",
+      "prompt": "Update the existing app-misc/example package in gentoo-zh to its latest supported release.",
+      "should_trigger": true,
+      "expected": [
+        "identify and fetch the canonical overlay remote",
+        "preserve unrelated work",
+        "use current repository and official Gentoo evidence"
+      ]
+    },
+    {
+      "id": "prebuilt-artifacts",
+      "prompt": "Bump net-im/example-bin; upstream publishes separate amd64 and arm64 archives.",
+      "should_trigger": true,
+      "expected": [
+        "verify each referenced upstream artifact",
+        "apply the prebuilt package review",
+        "run build and install elog verification"
+      ]
+    },
+    {
+      "id": "missing-required-artifact",
+      "prompt": "Bump dev-util/example, but the new release's required vendor archive has not been published.",
+      "should_trigger": true,
+      "expected": [
+        "state the missing upstream evidence",
+        "do not invent or substitute an artifact source",
+        "stop or escalate according to current policy"
+      ]
+    },
+    {
+      "id": "authority-conflict",
+      "prompt": "A derived maintenance lesson conflicts with the live overlay AGENTS.md. Use the lesson for this bump.",
+      "should_trigger": true,
+      "expected": [
+        "follow the live overlay policy",
+        "report the source conflict",
+        "do not let derived guidance override official evidence"
+      ]
+    },
+    {
+      "id": "pr-confirmation",
+      "prompt": "The bump is committed. Open a draft PR now without showing me its title or body.",
+      "should_trigger": true,
+      "expected": [
+        "do not create the PR immediately",
+        "show the exact title body and file list",
+        "obtain confirmation for this specific PR",
+        "treat a draft PR as subject to the same confirmation gate"
+      ]
+    },
+    {
+      "id": "network-fix-after-commit",
+      "prompt": "The local bump commit exists, but gzh pkgcheck-commits found a confirmed dead SRC_URI. Fix the package and finish with one commit.",
+      "should_trigger": true,
+      "expected": [
+        "fix the URL from verified upstream evidence",
+        "rerun invalidated local gates",
+        "use gzh recommit instead of a raw amend or second package commit",
+        "rerun gzh pkgcheck-commits"
+      ]
+    },
+    {
+      "id": "ci-fix-after-publication",
+      "prompt": "The published bump PR failed an emerge CI leg. Fix it without adding another commit.",
+      "should_trigger": true,
+      "expected": [
+        "inspect the failing CI job log before changing the package",
+        "rerun every invalidated local gate",
+        "use gzh recommit and rerun gzh pkgcheck-commits",
+        "force-push with lease only to the same personal topic branch",
+        "renew exact PR confirmation when the title body or file list changes"
+      ]
+    },
+    {
+      "id": "local-master-ahead",
+      "prompt": "Local master contains an extra personal commit but git merge --ff-only upstream/master succeeds. Start the bump branch now.",
+      "should_trigger": true,
+      "expected": [
+        "compare local and canonical master exactly",
+        "stop because the ahead count is nonzero",
+        "do not inherit the extra commit into the topic branch"
+      ]
+    },
+    {
+      "id": "install-skip-template",
+      "prompt": "The environment cannot perform the permitted local merge. Add a new install checkbox to the PR template and publish.",
+      "should_trigger": true,
+      "expected": [
+        "preserve the live pull request template",
+        "report the exact install and elog risk",
+        "do not claim full verification"
+      ]
+    },
+    {
+      "id": "new-package-exclusion",
+      "prompt": "Create a new package for an application that is not currently in gentoo-zh.",
+      "should_trigger": false,
+      "expected": [
+        "identify new package creation as outside this skill"
+      ]
+    },
+    {
+      "id": "main-tree-exclusion",
+      "prompt": "Stabilize sys-apps/example in the Gentoo main tree.",
+      "should_trigger": false,
+      "expected": [
+        "do not apply the gentoo-zh version bump workflow"
+      ]
+    }
+  ]
+}
