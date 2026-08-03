@@ -8,6 +8,7 @@ import re
 import stat
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 
@@ -19,7 +20,6 @@ REVISION_RE = re.compile(r"[0-9a-f]{40}")
 MEDIAWIKI_REVISION_RE = re.compile(r"[1-9][0-9]*")
 UTC_TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 LOCAL_LINK_RE = re.compile(r"\[[^]]+\]\(([^)]+)\)")
-CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 CHINESE_PR_EXAMPLE_RE = re.compile(
     r"Chinese PR body example:\s*\n```(?:text|markdown)\n.*?```", re.DOTALL)
 
@@ -99,7 +99,7 @@ def validate_skill(skill: Path, errors: list[str]) -> None:
 
 
 def validate_sources(errors: list[str]) -> None:
-    references = SKILLS_ROOT / "gzh-version-bump" / "references"
+    references = SKILLS_ROOT / "gentoo-overlay-development" / "references"
     registry = load_json(references / "sources.json", errors)
     lock = load_json(references / "source-lock.json", errors)
     sources = registry.get("sources", [])
@@ -107,16 +107,32 @@ def validate_sources(errors: list[str]) -> None:
         errors.append("source registry is missing or too small")
         return
     authorities = set(registry.get("authorities", []))
+    scopes = set(registry.get("scopes", []))
+    authority_scopes = registry.get("authority_scopes")
+    if (not isinstance(authority_scopes, dict)
+            or set(authority_scopes) != authorities
+            or any(not isinstance(values, list) or not values
+                   or any(value not in scopes for value in values)
+                   for values in authority_scopes.values())):
+        errors.append("source authority scope allowlist is invalid")
+        authority_scopes = {}
     ids = [source.get("id") for source in sources]
     if len(ids) != len(set(ids)):
         errors.append("source ids must be unique")
     for source in sources:
-        required = {"id", "title", "authority", "kind", "url", "topics", "use"}
+        required = {
+            "id", "title", "authority", "scope", "kind", "url", "topics", "use"}
         if not required.issubset(source):
             errors.append(f"incomplete source: {source.get('id')}")
             continue
         if source["authority"] not in authorities:
             errors.append(f"unknown source authority: {source['id']}")
+        if source["scope"] not in scopes:
+            errors.append(f"unknown source scope: {source['id']}")
+        elif (source["authority"] in authority_scopes
+              and source["scope"] not in authority_scopes[source["authority"]]):
+            errors.append(
+                f"source authority is not allowed in scope: {source['id']}")
         if source["kind"] not in {"git", "http", "mediawiki"}:
             errors.append(f"invalid source kind: {source['id']}")
         if source["kind"] == "mediawiki" and not source.get("api_url", "").startswith(
@@ -154,6 +170,15 @@ def validate_links(errors: list[str]) -> None:
                     f"broken local link in {path.relative_to(ROOT)}: {raw_target}")
 
 
+def contains_non_latin_script(text: str) -> bool:
+    for character in text:
+        if not unicodedata.category(character).startswith("L"):
+            continue
+        if "LATIN" not in unicodedata.name(character, ""):
+            return True
+    return False
+
+
 def validate_english_skill_content(errors: list[str]) -> None:
     text_suffixes = {".md", ".json", ".yaml", ".yml", ".py"}
     for path in SKILLS_ROOT.rglob("*"):
@@ -162,7 +187,7 @@ def validate_english_skill_content(errors: list[str]) -> None:
         text = path.read_text(encoding="utf-8")
         if path.suffix == ".md":
             text = CHINESE_PR_EXAMPLE_RE.sub("", text)
-        if CJK_RE.search(text):
+        if contains_non_latin_script(text):
             errors.append(f"skill content must be English: {path.relative_to(ROOT)}")
 
 
@@ -171,13 +196,13 @@ def validate_english_code(errors: list[str]) -> None:
         for path in directory.rglob("*"):
             if not path.is_file() or path.suffix not in {".py", ".sh", ".yaml", ".yml"}:
                 continue
-            if CJK_RE.search(path.read_text(encoding="utf-8")):
+            if contains_non_latin_script(path.read_text(encoding="utf-8")):
                 errors.append(f"code and comments must be English: {path.relative_to(ROOT)}")
 
 
 def validate_executables(errors: list[str]) -> None:
     paths = [ROOT / "install.sh", ROOT / "update.sh"]
-    paths.extend((SKILLS_ROOT / "gzh-version-bump" / "scripts").glob("*.py"))
+    paths.extend(SKILLS_ROOT.glob("*/scripts/*.py"))
     paths.extend([ROOT / "scripts" / "install.py", ROOT / "scripts" / "update.py"])
     for path in paths:
         if not path.is_file() or not path.stat().st_mode & stat.S_IXUSR:
@@ -213,7 +238,7 @@ def main() -> int:
         return 1
     print(
         f"validated {len(skills)} skills, "
-        f"{len(load_json(SKILLS_ROOT / 'gzh-version-bump/references/sources.json', [] )['sources'])} sources")
+        f"{len(load_json(SKILLS_ROOT / 'gentoo-overlay-development/references/sources.json', [])['sources'])} sources")
     return 0
 
 

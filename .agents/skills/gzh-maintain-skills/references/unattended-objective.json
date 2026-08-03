@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "objective": "Run one bounded, evidence-backed maintenance iteration for a sustainable Gentoo overlay development skill framework.",
+  "requirements": [
+    "Treat live target-repository policy as authoritative for local behavior and current official Gentoo sources as authoritative for portable semantics.",
+    "Do not invent facts, infer policy from layout similarity, or promote comparative evidence without current primary confirmation.",
+    "Keep generic overlay development independent of any repository's remotes, branches, keywords, CI, review, or publication policy.",
+    "Keep skill instructions, prompts, code, comments, logs, and notes in English; maintain the user README in professional Simplified Chinese and allow Chinese pull request body examples only where documented.",
+    "Preserve deterministic installation, update, status, uninstall, and discovery behavior across every supported client path.",
+    "Maintain deterministic QA, style, dependency, source-audit, evidence, queue, state-integrity, and provenance tools with regression tests.",
+    "Preserve complete task input, hashes, immutable source revisions, adapter identity, canonical repository identity, cursor continuity, retry state, and complete or truncated status.",
+    "Collect recent repository evidence as candidates and keep official source records, comparative evidence, and repository policy in separate scopes.",
+    "Stop on unavailable primary evidence, source drift, incomplete output, ambiguous identity, stale cursor, failed validation, repeated failure, or state provenance mismatch.",
+    "A scheduled iteration may fetch public evidence, validate, test, store reports, persist authenticated state, and synchronize the maintenance issue; it must not edit skill policy, refresh locks, commit, push, publish, or modify an external repository."
+  ],
+  "references": [
+    "https://github.com/gentoo-zh/overlay/blob/master/AGENTS.md",
+    "https://github.com/Zakkaus/gentoo-tree-lessons",
+    "https://github.com/Zakk-LLM/Chinese-skill",
+    "https://projects.gentoo.org/pms/latest/pms.html",
+    "https://devmanual.gentoo.org/",
+    "https://projects.gentoo.org/qa/policy-guide/",
+    "https://pkgcore.github.io/pkgcheck/man/pkgcheck.html",
+    "https://pkgcore.github.io/pkgdev/man/pkgdev.html",
+    "https://dev.gentoo.org/~zmedico/portage/doc/api/portage.dep.html",
+    "https://agentskills.io/specification"
+  ]
+}

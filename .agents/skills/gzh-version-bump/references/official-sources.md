@@ -62,8 +62,8 @@ Secondary sources include the
 3. Query the evidence registry for the narrowest relevant official source:
 
    ```bash
-   python3 <skill-root>/scripts/source_manager.py list --topic dependency
-   python3 <skill-root>/scripts/source_manager.py show overlay-policy
+   python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py list --scope portable-core --topic dependency
+   python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py show overlay-policy
    ```
 
 4. Read every ebuild for the target package, `metadata.xml`, referenced files, relevant
@@ -84,11 +84,12 @@ diff, or one similar package is never sufficient proof of a general rule.
 Audit registered sources without rewriting policy:
 
 ```bash
-python3 <skill-root>/scripts/source_manager.py audit
-python3 <skill-root>/scripts/source_manager.py audit --fail-on-drift
+python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py audit --scope portable-core
+python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py audit --scope adapter:gentoo-zh --fail-on-drift
 ```
 
-`source-lock.json` stores observed fingerprints and a per-source UTC check timestamp, not
+The shared `gentoo-overlay-development/references/source-lock.json` stores observed
+fingerprints and a per-source UTC check timestamp, not
 a trusted offline copy of the source. If a required current source cannot be read, report
 the unavailable check and stop whenever the missing evidence affects licensing,
 redistribution, security, artifacts, masks, eclass compatibility, CI behavior, or pull

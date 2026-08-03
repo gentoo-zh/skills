@@ -27,8 +27,8 @@ Run a focused source audit from the skill directory when a full installation upd
 not needed:
 
 ```bash
-python3 <skill-root>/scripts/source_manager.py audit
-python3 <skill-root>/scripts/source_manager.py audit --topic eclass --fail-on-drift
+python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py audit --all-scopes
+python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py audit --scope portable-core --topic eclass --fail-on-drift
 ```
 
 Do not use `refresh-lock` as an update command. It writes reviewed fingerprints and must
@@ -50,7 +50,7 @@ run only after the review process below is complete.
 8. Review the resulting diff before recording new fingerprints:
 
    ```bash
-   python3 <skill-root>/scripts/source_manager.py refresh-lock --id <source-id>
+   python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py refresh-lock --id <source-id>
    ```
 
 Never let a scheduled job rewrite skill instructions, update the source lock, reset a

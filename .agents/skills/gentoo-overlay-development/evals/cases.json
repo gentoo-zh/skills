@@ -1,0 +1,195 @@
+{
+  "schema": 1,
+  "skill": "gentoo-overlay-development",
+  "cases": [
+    {
+      "id": "existing-version-bump",
+      "prompt": "Update an existing package in this independently maintained Gentoo overlay to a verified upstream release.",
+      "should_trigger": true,
+      "expected": [
+        "read the complete live repository policy",
+        "resolve the repository capability contract before writes",
+        "verify release and artifact facts from upstream primary evidence",
+        "run every repository-required QA and install gate"
+      ]
+    },
+    {
+      "id": "dependency-correction",
+      "prompt": "Correct the runtime and build dependencies of this existing ebuild after an upstream build-system change.",
+      "should_trigger": true,
+      "expected": [
+        "classify direct dependencies under the active EAPI",
+        "verify provider atoms and slot relationships",
+        "exercise affected USE states",
+        "decide a revision from current evidence"
+      ]
+    },
+    {
+      "id": "prebuilt-update",
+      "prompt": "Update an existing prebuilt package that publishes different artifacts for two architectures.",
+      "should_trigger": true,
+      "expected": [
+        "verify each exact upstream artifact",
+        "apply the live keyword policy",
+        "inspect every installed binary object",
+        "scope QA exceptions to reviewed paths"
+      ]
+    },
+    {
+      "id": "license-change",
+      "prompt": "The next release of an existing package changed its product terms and bundled components. Update the ebuild safely.",
+      "should_trigger": true,
+      "expected": [
+        "read the exact release license and notices",
+        "evaluate mirror bindist and fetch restrictions independently",
+        "stop on unclear redistribution permission",
+        "verify required installed notices"
+      ]
+    },
+    {
+      "id": "patch-refresh",
+      "prompt": "Refresh a local patch for the next release of an existing overlay package and update its Manifest.",
+      "should_trigger": true,
+      "expected": [
+        "verify the patch against exact target source",
+        "record upstream provenance when available",
+        "keep every referenced file in the atomic change",
+        "regenerate and inspect the Manifest"
+      ]
+    },
+    {
+      "id": "use-state-change",
+      "prompt": "Fix an existing ebuild whose optional feature disables its build flag but still installs and depends on the feature.",
+      "should_trigger": true,
+      "expected": [
+        "make the USE condition control options dependencies tests and installed files",
+        "test both affected states",
+        "disable automagic behavior",
+        "inspect the installed images"
+      ]
+    },
+    {
+      "id": "unknown-repository",
+      "prompt": "Modify this overlay now even though it has no discoverable live policy, canonical identity, or verification commands.",
+      "should_trigger": true,
+      "expected": [
+        "classify required capabilities as unknown",
+        "perform read-only discovery only",
+        "stop before writing",
+        "report the missing capability evidence"
+      ]
+    },
+    {
+      "id": "publish-without-procedure",
+      "prompt": "The local ebuild change is verified. Push it to whichever remote looks conventional even though publication rules are absent.",
+      "should_trigger": true,
+      "expected": [
+        "treat publication as a separate capability",
+        "do not infer a remote or branch",
+        "finish with local changes only",
+        "report publication as unsupported"
+      ]
+    },
+    {
+      "id": "elog-required",
+      "prompt": "The repository requires a clean install and saved elog review, but only compilation has completed.",
+      "should_trigger": true,
+      "expected": [
+        "do not treat compilation as install verification",
+        "run the required clean install",
+        "inspect saved qa warn and error elog files",
+        "stop later actions if the gate cannot run"
+      ]
+    },
+    {
+      "id": "new-package",
+      "prompt": "Create the first ebuild for a project that is not present in this overlay.",
+      "should_trigger": true,
+      "expected": [
+        "verify the project is not already present under another identity",
+        "establish exact upstream artifact dependency and license evidence",
+        "add ebuild metadata Manifest and referenced files atomically",
+        "apply the live repository's new-package and keyword gates"
+      ]
+    },
+    {
+      "id": "keyword-change",
+      "prompt": "Stabilize the current package on three architectures.",
+      "should_trigger": true,
+      "expected": [
+        "resolve whether the target overlay supports stable keywords",
+        "require the live architecture evidence for each keyword",
+        "check reverse dependencies providers and retained versions",
+        "stop when architecture verification is missing"
+      ]
+    },
+    {
+      "id": "package-move",
+      "prompt": "Move a package to a new category and add the repository update record.",
+      "should_trigger": true,
+      "expected": [
+        "verify CATEGORY PN and path-dependent behavior before moving",
+        "use the live repository's update record procedure",
+        "update every dependency profile metadata and automation reference",
+        "verify old-to-new package-manager behavior"
+      ]
+    },
+    {
+      "id": "repository-eclass",
+      "prompt": "Design and publish a new repository-wide eclass used by every package.",
+      "should_trigger": true,
+      "expected": [
+        "require explicit live ownership approval and publication procedures",
+        "define the supported EAPI and public interface",
+        "inspect and verify every consumer when compatibility cannot be bounded",
+        "stop before publication if any capability remains unknown"
+      ]
+    },
+    {
+      "id": "package-removal",
+      "prompt": "Remove an obsolete package and all repository-owned references from this overlay.",
+      "should_trigger": true,
+      "expected": [
+        "resolve the target repository's removal and timing procedure",
+        "check reverse dependencies providers profiles and metadata references",
+        "preserve required blockers and remove obsolete owned state",
+        "verify dependency resolution after the removal"
+      ]
+    },
+    {
+      "id": "profile-change",
+      "prompt": "Change a repository profile mask and USE defaults for several packages.",
+      "should_trigger": true,
+      "expected": [
+        "resolve the profile EAPI and inheritance graph",
+        "identify every affected profile package architecture and USE state",
+        "test package resolution before and after the change",
+        "require live ownership validation rollout and rollback procedures"
+      ]
+    },
+    {
+      "id": "unrelated-packaging-exclusion",
+      "prompt": "Build a package for a non-Gentoo Linux distribution.",
+      "should_trigger": false,
+      "expected": [
+        "do not apply Gentoo overlay semantics"
+      ]
+    },
+    {
+      "id": "official-gentoo-repository-exclusion",
+      "prompt": "Update a package directly in the official Gentoo repository.",
+      "should_trigger": false,
+      "expected": [
+        "do not apply an independently maintained overlay workflow"
+      ]
+    },
+    {
+      "id": "repository-specific-skill-exclusion",
+      "prompt": "Update an existing package in this overlay. Its live repository instructions already route package updates through a reviewed repository-local skill.",
+      "should_trigger": false,
+      "expected": [
+        "prefer the reviewed repository-specific workflow"
+      ]
+    }
+  ]
+}

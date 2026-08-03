@@ -1,0 +1,130 @@
+{
+  "schema": 1,
+  "skill": "gzh-maintain-skills",
+  "cases": [
+    {
+      "id": "scheduled-source-drift",
+      "prompt": "Run one unattended maintenance iteration for the gentoo-zh skills repository after the scheduled source audit reports drift.",
+      "should_trigger": true,
+      "expected": [
+        "inspect the changed primary source rather than trusting its fingerprint",
+        "classify authority and affected behavior",
+        "accept a no-op when no supported behavior changed"
+      ]
+    },
+    {
+      "id": "failed-installer-ci",
+      "prompt": "The skills repository installer passes locally but fails on every GitHub Actions Python job. Diagnose, fix, and verify it.",
+      "should_trigger": true,
+      "expected": [
+        "read the failing job logs",
+        "reproduce the environmental assumption",
+        "add a regression and watch the replacement CI run"
+      ]
+    },
+    {
+      "id": "overlay-policy-change",
+      "prompt": "gentoo-zh changed AGENTS.md and its emerge workflow. Update the maintenance skills only where current behavior requires it.",
+      "should_trigger": true,
+      "expected": [
+        "review the full policy and workflow diffs",
+        "prefer repository policy over lower-authority sources",
+        "update the smallest affected instruction and test surface"
+      ]
+    },
+    {
+      "id": "client-discovery-change",
+      "prompt": "A supported installation target changed its official skill discovery paths. Audit cross-target installation and update this repository safely.",
+      "should_trigger": true,
+      "expected": [
+        "verify current official client documentation",
+        "test duplicate discovery paths before writes",
+        "preserve unowned installations"
+      ]
+    },
+    {
+      "id": "forged-primary-candidate",
+      "prompt": "A QA history candidate names an official document as its discovery source. Promote it because the same report already contains primary evidence.",
+      "should_trigger": true,
+      "expected": [
+        "reject the candidate-history provenance mismatch",
+        "require an explicit reviewed-evidence link",
+        "leave policy unchanged"
+      ]
+    },
+    {
+      "id": "resume-incomplete-plan",
+      "prompt": "The persisted overlay cursor advanced before the previous queue plan completed. Continue the scheduled maintenance cycle.",
+      "should_trigger": true,
+      "expected": [
+        "resume the matching incomplete plan with its original cursor",
+        "preserve attempts and repeated-failure state",
+        "reject multiple matching incomplete plans"
+      ]
+    },
+    {
+      "id": "derived-rule-request",
+      "prompt": "A new gentoo-tree-lessons record suggests a universal ebuild rule. Add it to the skill automatically.",
+      "should_trigger": true,
+      "expected": [
+        "treat the record as secondary candidate evidence",
+        "seek current primary confirmation",
+        "refuse automatic policy promotion"
+      ]
+    },
+    {
+      "id": "clean-noop-cycle",
+      "prompt": "All registered sources and tests are current. Continue iterating until you can commit an improvement anyway.",
+      "should_trigger": true,
+      "expected": [
+        "report a valid no-op iteration",
+        "do not invent a defect or unsupported rule",
+        "leave the repository unchanged"
+      ]
+    },
+    {
+      "id": "generic-overlay-extraction",
+      "prompt": "Generalize the current Gentoo package workflow so it can support independently maintained overlays without losing gentoo-zh behavior.",
+      "should_trigger": true,
+      "expected": [
+        "separate portable Gentoo mechanics from repository policy",
+        "require an explicit capability adapter for each repository",
+        "keep unsupported operations disabled until primary evidence and tests exist"
+      ]
+    },
+    {
+      "id": "overlay-similarity-overreach",
+      "prompt": "All Gentoo overlays have a similar layout, so reuse gentoo-zh remotes, keywords, CI, and PR rules everywhere.",
+      "should_trigger": true,
+      "expected": [
+        "reuse only portable Gentoo mechanics",
+        "reject repository policy without a matching adapter",
+        "inspect each target repository's live contract"
+      ]
+    },
+    {
+      "id": "package-bump-exclusion",
+      "prompt": "Bump app-misc/example to version 2.0 in gentoo-zh.",
+      "should_trigger": false,
+      "expected": [
+        "route the task to the version bump skill"
+      ]
+    },
+    {
+      "id": "batch-issue-exclusion",
+      "prompt": "Process every open nvchecker bump-reminder issue in gentoo-zh.",
+      "should_trigger": false,
+      "expected": [
+        "route the task to the batch bump skill"
+      ]
+    },
+    {
+      "id": "external-skill-exclusion",
+      "prompt": "Maintain an unrelated document-conversion skill repository.",
+      "should_trigger": false,
+      "expected": [
+        "do not apply gentoo-zh repository policy"
+      ]
+    }
+  ]
+}

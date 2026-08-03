@@ -16,10 +16,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILLS_ROOT = ROOT / ".agents" / "skills"
-SKILL_NAMES = ("gzh-version-bump", "gzh-bump-from-issues")
+SKILL_NAMES = tuple(sorted(
+    path.name for path in SKILLS_ROOT.iterdir()
+    if path.is_dir() and (path / "SKILL.md").is_file()))
 INSTALLER_ID = "gentoo-zh/skills"
 SKILL_MARKER = ".gzh-skill-install.json"
 GZH_MARKER = ".gzh-install.json"
+INSTALLATION_STATE = "skill-installations.json"
+CLIENT_NAMES = {"claude", "codex", "opencode"}
 IGNORED_NAMES = {".git", ".hg", ".svn", "__pycache__", SKILL_MARKER}
 
 
@@ -105,6 +109,98 @@ def gzh_paths() -> tuple[Path, Path]:
     return install_root, bin_dir / "gzh"
 
 
+def absolute_path(path: Path) -> Path:
+    return Path(os.path.abspath(path.expanduser()))
+
+
+def installation_state_path() -> Path:
+    home = Path.home()
+    data_home = expand_env_path("XDG_DATA_HOME", home / ".local" / "share")
+    return data_home / "gentoo-zh-skills" / INSTALLATION_STATE
+
+
+def valid_skill_name(name: object) -> bool:
+    return (isinstance(name, str) and bool(name)
+            and Path(name).name == name and name not in {".", ".."})
+
+
+def skill_bundle_record(base: Path, clients: list[str], mode: str,
+                        skills: tuple[str, ...] | list[str],
+                        source: Path = SKILLS_ROOT) -> dict:
+    return {
+        "target": str(absolute_path(base)),
+        "clients": sorted(set(clients)),
+        "mode": mode,
+        "source": str(absolute_path(source)),
+        "skills": sorted(set(skills)),
+    }
+
+
+def read_installation_state() -> dict[Path, dict]:
+    path = installation_state_path()
+    if not path.exists() and not path.is_symlink():
+        return {}
+    if path.is_symlink() or not path.is_file():
+        raise InstallError(f"invalid managed installation state: {path}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise InstallError(f"invalid managed installation state: {path}") from exc
+    if (not isinstance(data, dict) or data.get("schema") != 1
+            or data.get("installer") != INSTALLER_ID
+            or not isinstance(data.get("targets"), list)):
+        raise InstallError(f"invalid managed installation state: {path}")
+    records: dict[Path, dict] = {}
+    for record in data["targets"]:
+        if not isinstance(record, dict):
+            raise InstallError(f"invalid managed installation state: {path}")
+        target_value = record.get("target")
+        source_value = record.get("source")
+        clients = record.get("clients")
+        skills = record.get("skills")
+        mode = record.get("mode")
+        if (not isinstance(target_value, str) or not Path(target_value).is_absolute()
+                or not isinstance(source_value, str) or not Path(source_value).is_absolute()
+                or not isinstance(clients, list) or not clients
+                or any(client not in CLIENT_NAMES for client in clients)
+                or len(clients) != len(set(clients))
+                or mode not in {"copy", "link"}
+                or not isinstance(skills, list)
+                or any(not valid_skill_name(name) for name in skills)
+                or len(skills) != len(set(skills))):
+            raise InstallError(f"invalid managed installation state: {path}")
+        target = absolute_path(Path(target_value))
+        if target in records:
+            raise InstallError(f"invalid managed installation state: {path}")
+        records[target] = skill_bundle_record(
+            target, clients, mode, skills, Path(source_value))
+    return records
+
+
+def write_installation_state(records: dict[Path, dict]) -> None:
+    path = installation_state_path()
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise InstallError(f"refusing to replace unowned path: {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    document = {
+        "schema": 1,
+        "installer": INSTALLER_ID,
+        "targets": [records[target] for target in sorted(records, key=str)],
+    }
+    descriptor, staged_name = tempfile.mkstemp(
+        prefix=f".{path.name}.new.", dir=path.parent)
+    staged = Path(staged_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(document, handle, indent=2)
+            handle.write("\n")
+        os.replace(staged, path)
+    except Exception:
+        if staged.exists():
+            staged.unlink()
+        raise
+
+
 def read_marker(path: Path, marker_name: str) -> dict | None:
     marker = path / marker_name
     if not marker.is_file():
@@ -126,6 +222,62 @@ def owned_skill(destination: Path, source: Path) -> tuple[bool, str | None]:
     if marker and marker.get("skill") == source.name:
         return True, marker.get("mode")
     return False, None
+
+
+def path_present(path: Path) -> bool:
+    return path.exists() or path.is_symlink()
+
+
+def recorded_skill_owned(record: dict, name: str) -> bool:
+    destination = Path(record["target"]) / name
+    if record["mode"] == "link":
+        if not destination.is_symlink():
+            return False
+        try:
+            expected = Path(record["source"]) / name
+            return destination.resolve(strict=False) == expected.resolve(strict=False)
+        except OSError:
+            return False
+    marker = read_marker(destination, SKILL_MARKER)
+    return bool(marker and marker.get("skill") == name
+                and marker.get("mode") == "copy")
+
+
+def inferred_clients(base: Path) -> list[str]:
+    base = absolute_path(base)
+    clients = []
+    if base in map(absolute_path, codex_discovery_destinations()):
+        clients.append("codex")
+    claude = expand_env_path(
+        "CLAUDE_CONFIG_DIR", Path.home() / ".claude") / "skills"
+    if base == absolute_path(claude):
+        clients.append("claude")
+    if base in map(absolute_path, opencode_discovery_destinations()):
+        clients.append("opencode")
+    return clients
+
+
+def legacy_skill_bundle(base: Path, clients: list[str] | None = None) -> dict | None:
+    base = absolute_path(base)
+    managed = []
+    modes = set()
+    for name in SKILL_NAMES:
+        destination = base / name
+        if not path_present(destination):
+            continue
+        owned, mode = owned_skill(destination, SKILLS_ROOT / name)
+        if owned:
+            managed.append(name)
+            modes.add(mode)
+    if not managed:
+        return None
+    if len(modes) != 1:
+        raise InstallError(f"managed skills use mixed modes at {base}")
+    detected_clients = clients or inferred_clients(base)
+    if not detected_clients:
+        raise InstallError(f"cannot identify clients for managed skills at {base}")
+    return skill_bundle_record(
+        base, detected_clients, modes.pop(), managed, SKILLS_ROOT)
 
 
 def inventory(root: Path) -> dict[str, tuple]:
@@ -232,6 +384,111 @@ def install_skill(source: Path, destination: Path, mode: str) -> str:
     return f"{mode}, current"
 
 
+def validate_skill_bundle(old_record: dict | None, new_record: dict) -> None:
+    base = Path(new_record["target"])
+    old_skills = set(old_record["skills"]) if old_record else set()
+    if old_record and old_record["target"] != new_record["target"]:
+        raise InstallError("managed skill target changed during an installation transaction")
+    for name in old_skills:
+        destination = base / name
+        if path_present(destination) and not recorded_skill_owned(old_record, name):
+            raise InstallError(f"refusing to replace unowned path: {destination}")
+    for name in new_record["skills"]:
+        destination = base / name
+        if name not in old_skills and path_present(destination):
+            raise InstallError(f"refusing to replace unowned path: {destination}")
+
+
+def synchronize_skill_bundle(records: dict[Path, dict], old_record: dict | None,
+                             new_record: dict) -> None:
+    validate_skill_bundle(old_record, new_record)
+    base = Path(new_record["target"])
+    base_existed = base.exists()
+    old_skills = set(old_record["skills"]) if old_record else set()
+    new_skills = set(new_record["skills"])
+    staged_skills: dict[str, Path] = {}
+    swapped: list[tuple[Path, Path | None]] = []
+    retired: list[tuple[Path, Path]] = []
+    try:
+        for name in sorted(new_skills):
+            staged_skills[name] = stage_skill(
+                Path(new_record["source"]) / name, base, new_record["mode"])
+        try:
+            for name in sorted(new_skills):
+                destination = base / name
+                backup = swap_path(staged_skills[name], destination)
+                swapped.append((destination, backup))
+            for name in sorted(old_skills - new_skills):
+                destination = base / name
+                if not path_present(destination):
+                    continue
+                backup = Path(tempfile.mkdtemp(
+                    prefix=f".{name}.old.", dir=base))
+                backup.rmdir()
+                destination.rename(backup)
+                retired.append((destination, backup))
+            updated = dict(records)
+            updated[base] = new_record
+            write_installation_state(updated)
+        except Exception:
+            for destination, backup in reversed(retired):
+                if path_present(destination):
+                    remove_path(destination)
+                backup.rename(destination)
+            for destination, backup in reversed(swapped):
+                rollback_swap(destination, backup)
+            raise
+        else:
+            records.clear()
+            records.update(updated)
+            for _destination, backup in swapped:
+                finish_swap(backup)
+            for _destination, backup in retired:
+                finish_swap(backup)
+    finally:
+        for staged in staged_skills.values():
+            if staged.parent.exists():
+                shutil.rmtree(staged.parent, ignore_errors=True)
+        if not base_existed and base.exists():
+            try:
+                base.rmdir()
+            except OSError:
+                pass
+
+
+def remove_skill_bundle(records: dict[Path, dict], record: dict) -> None:
+    base = Path(record["target"])
+    for name in record["skills"]:
+        destination = base / name
+        if path_present(destination) and not recorded_skill_owned(record, name):
+            raise InstallError(f"refusing to remove unowned path: {destination}")
+    removed: list[tuple[Path, Path]] = []
+    try:
+        for name in record["skills"]:
+            destination = base / name
+            if not path_present(destination):
+                continue
+            backup = Path(tempfile.mkdtemp(
+                prefix=f".{name}.old.", dir=base))
+            backup.rmdir()
+            destination.rename(backup)
+            removed.append((destination, backup))
+        updated = dict(records)
+        updated.pop(base, None)
+        write_installation_state(updated)
+    except Exception:
+        for destination, backup in reversed(removed):
+            if path_present(destination):
+                remove_path(destination)
+            backup.rename(destination)
+        raise
+    else:
+        records.clear()
+        records.update(updated)
+        for _destination, backup in removed:
+            finish_swap(backup)
+
+
 def skill_status(source: Path, destination: Path) -> tuple[str, bool]:
     if not destination.exists() and not destination.is_symlink():
         return "not installed", False
@@ -242,6 +499,21 @@ def skill_status(source: Path, destination: Path) -> tuple[str, bool]:
         return "link, current", True
     current = copy_current(source, destination)
     return f"copy, {'current' if current else 'stale'}", current
+
+
+def recorded_skill_status(record: dict, name: str) -> tuple[str, bool]:
+    destination = Path(record["target"]) / name
+    if not path_present(destination):
+        return "not installed", False
+    if not recorded_skill_owned(record, name):
+        return "unowned", False
+    if name not in SKILL_NAMES:
+        return f"{record['mode']}, retired", False
+    if record["mode"] == "link":
+        current = destination.resolve(strict=False) == (SKILLS_ROOT / name).resolve()
+    else:
+        current = copy_current(SKILLS_ROOT / name, destination)
+    return f"{record['mode']}, {'current' if current else 'stale'}", current
 
 
 def executable_owned(executable: Path, install_root: Path) -> bool:
@@ -274,7 +546,7 @@ def stage_gzh(install_root: Path) -> Path:
              str(staged / "venv")], check=True)
         subprocess.run(
             [str(staged / "venv" / "bin" / "python"), "-m", "pip", "install",
-             "--disable-pip-version-check", "--no-build-isolation",
+             "--disable-pip-version-check",
              str(ROOT / "gzh")], check=True)
         rewrite_venv_prefix(staged, install_root)
         marker = {
@@ -367,39 +639,50 @@ def uninstall_gzh() -> str:
 def run_install(clients: list[str], mode: str, include_skills: bool,
                 include_gzh: bool) -> int:
     validate_sources()
-    targets = destinations(clients)
+    targets = {
+        absolute_path(base): consumers
+        for base, consumers in destinations(clients).items()
+    }
+    records = read_installation_state() if include_skills else {}
+    bundles: dict[Path, tuple[dict | None, dict]] = {}
     conflicts = []
     if include_skills:
-        for base in targets:
-            for name in SKILL_NAMES:
-                destination = base / name
-                if ((destination.exists() or destination.is_symlink())
-                        and not owned_skill(destination, SKILLS_ROOT / name)[0]):
-                    conflicts.append(f"refusing to replace unowned path: {destination}")
+        for base, consumers in targets.items():
+            try:
+                old_record = records.get(base) or legacy_skill_bundle(base, consumers)
+                recorded_clients = old_record["clients"] if old_record else []
+                new_record = skill_bundle_record(
+                    base, recorded_clients + consumers, mode, SKILL_NAMES)
+                validate_skill_bundle(old_record, new_record)
+                bundles[base] = old_record, new_record
+            except InstallError as exc:
+                conflicts.append(str(exc))
         if "opencode" in clients:
             planned_bases = set(targets)
-            planned_discovery = planned_bases.intersection(
-                opencode_discovery_destinations())
+            planned_discovery = planned_bases.intersection(map(
+                absolute_path, opencode_discovery_destinations()))
             if len(planned_discovery) > 1:
                 paths = ", ".join(str(path) for path in sorted(planned_discovery))
                 conflicts.append(
                     f"selected clients would create duplicate OpenCode skills: {paths}")
             for base in opencode_discovery_destinations():
+                base = absolute_path(base)
                 if base in planned_bases:
                     continue
                 for name in SKILL_NAMES:
                     alternate = base / name
-                    if alternate.exists() or alternate.is_symlink():
+                    if path_present(alternate):
                         conflicts.append(
                             f"duplicate OpenCode skill exists outside the target: {alternate}")
         if "codex" in clients:
             planned_bases = set(targets)
             for base in codex_discovery_destinations():
+                base = absolute_path(base)
                 if base in planned_bases:
                     continue
                 for name in SKILL_NAMES:
                     alternate = base / name
-                    if alternate.exists() or alternate.is_symlink():
+                    if path_present(alternate):
                         conflicts.append(
                             f"duplicate Codex skill exists outside the target: {alternate}")
     if include_gzh:
@@ -416,15 +699,18 @@ def run_install(clients: list[str], mode: str, include_skills: bool,
     if include_skills:
         for base, consumers in targets.items():
             label = "+".join(consumers)
-            for name in SKILL_NAMES:
-                source = SKILLS_ROOT / name
-                destination = base / name
-                try:
-                    state = install_skill(source, destination, mode)
-                    print(f"{label:<18} {name:<23} {state} ({destination})")
-                except (InstallError, OSError) as exc:
-                    print(f"{label:<18} {name:<23} {exc}", file=sys.stderr)
-                    failed = True
+            old_record, new_record = bundles[base]
+            try:
+                synchronize_skill_bundle(records, old_record, new_record)
+                for name in SKILL_NAMES:
+                    destination = base / name
+                    print(f"{label:<18} {name:<23} {mode}, current ({destination})")
+                if old_record:
+                    for name in sorted(set(old_record["skills"]) - set(SKILL_NAMES)):
+                        print(f"{label:<18} {name:<23} removed")
+            except (InstallError, OSError) as exc:
+                print(f"{label:<18} {'bundle':<23} {exc}", file=sys.stderr)
+                failed = True
     if include_gzh:
         try:
             print(f"{'gzh':<18} {'CLI':<23} installed ({install_gzh()})")
@@ -434,28 +720,42 @@ def run_install(clients: list[str], mode: str, include_skills: bool,
     return int(failed)
 
 
-def _extra_detected_destinations(planned: dict[Path, list[str]]) -> dict[Path, list[str]]:
-    extras = {}
-    for base in all_known_destinations():
-        if base in planned:
-            continue
-        if any((base / name).exists() or (base / name).is_symlink()
-               for name in SKILL_NAMES):
-            extras[base] = ["detected"]
-    return extras
+def selected_skill_targets(clients: list[str], scan_all: bool,
+                           records: dict[Path, dict]) -> dict[Path, list[str]]:
+    targets = {
+        absolute_path(base): consumers
+        for base, consumers in destinations(clients).items()
+    }
+    selected = set(clients)
+    for base, record in records.items():
+        if scan_all or selected.intersection(record["clients"]):
+            targets.setdefault(base, record["clients"])
+    if scan_all:
+        for candidate in all_known_destinations():
+            base = absolute_path(candidate)
+            if base in targets:
+                continue
+            if any(path_present(base / name) for name in SKILL_NAMES):
+                targets[base] = inferred_clients(base) or ["detected"]
+    return targets
 
 
 def run_status(clients: list[str], include_skills: bool,
                include_gzh: bool, scan_all: bool = False) -> int:
     failed = False
     if include_skills:
-        targets = destinations(clients)
-        if scan_all:
-            targets.update(_extra_detected_destinations(targets))
+        records = read_installation_state()
+        targets = selected_skill_targets(clients, scan_all, records)
         for base, consumers in targets.items():
             label = "+".join(consumers)
-            for name in SKILL_NAMES:
-                state, current = skill_status(SKILLS_ROOT / name, base / name)
+            record = records.get(base)
+            names = sorted(set(SKILL_NAMES).union(
+                record["skills"] if record else ()))
+            for name in names:
+                if record and name in record["skills"]:
+                    state, current = recorded_skill_status(record, name)
+                else:
+                    state, current = skill_status(SKILLS_ROOT / name, base / name)
                 print(f"{label:<18} {name:<23} {state} ({base / name})")
                 failed = failed or not current
     if include_gzh:
@@ -469,23 +769,33 @@ def run_uninstall(clients: list[str], include_skills: bool,
                   include_gzh: bool, scan_all: bool = False) -> int:
     failed = False
     if include_skills:
-        targets = destinations(clients)
-        if scan_all:
-            targets.update(_extra_detected_destinations(targets))
+        records = read_installation_state()
+        targets = selected_skill_targets(clients, scan_all, records)
         for base, consumers in targets.items():
             label = "+".join(consumers)
-            for name in SKILL_NAMES:
-                destination = base / name
-                if not destination.exists() and not destination.is_symlink():
-                    print(f"{label:<18} {name:<23} not installed")
+            try:
+                record = records.get(base) or legacy_skill_bundle(base, consumers)
+                if record is None:
+                    for name in SKILL_NAMES:
+                        destination = base / name
+                        if not path_present(destination):
+                            print(f"{label:<18} {name:<23} not installed")
+                        else:
+                            print(
+                                f"{label:<18} {name:<23} refusing to remove unowned path: "
+                                f"{destination}", file=sys.stderr)
+                            failed = True
                     continue
-                if not owned_skill(destination, SKILLS_ROOT / name)[0]:
-                    print(f"{label:<18} {name:<23} refusing to remove unowned path: {destination}",
-                          file=sys.stderr)
-                    failed = True
-                    continue
-                remove_path(destination)
-                print(f"{label:<18} {name:<23} removed")
+                present = {
+                    name: path_present(base / name) for name in record["skills"]
+                }
+                remove_skill_bundle(records, record)
+                for name in record["skills"]:
+                    state = "removed" if present[name] else "not installed"
+                    print(f"{label:<18} {name:<23} {state}")
+            except (InstallError, OSError) as exc:
+                print(f"{label:<18} {'bundle':<23} {exc}", file=sys.stderr)
+                failed = True
     if include_gzh:
         try:
             print(f"{'gzh':<18} {'CLI':<23} {uninstall_gzh()}")
@@ -498,22 +808,39 @@ def run_uninstall(clients: list[str], include_skills: bool,
 def refresh_installed() -> int:
     validate_sources()
     found = failed = False
-    for base in all_known_destinations():
-        for name in SKILL_NAMES:
-            source = SKILLS_ROOT / name
-            destination = base / name
-            if not destination.exists() and not destination.is_symlink():
+    records = read_installation_state()
+    bases = list(records)
+    for candidate in all_known_destinations():
+        base = absolute_path(candidate)
+        if base not in records and base not in bases:
+            bases.append(base)
+    for base in bases:
+        record = records.get(base)
+        try:
+            if record is None:
+                record = legacy_skill_bundle(base)
+            if record is None:
+                unowned = [name for name in SKILL_NAMES if path_present(base / name)]
+                for name in unowned:
+                    print(
+                        f"skill              {name:<23} unowned; skipped ({base / name})",
+                        file=sys.stderr)
+                failed = failed or bool(unowned)
                 continue
             found = True
-            owned, mode = owned_skill(destination, source)
-            if not owned:
-                print(f"skill              {name:<23} unowned; skipped ({destination})",
-                      file=sys.stderr)
-                failed = True
-                continue
-            if mode == "copy":
-                install_skill(source, destination, "copy")
-            print(f"skill              {name:<23} {mode}, current ({destination})")
+            new_record = skill_bundle_record(
+                base, record["clients"], record["mode"], SKILL_NAMES)
+            retired = sorted(set(record["skills"]) - set(SKILL_NAMES))
+            synchronize_skill_bundle(records, record, new_record)
+            for name in SKILL_NAMES:
+                print(
+                    f"skill              {name:<23} {record['mode']}, current "
+                    f"({base / name})")
+            for name in retired:
+                print(f"skill              {name:<23} removed")
+        except (InstallError, OSError) as exc:
+            print(f"skill              {'bundle':<23} {exc}", file=sys.stderr)
+            failed = True
     install_root, executable = gzh_paths()
     if install_root.exists() or executable.exists() or executable.is_symlink():
         found = True

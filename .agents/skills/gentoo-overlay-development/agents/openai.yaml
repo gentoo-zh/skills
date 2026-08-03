@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gentoo Overlay Development"
+  short_description: "Develop and verify portable Gentoo overlay changes"
+  default_prompt: "Use $gentoo-overlay-development to make and verify this Gentoo overlay change under its live repository policy."

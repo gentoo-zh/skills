@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gentoo Overlay Skill Maintenance"
+  short_description: "Audit and evolve overlay skills from evidence"
+  default_prompt: "Use $gzh-maintain-skills to run one bounded, evidence-backed maintenance iteration for this repository."

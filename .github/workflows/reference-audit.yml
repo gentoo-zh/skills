@@ -1,4 +1,4 @@
-name: Source drift audit
+name: Maintenance cycle
 
 on:
   workflow_dispatch:
@@ -6,11 +6,12 @@ on:
     - cron: "17 3 * * 1"
 
 permissions:
+  actions: read
   contents: read
   issues: write
 
 concurrency:
-  group: source-drift-audit
+  group: skill-maintenance-cycle
   cancel-in-progress: false
 
 jobs:
@@ -18,47 +19,393 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: master
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
-      - name: Compare registered sources with the reviewed lock
-        id: audit
+      - name: Install test environment
+        run: python -m pip install -e './gzh[test]'
+      - name: Restore authenticated maintenance state
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set +e
-          python .agents/skills/gzh-version-bump/scripts/source_manager.py \
-            audit --fail-on-drift > reference-report.json
+          mkdir -p maintenance-output
+          printf '/maintenance-output/\n' >> .git/info/exclude
+          (
+            set -euo pipefail
+            workflow_path=".github/workflows/reference-audit.yml"
+            state_db="maintenance-output/maintenance-state.db"
+            artifact_json="maintenance-output/artifacts.json"
+            gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=skill-maintenance-state&per_page=100" > "$artifact_json"
+            mapfile -t candidates < <(
+              jq -r '.artifacts
+                | map(select(.expired == false))
+                | sort_by(.created_at) | reverse
+                | .[] | [.id, .workflow_run.id] | @tsv' "$artifact_json"
+            )
+            selected_artifact=""
+            eligible_candidates=0
+            for candidate in "${candidates[@]}"; do
+              read -r artifact_id run_id <<< "$candidate"
+              if ! gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" > maintenance-output/candidate-run.json; then
+                echo "failed to retrieve workflow run for state artifact ${artifact_id}" >&2
+                exit 1
+              fi
+              if jq -e --arg repository "$GITHUB_REPOSITORY" --arg workflow "$workflow_path" '
+                    .repository.full_name == $repository
+                    and .path == $workflow
+                    and .head_branch == "master"
+                    and .status == "completed"
+                    and (.conclusion == "success" or .conclusion == "failure")
+                    and (.event == "schedule" or .event == "workflow_dispatch")
+                  ' maintenance-output/candidate-run.json >/dev/null; then
+                if ! gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs?filter=latest&per_page=100" > maintenance-output/candidate-jobs.json; then
+                  echo "failed to retrieve workflow jobs for state artifact ${artifact_id}" >&2
+                  exit 1
+                fi
+                head_sha="$(jq -r '.head_sha' maintenance-output/candidate-run.json)"
+                if jq -e --arg head_sha "$head_sha" '[.jobs[] | select(
+                      .status == "completed" and .head_sha == $head_sha
+                      and ([.steps[] | select(.name == "Seal maintenance state") | .conclusion] | first) == "success"
+                      and ([.steps[] | select(.name == "Preserve authenticated maintenance state") | .conclusion] | first) == "success"
+                    )] | select(length == 1) | .[0]' maintenance-output/candidate-jobs.json > maintenance-output/candidate-job.json; then
+                  eligible_candidates=$((eligible_candidates + 1))
+                  candidate_zip="maintenance-output/candidate-state-${artifact_id}.zip"
+                  candidate_dir="maintenance-output/candidate-state-${artifact_id}"
+                  if ! gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "$candidate_zip"; then
+                    echo "failed to download eligible state artifact ${artifact_id}" >&2
+                    exit 1
+                  fi
+                  if (
+                    set -euo pipefail
+                    mkdir "$candidate_dir"
+                    unzip -q "$candidate_zip" -d "$candidate_dir"
+                    mapfile -t restored_entries < <(
+                      find "$candidate_dir" -mindepth 1 -printf '%P\n' | sort
+                    )
+                    if [[ "${restored_entries[*]}" != "maintenance-state.db maintenance-state.manifest.json" ]]; then
+                      echo "state artifact has an unexpected file set" >&2
+                      exit 1
+                    fi
+                    python .agents/skills/gzh-maintain-skills/scripts/state_bundle.py verify --database "$candidate_dir/maintenance-state.db" --manifest "$candidate_dir/maintenance-state.manifest.json"
+                    python .agents/skills/gzh-maintain-skills/scripts/state_bundle.py verify-provenance --manifest "$candidate_dir/maintenance-state.manifest.json" --run-record maintenance-output/candidate-run.json --job-record maintenance-output/candidate-job.json --repository "$GITHUB_REPOSITORY" --workflow "$workflow_path" --branch master
+                  ); then
+                    selected_artifact="$artifact_id"
+                    cp maintenance-output/candidate-run.json maintenance-output/authenticated-run.json
+                    cp maintenance-output/candidate-job.json maintenance-output/authenticated-job.json
+                    mv "$candidate_dir/maintenance-state.db" "$state_db"
+                    break
+                  fi
+                  echo "eligible state artifact ${artifact_id} failed content verification" >&2
+                fi
+              fi
+            done
+
+            if [[ -n "$selected_artifact" ]]; then
+              printf 'false\n' > maintenance-output/state-bootstrap.txt
+            elif (( eligible_candidates > 0 )); then
+              echo "no eligible state artifact passed content verification" >&2
+              exit 1
+            else
+              python .agents/skills/gzh-maintain-skills/scripts/evidence_store.py --db "$state_db" init
+              printf 'true\n' > maintenance-output/state-bootstrap.txt
+            fi
+
+            python .agents/skills/gzh-maintain-skills/scripts/evidence_store.py --db "$state_db" latest-cursor --adapter-id gentoo-zh --canonical-repository gentoo-zh/overlay > maintenance-output/cursor.json
+            cursor="$(jq -r '.revision // empty' maintenance-output/cursor.json)"
+            if [[ -z "$cursor" ]]; then
+              cursor="$(python .agents/skills/gentoo-overlay-development/scripts/source_manager.py resolve-git-ref --url https://github.com/gentoo-zh/overlay.git --ref refs/heads/master)"
+              printf 'true\n' > maintenance-output/state-bootstrap.txt
+            fi
+            if [[ ! "$cursor" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "overlay cursor is not an immutable commit ID" >&2
+              exit 1
+            fi
+            printf '%s\n' "$cursor" > maintenance-output/after-revision.txt
+          ) > maintenance-output/state-restore.log 2>&1
           status=$?
-          echo "status=$status" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$status" > maintenance-output/state.status
+          if (( status != 0 )); then
+            jq -n --arg error "$(tail -c 12000 maintenance-output/state-restore.log)" '{schema: 1, ok: false, complete: false, truncated: false, stage: "state-restore", error: $error}' > maintenance-output/maintenance-report.json
+            {
+              printf '<!-- gentoo-zh-skills-maintenance:v1 -->\n'
+              printf '# Skill maintenance review required\n\n'
+              printf 'Authenticated state restoration failed.\n\n'
+              printf '## State restoration\n\n~~~text\n'
+              tail -c 12000 maintenance-output/state-restore.log
+              printf '\n~~~\n'
+            } > maintenance-output/maintenance-report.md
+          fi
+          cat maintenance-output/state-restore.log
           exit 0
-      - name: Open or update the review issue
-        if: steps.audit.outputs.status != '0'
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Run maintenance cycle
         shell: bash
         run: |
-          number=$(gh issue list --state open --json number,title \
-            --jq '.[] | select(.title == "Registered source drift detected") | .number' \
-            | head -n 1)
-          if [[ -n "$number" ]]; then
-            gh issue comment "$number" --body-file reference-report.json
+          set +e
+          if [[ "$(cat maintenance-output/state.status)" != "0" ]]; then
+            printf '1\n' > maintenance-output/cycle.status
+            exit 0
+          fi
+          python .agents/skills/gzh-maintain-skills/scripts/maintenance_cycle.py --fetch --require-synced-master --output maintenance-output/maintenance-report.json --markdown-output maintenance-output/maintenance-report.md --evidence-db maintenance-output/maintenance-state.db
+          status=$?
+          printf '%s\n' "$status" > maintenance-output/cycle.status
+          exit 0
+      - name: Run durable maintenance queue
+        shell: bash
+        run: |
+          set +e
+          if [[ "$(cat maintenance-output/state.status)" != "0" || "$(cat maintenance-output/cycle.status)" != "0" ]]; then
+            printf '1\n' > maintenance-output/queue.status
+            exit 0
+          fi
+          cursor="$(cat maintenance-output/after-revision.txt)"
+          python .agents/skills/gzh-maintain-skills/scripts/maintenance_queue.py --db maintenance-output/maintenance-state.db find-open-plan --head-sha "$GITHUB_SHA" --adapter-id gentoo-zh --canonical-repository gentoo-zh/overlay > maintenance-output/open-plan.json 2> maintenance-output/open-plan.log
+          status=$?
+          if (( status != 0 )); then
+            printf '%s\n' "$status" > maintenance-output/queue.status
+            cat maintenance-output/open-plan.log
+            exit 0
+          fi
+          plan_id="$(jq -r '.plan_id // empty' maintenance-output/open-plan.json)"
+          if [[ -n "$plan_id" ]]; then
+            cursor="$(jq -r '.after_revision' maintenance-output/open-plan.json)"
+            printf '%s\n' "$cursor" > maintenance-output/after-revision.txt
           else
-            gh issue create --title "Registered source drift detected" \
-              --body-file reference-report.json
+            plan_id="maintenance-${GITHUB_SHA}-${cursor}"
           fi
-      - name: Close the resolved review issue
-        if: steps.audit.outputs.status == '0'
+          jq --slurpfile contract .agents/skills/gzh-maintain-skills/references/unattended-objective.json --arg repository "$GITHUB_REPOSITORY" --arg workflow ".github/workflows/reference-audit.yml" --arg head_sha "$GITHUB_SHA" --arg cursor "$cursor" '
+                $contract[0] + {iteration: {
+                  repository: $repository, workflow: $workflow,
+                  head_sha: $head_sha,
+                  after_revision: $cursor
+                }}' > maintenance-output/maintenance-context.json
+          python .agents/skills/gzh-maintain-skills/scripts/maintenance_queue.py --db maintenance-output/maintenance-state.db enqueue-default --plan-id "$plan_id" --context maintenance-output/maintenance-context.json --overlay-url https://github.com/gentoo-zh/overlay.git --adapter-id gentoo-zh --canonical-repository gentoo-zh/overlay --overlay-ref refs/heads/master --after-revision "$(cat maintenance-output/after-revision.txt)" --limit 500 > maintenance-output/queue-enqueue.log 2>&1
+          status=$?
+          if (( status == 0 )); then
+            python .agents/skills/gzh-maintain-skills/scripts/maintenance_queue.py --db maintenance-output/maintenance-state.db run --plan-id "$plan_id" --worker "github-${GITHUB_RUN_ID}" --output-dir maintenance-output/queue-artifacts --evidence-db maintenance-output/maintenance-state.db --until-empty > maintenance-output/queue-run.log 2>&1
+            status=$?
+          fi
+          python .agents/skills/gzh-maintain-skills/scripts/maintenance_queue.py --db maintenance-output/maintenance-state.db status --plan-id "$plan_id" --output maintenance-output/queue-report.json --markdown-output maintenance-output/queue-report.md > maintenance-output/queue-status.log 2>&1
+          status_command=$?
+          if (( status == 0 && status_command != 0 )); then
+            status=$status_command
+          fi
+          printf '%s\n' "$status" > maintenance-output/queue.status
+          cat maintenance-output/queue-enqueue.log
+          cat maintenance-output/queue-run.log 2>/dev/null || true
+          cat maintenance-output/queue-status.log
+          exit 0
+      - name: Prepare complete failure report
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          state_status="$(cat maintenance-output/state.status 2>/dev/null || printf 1)"
+          queue_status="$(cat maintenance-output/queue.status 2>/dev/null || printf 1)"
+          cycle_status="$(cat maintenance-output/cycle.status 2>/dev/null || printf 1)"
+          overall=1
+          if [[ "$state_status" == "0" && "$queue_status" == "0" && "$cycle_status" == "0" ]]; then
+            overall=0
+          fi
+          printf '%s\n' "$overall" > maintenance-output/overall.status
+          if [[ ! -f maintenance-output/maintenance-report.md ]]; then
+            {
+              printf '<!-- gentoo-zh-skills-maintenance:v1 -->\n'
+              printf '# Skill maintenance review required\n\n'
+              printf 'The durable maintenance queue did not complete.\n\n'
+              printf 'No complete maintenance report was produced.\n'
+            } > maintenance-output/maintenance-report.md
+          fi
+          if [[ -f maintenance-output/queue-report.md ]]; then
+            printf '\n' >> maintenance-output/maintenance-report.md
+            cat maintenance-output/queue-report.md >> maintenance-output/maintenance-report.md
+          fi
+          if [[ ! -f maintenance-output/maintenance-report.json ]]; then
+            jq -n --argjson state "$state_status" --argjson queue "$queue_status" --argjson cycle "$cycle_status" '{schema: 1, ok: false, complete: false, truncated: false, status: {state: $state, queue: $queue, cycle: $cycle}}' > maintenance-output/maintenance-report.json
+          elif (( overall != 0 )); then
+            jq --argjson state "$state_status" --argjson queue "$queue_status" --argjson cycle "$cycle_status" '
+              .ok = false
+              | .complete = false
+              | .status = {state: $state, queue: $queue, cycle: $cycle}
+            ' maintenance-output/maintenance-report.json > maintenance-output/maintenance-report.prepared.json
+            mv maintenance-output/maintenance-report.prepared.json maintenance-output/maintenance-report.json
+          fi
+      - name: Seal maintenance state
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if [[ ! -f maintenance-output/maintenance-state.db ]]; then
+            echo "maintenance state database was not created" > maintenance-output/state-seal.log
+            printf '1\n' > maintenance-output/state-seal.status
+            printf '1\n' > maintenance-output/overall.status
+            exit 0
+          fi
+          python .agents/skills/gzh-maintain-skills/scripts/maintenance_queue.py --db maintenance-output/maintenance-state.db compact --keep-plans 16 > maintenance-output/queue-compact.log 2>&1
+          queue_compact_status=$?
+          python .agents/skills/gzh-maintain-skills/scripts/evidence_store.py --db maintenance-output/maintenance-state.db compact --keep-runs 32 > maintenance-output/evidence-compact.log 2>&1
+          evidence_compact_status=$?
+          if (( queue_compact_status != 0 || evidence_compact_status != 0 )); then
+            printf '1\n' > maintenance-output/state-seal.status
+            printf '1\n' > maintenance-output/overall.status
+            cat maintenance-output/queue-compact.log
+            cat maintenance-output/evidence-compact.log
+            exit 0
+          fi
+          jq -n --arg repository "$GITHUB_REPOSITORY" --arg workflow ".github/workflows/reference-audit.yml" --arg head_sha "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --argjson run_id "$GITHUB_RUN_ID" '{
+              repository: $repository,
+              workflow: $workflow,
+              default_branch: "master",
+              run_id: $run_id,
+              head_sha: $head_sha,
+              event: $event
+            }' > maintenance-output/state-metadata.json
+          python .agents/skills/gzh-maintain-skills/scripts/state_bundle.py create --database maintenance-output/maintenance-state.db --manifest maintenance-output/maintenance-state.manifest.json --metadata maintenance-output/state-metadata.json > maintenance-output/state-seal.log 2>&1
+          status=$?
+          if (( status == 0 )); then
+            (
+              set -euo pipefail
+              staging="maintenance-output/state-artifact.staging"
+              mkdir "$staging"
+              cp maintenance-output/maintenance-state.db "$staging/"
+              cp maintenance-output/maintenance-state.manifest.json "$staging/"
+              python .agents/skills/gzh-maintain-skills/scripts/state_bundle.py verify --database "$staging/maintenance-state.db" --manifest "$staging/maintenance-state.manifest.json"
+              mv "$staging" maintenance-output/state-artifact
+            ) >> maintenance-output/state-seal.log 2>&1
+            status=$?
+          fi
+          printf '%s\n' "$status" > maintenance-output/state-seal.status
+          if (( status != 0 )); then
+            printf '1\n' > maintenance-output/overall.status
+          fi
+          cat maintenance-output/state-seal.log
+          exit 0
+      - name: Preserve authenticated maintenance state
+        id: state_upload
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: skill-maintenance-state
+          path: |
+            maintenance-output/state-artifact/maintenance-state.db
+            maintenance-output/state-artifact/maintenance-state.manifest.json
+          if-no-files-found: error
+      - name: Finalize report after state persistence
+        if: always()
+        env:
+          STATE_UPLOAD_OUTCOME: ${{ steps.state_upload.outcome }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          seal_status="$(cat maintenance-output/state-seal.status 2>/dev/null || printf 1)"
+          upload_status=1
+          if [[ "$STATE_UPLOAD_OUTCOME" == "success" ]]; then
+            upload_status=0
+          fi
+          if [[ "$seal_status" == "0" && "$upload_status" == "0" ]]; then
+            exit 0
+          fi
+          printf '1\n' > maintenance-output/overall.status
+          queue_compact="$(tail -c 6000 maintenance-output/queue-compact.log 2>/dev/null || true)"
+          evidence_compact="$(tail -c 6000 maintenance-output/evidence-compact.log 2>/dev/null || true)"
+          state_seal="$(tail -c 6000 maintenance-output/state-seal.log 2>/dev/null || true)"
+          if ! jq --arg status "$seal_status" --arg upload_status "$upload_status" --arg upload_outcome "$STATE_UPLOAD_OUTCOME" --arg queue_compact "$queue_compact" --arg evidence_compact "$evidence_compact" --arg state_seal "$state_seal" '
+                .ok = false
+                | .complete = false
+                | .state_persistence = {
+                    ok: false,
+                    status: ($status | tonumber),
+                    upload_status: ($upload_status | tonumber),
+                    upload_outcome: $upload_outcome,
+                    queue_compaction: $queue_compact,
+                    evidence_compaction: $evidence_compact,
+                    state_seal: $state_seal
+                  }
+              ' maintenance-output/maintenance-report.json > maintenance-output/maintenance-report.final.json; then
+            jq -n --arg status "$seal_status" --arg upload_status "$upload_status" --arg upload_outcome "$STATE_UPLOAD_OUTCOME" --arg queue_compact "$queue_compact" --arg evidence_compact "$evidence_compact" --arg state_seal "$state_seal" '{
+              schema: 1,
+              ok: false,
+              complete: false,
+              truncated: false,
+              state_persistence: {
+                ok: false,
+                status: ($status | tonumber),
+                upload_status: ($upload_status | tonumber),
+                upload_outcome: $upload_outcome,
+                queue_compaction: $queue_compact,
+                evidence_compaction: $evidence_compact,
+                state_seal: $state_seal
+              }
+            }' > maintenance-output/maintenance-report.final.json
+          fi
+          mv maintenance-output/maintenance-report.final.json maintenance-output/maintenance-report.json
+          sed -i \
+            -e 's/^- Result: pass$/- Result: review required/' \
+            -e 's/^- Result: scoped pass$/- Result: review required/' \
+            maintenance-output/maintenance-report.md
+          {
+            printf '\n## State persistence\n\n'
+            printf 'State compaction, sealing, or upload failed. The previous authenticated state remains authoritative.\n'
+            for entry in \
+              "queue compaction|$queue_compact" \
+              "evidence compaction|$evidence_compact" \
+              "state seal|$state_seal" \
+              "state upload|$STATE_UPLOAD_OUTCOME"; do
+              name="${entry%%|*}"
+              detail="${entry#*|}"
+              if [[ -n "$detail" ]]; then
+                printf '\n### %s\n\n```text\n%s\n```\n' "$name" "$detail"
+              fi
+            done
+          } >> maintenance-output/maintenance-report.md
+      - name: Preserve the complete report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: skill-maintenance-report
+          path: |
+            maintenance-output/maintenance-report.json
+            maintenance-output/maintenance-report.md
+            maintenance-output/queue-report.json
+            maintenance-output/queue-report.md
+            maintenance-output/maintenance-context.json
+            maintenance-output/state-restore.log
+            maintenance-output/state-seal.log
+            maintenance-output/open-plan.log
+            maintenance-output/queue-compact.log
+            maintenance-output/evidence-compact.log
+            maintenance-output/*.status
+          if-no-files-found: error
+      - name: Synchronize the review issue
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          number=$(gh issue list --state open --json number,title \
-            --jq '.[] | select(.title == "Registered source drift detected") | .number' \
-            | head -n 1)
-          if [[ -n "$number" ]]; then
-            gh issue close "$number" \
-              --comment "All registered sources match the reviewed lock."
+          set -euo pipefail
+          mapfile -t numbers < <(gh issue list --state open --limit 1000 --json number,title --jq '.[] | select(.title == "Skill maintenance review required") | .number')
+          if (( ${#numbers[@]} > 1 )); then
+            echo "multiple open maintenance issues found" >&2
+            exit 1
           fi
-      - name: Fail after recording drift
-        if: steps.audit.outputs.status != '0'
-        run: exit 1
+          number="${numbers[0]:-}"
+          status="$(cat maintenance-output/overall.status)"
+          if [[ "$status" != "0" ]]; then
+            if [[ -n "$number" ]]; then
+              gh issue view "$number" --json body --jq '.body' > maintenance-output/current-issue-body.md
+              if ! cmp -s maintenance-output/current-issue-body.md maintenance-output/maintenance-report.md; then
+                gh issue edit "$number" --body-file maintenance-output/maintenance-report.md
+              fi
+            else
+              gh issue create --title "Skill maintenance review required" --body-file maintenance-output/maintenance-report.md
+            fi
+          elif [[ -n "$number" ]]; then
+            gh issue close "$number" --comment "The scheduled maintenance cycle is current."
+          fi
+      - name: Fail after preserving maintenance evidence
+        if: always()
+        run: test "$(cat maintenance-output/overall.status)" = "0"

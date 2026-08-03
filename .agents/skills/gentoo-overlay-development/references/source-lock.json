@@ -143,13 +143,13 @@
     },
     "gentoo-tree": {
       "kind": "git",
-      "revision": "336e549b0098b6711fafd33da69723479fad8136",
-      "checked_at": "2026-08-03T17:26:54Z"
+      "revision": "72f93b784a56eccf2c5ad6e139da4ef2661b96dd",
+      "checked_at": "2026-08-03T20:17:54Z"
     },
     "guru": {
       "kind": "git",
-      "revision": "eff578ebcfcf8bc6327ed78c6222c07ae41e8a7b",
-      "checked_at": "2026-08-03T15:48:54Z"
+      "revision": "d83ad36e967ed599b4f1d0ade2f8673d54fd229c",
+      "checked_at": "2026-08-03T18:39:14Z"
     },
     "guru-contributors": {
       "kind": "mediawiki",
@@ -168,10 +168,10 @@
     },
     "agent-skills-spec": {
       "kind": "http",
-      "sha256": "da5ba3dab834bb009c139d5ece5ab5278e73671376644c5df1eb685c2b5f85bf",
-      "bytes": 401702,
-      "final_url": "https://agentskills.io/specification",
-      "checked_at": "2026-08-03T15:48:54Z"
+      "sha256": "494b0d84537c4d39714bf91e016d31d0731df0380015321cb12040625b22d3f9",
+      "bytes": 6953,
+      "final_url": "https://raw.githubusercontent.com/agentskills/agentskills/main/docs/specification.mdx",
+      "checked_at": "2026-08-03T20:17:54Z"
     },
     "openai-skills": {
       "kind": "git",
@@ -192,10 +192,10 @@
     },
     "claude-skills": {
       "kind": "http",
-      "sha256": "aa66a89a12b406a089b3afd6212a2a48ebed80f9a5b2476c0591178fa066b6e4",
-      "bytes": 943476,
-      "final_url": "https://code.claude.com/docs/en/skills",
-      "checked_at": "2026-08-03T15:48:54Z"
+      "sha256": "23d035ad222c1a288a0c05cb4202a394f91f1167aa80c522f9011729bab9168a",
+      "bytes": 73907,
+      "final_url": "https://code.claude.com/docs/en/skills.md",
+      "checked_at": "2026-08-03T20:17:54Z"
     },
     "opencode-skills": {
       "kind": "http",
@@ -266,7 +266,50 @@
       "bytes": 18894,
       "final_url": "https://devmanual.gentoo.org/general-concepts/licenses/",
       "checked_at": "2026-08-03T16:43:33Z"
+    },
+    "portage-dependency-api": {
+      "kind": "http",
+      "sha256": "38cee24db8d7f26743b23a9b0409067c374a51c070a7f72eef8d622fd1aa705a",
+      "bytes": 130599,
+      "final_url": "https://dev.gentoo.org/~zmedico/portage/doc/api/portage.dep.html",
+      "checked_at": "2026-08-03T18:37:54Z"
+    },
+    "devmanual-new-ebuild": {
+      "kind": "http",
+      "sha256": "49be6ad6dbdc1f00b24b7900f4d2f9a930725d6515c3550dc430f7a85226493b",
+      "bytes": 14216,
+      "final_url": "https://devmanual.gentoo.org/ebuild-maintenance/new-ebuild/",
+      "checked_at": "2026-08-03T20:22:46Z"
+    },
+    "devmanual-removal": {
+      "kind": "http",
+      "sha256": "50cd8533988208a4d8d983723a19ac0b66da9d46fb1d87910232580d7dd21350",
+      "bytes": 11733,
+      "final_url": "https://devmanual.gentoo.org/ebuild-maintenance/removal/",
+      "checked_at": "2026-08-03T20:22:46Z"
+    },
+    "devmanual-eclass-writing": {
+      "kind": "http",
+      "sha256": "246356e25764e554e01da4761781d1c5844c1813f6862e64f7c5749803041dae",
+      "bytes": 57852,
+      "final_url": "https://devmanual.gentoo.org/eclass-writing/",
+      "checked_at": "2026-08-03T20:22:46Z"
+    },
+    "github-actions-checkout-v7": {
+      "kind": "git",
+      "revision": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "checked_at": "2026-08-03T20:34:24Z"
+    },
+    "github-actions-setup-python-v7": {
+      "kind": "git",
+      "revision": "5fda3b95a4ea91299a34e894583c3862153e4b97",
+      "checked_at": "2026-08-03T20:34:24Z"
+    },
+    "github-actions-upload-artifact-v7": {
+      "kind": "git",
+      "revision": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+      "checked_at": "2026-08-03T20:34:24Z"
     }
   },
-  "updated_at": "2026-08-03T17:28:25Z"
+  "updated_at": "2026-08-03T20:34:24Z"
 }

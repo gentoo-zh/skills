@@ -1,0 +1,761 @@
+{
+  "schema": 1,
+  "checked": "2026-08-04",
+  "authorities": [
+    "overlay-policy",
+    "gentoo-standard",
+    "gentoo-tool",
+    "gentoo-practice",
+    "upstream-primary",
+    "derived-corpus",
+    "skill-architecture"
+  ],
+  "authority_scopes": {
+    "overlay-policy": [
+      "adapter:gentoo-zh"
+    ],
+    "gentoo-standard": [
+      "portable-core",
+      "comparative-evidence"
+    ],
+    "gentoo-tool": [
+      "portable-core"
+    ],
+    "gentoo-practice": [
+      "comparative-evidence"
+    ],
+    "upstream-primary": [
+      "portable-tooling"
+    ],
+    "derived-corpus": [
+      "comparative-evidence"
+    ],
+    "skill-architecture": [
+      "skills-maintenance"
+    ]
+  },
+  "sources": [
+    {
+      "id": "overlay-policy",
+      "title": "gentoo-zh overlay AGENTS.md",
+      "authority": "overlay-policy",
+      "kind": "http",
+      "url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/AGENTS.md",
+      "topics": [
+        "all",
+        "workflow",
+        "commit",
+        "ebuild",
+        "prebuilt",
+        "qa"
+      ],
+      "use": "Live repository policy; highest priority for overlay work.",
+      "scope": "adapter:gentoo-zh"
+    },
+    {
+      "id": "overlay-ci-pkgcheck",
+      "title": "gentoo-zh pkgcheck workflow",
+      "authority": "overlay-policy",
+      "kind": "http",
+      "url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/.github/workflows/pkgcheck.yml",
+      "topics": [
+        "ci",
+        "pkgcheck",
+        "qa"
+      ],
+      "use": "Executable CI contract for static checks.",
+      "scope": "adapter:gentoo-zh"
+    },
+    {
+      "id": "overlay-ci-emerge",
+      "title": "gentoo-zh emerge-on-PR workflow",
+      "authority": "overlay-policy",
+      "kind": "http",
+      "url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/.github/workflows/emerge-on-pr.yml",
+      "topics": [
+        "ci",
+        "install",
+        "elog",
+        "arch",
+        "prebuilt"
+      ],
+      "use": "Executable profile, architecture, merge, and elog contract.",
+      "scope": "adapter:gentoo-zh"
+    },
+    {
+      "id": "overlay-pr-template",
+      "title": "gentoo-zh pull request template",
+      "authority": "overlay-policy",
+      "kind": "http",
+      "url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/.github/pull_request_template.md",
+      "topics": [
+        "pr",
+        "review"
+      ],
+      "use": "Live template that must be preserved.",
+      "scope": "adapter:gentoo-zh"
+    },
+    {
+      "id": "overlay-readme",
+      "title": "gentoo-zh contributor README",
+      "authority": "overlay-policy",
+      "kind": "http",
+      "url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/README.en.md",
+      "topics": [
+        "contribution",
+        "license",
+        "manifest",
+        "nvchecker"
+      ],
+      "use": "Live contributor requirements, including license validation.",
+      "scope": "adapter:gentoo-zh"
+    },
+    {
+      "id": "overlay-license-groups",
+      "title": "gentoo-zh license groups",
+      "authority": "overlay-policy",
+      "kind": "http",
+      "url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/profiles/license_groups",
+      "topics": [
+        "license",
+        "redistribution",
+        "profile"
+      ],
+      "use": "Current overlay-specific license group membership.",
+      "scope": "adapter:gentoo-zh"
+    },
+    {
+      "id": "pms-latest",
+      "title": "Gentoo Package Manager Specification",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://projects.gentoo.org/pms/latest/pms.html",
+      "topics": [
+        "eapi",
+        "version",
+        "dependency",
+        "repository",
+        "ebuild"
+      ],
+      "use": "Normative package-manager and repository semantics.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "devmanual",
+      "title": "Gentoo Development Guide",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://devmanual.gentoo.org/",
+      "topics": [
+        "all",
+        "ebuild",
+        "maintenance"
+      ],
+      "use": "Primary official ebuild authoring and maintenance guide.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "devmanual-dependencies",
+      "title": "Gentoo dependency guide",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://devmanual.gentoo.org/general-concepts/dependencies/",
+      "topics": [
+        "dependency",
+        "slot",
+        "bdepend",
+        "depend",
+        "rdepend",
+        "idepend"
+      ],
+      "use": "Dependency classes, direct dependencies, slots, and operators.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "devmanual-revisions",
+      "title": "Gentoo ebuild revisions",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://devmanual.gentoo.org/general-concepts/ebuild-revisions/",
+      "topics": [
+        "revision",
+        "revbump",
+        "dependency",
+        "license"
+      ],
+      "use": "Official revbump decision criteria.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "devmanual-licenses",
+      "title": "Gentoo license and redistribution guidance",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://devmanual.gentoo.org/general-concepts/licenses/",
+      "topics": [
+        "license",
+        "restrict",
+        "mirror",
+        "bindist",
+        "fetch"
+      ],
+      "use": "Official LICENSE syntax, evidence search, and redistribution restrictions.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "devmanual-versions",
+      "title": "Gentoo version rules",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://devmanual.gentoo.org/ebuild-writing/file-format/index.html",
+      "topics": [
+        "version",
+        "bump"
+      ],
+      "use": "Gentoo version syntax and normalization.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "devmanual-eclasses",
+      "title": "Gentoo eclass reference",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://devmanual.gentoo.org/eclass-reference/index.html",
+      "topics": [
+        "eclass",
+        "eapi",
+        "phase"
+      ],
+      "use": "Current supported EAPIs, variables, helpers, and exported phases.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "ebuild-manual",
+      "title": "Gentoo ebuild manual",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://devmanual.gentoo.org/eclass-reference/ebuild/index.html",
+      "topics": [
+        "ebuild",
+        "variables",
+        "qa",
+        "prebuilt"
+      ],
+      "use": "Current ebuild variables, QA controls, and phase interface.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "devmanual-tests",
+      "title": "Gentoo src_test guidance",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://devmanual.gentoo.org/ebuild-writing/functions/src_test/index.html",
+      "topics": [
+        "test",
+        "network-sandbox",
+        "properties"
+      ],
+      "use": "Test execution and restriction guidance.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "devmanual-manifest",
+      "title": "Gentoo Manifest guidance",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://devmanual.gentoo.org/general-concepts/manifest/",
+      "topics": [
+        "manifest",
+        "distfile",
+        "integrity"
+      ],
+      "use": "Manifest purpose and maintenance.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "devmanual-patches",
+      "title": "Gentoo patch guidance",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://devmanual.gentoo.org/ebuild-writing/misc-files/patches/",
+      "topics": [
+        "patch",
+        "files",
+        "provenance"
+      ],
+      "use": "Patch format, attribution, size, and placement.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "devmanual-metadata",
+      "title": "Gentoo metadata.xml guidance",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://devmanual.gentoo.org/ebuild-writing/misc-files/metadata/",
+      "topics": [
+        "metadata",
+        "maintainer",
+        "remote-id",
+        "use"
+      ],
+      "use": "Package metadata requirements.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "devmanual-package-moves",
+      "title": "Gentoo package and slot moves",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://devmanual.gentoo.org/ebuild-maintenance/package-moves/",
+      "topics": [
+        "move",
+        "slotmove",
+        "profiles",
+        "dependency"
+      ],
+      "use": "Package move history and reference updates.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "devmanual-new-ebuild",
+      "title": "Gentoo new ebuild guidance",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://devmanual.gentoo.org/ebuild-maintenance/new-ebuild/",
+      "topics": [
+        "new-package",
+        "keyword",
+        "files",
+        "qa"
+      ],
+      "use": "New package structure, architecture evidence, and local files.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "devmanual-removal",
+      "title": "Gentoo package removal guidance",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://devmanual.gentoo.org/ebuild-maintenance/removal/",
+      "topics": [
+        "removal",
+        "dependency",
+        "keyword",
+        "cleanup"
+      ],
+      "use": "Version and package removal dependency and cleanup checks.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "devmanual-eclass-writing",
+      "title": "Gentoo eclass writing guide",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://devmanual.gentoo.org/eclass-writing/",
+      "topics": [
+        "eclass",
+        "eapi",
+        "metadata",
+        "consumer"
+      ],
+      "use": "Eclass interface, documentation, and consumer maintenance.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "devmanual-common-problems",
+      "title": "Gentoo common ebuild problems",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://devmanual.gentoo.org/appendices/common-problems/",
+      "topics": [
+        "ebuild",
+        "global-scope",
+        "qa"
+      ],
+      "use": "Current common correctness failures.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "glep-66",
+      "title": "GLEP 66 Gentoo Git Workflow",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://gitweb.gentoo.org/data/glep.git/plain/glep-0066.rst",
+      "topics": [
+        "commit",
+        "git",
+        "atomic"
+      ],
+      "use": "Gentoo ebuild repository commit policy; apply to another overlay only when its live policy adopts it.",
+      "scope": "comparative-evidence"
+    },
+    {
+      "id": "glep-76",
+      "title": "GLEP 76 Copyright Policy",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://gitweb.gentoo.org/data/glep.git/plain/glep-0076.rst",
+      "topics": [
+        "commit",
+        "signoff",
+        "identity"
+      ],
+      "use": "Gentoo ebuild repository copyright and sign-off policy; not a portable overlay default.",
+      "scope": "comparative-evidence"
+    },
+    {
+      "id": "gentoo-qa-policy",
+      "title": "Gentoo QA Policy Guide",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://projects.gentoo.org/qa/policy-guide/",
+      "topics": [
+        "qa",
+        "ebuild",
+        "repository",
+        "prebuilt"
+      ],
+      "use": "Official Gentoo QA policy and repository expectations.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "pkgcheck",
+      "title": "pkgcheck manual",
+      "authority": "gentoo-tool",
+      "kind": "http",
+      "url": "https://pkgcore.github.io/pkgcheck/man/pkgcheck.html",
+      "topics": [
+        "pkgcheck",
+        "qa",
+        "commit",
+        "network"
+      ],
+      "use": "Current pkgcheck command and reporter behavior.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "pkgdev",
+      "title": "pkgdev manual",
+      "authority": "gentoo-tool",
+      "kind": "http",
+      "url": "https://pkgcore.github.io/pkgdev/man/pkgdev.html",
+      "topics": [
+        "pkgdev",
+        "manifest",
+        "commit",
+        "push"
+      ],
+      "use": "Current pkgdev command behavior.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "portage-emerge",
+      "title": "Portage emerge manual",
+      "authority": "gentoo-tool",
+      "kind": "http",
+      "url": "https://dev.gentoo.org/~zmedico/portage/doc/man/emerge.1.html",
+      "topics": [
+        "portage",
+        "emerge",
+        "install",
+        "dependency",
+        "oneshot"
+      ],
+      "use": "Current emerge selection, reinstall, dependency, and world-set behavior.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "portage-dependency-api",
+      "title": "Portage dependency API reference",
+      "authority": "gentoo-tool",
+      "kind": "http",
+      "url": "https://dev.gentoo.org/~zmedico/portage/doc/api/portage.dep.html",
+      "topics": [
+        "portage",
+        "dependency",
+        "atom",
+        "eapi",
+        "use",
+        "slot"
+      ],
+      "use": "Current Portage Atom and dependency parser interface behavior.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "nvchecker-usage",
+      "title": "nvchecker usage documentation",
+      "authority": "upstream-primary",
+      "kind": "http",
+      "url": "https://nvchecker.readthedocs.io/en/latest/usage.html",
+      "topics": [
+        "nvchecker",
+        "upstream",
+        "version",
+        "tracking"
+      ],
+      "use": "Primary documentation for tracker source and option behavior.",
+      "scope": "portable-tooling"
+    },
+    {
+      "id": "gentoo-tree",
+      "title": "gentoo/gentoo repository",
+      "authority": "gentoo-practice",
+      "kind": "git",
+      "url": "https://github.com/gentoo/gentoo.git",
+      "ref": "HEAD",
+      "topics": [
+        "precedent",
+        "eclass",
+        "package",
+        "commit"
+      ],
+      "use": "Current implementation and full commit evidence.",
+      "scope": "comparative-evidence"
+    },
+    {
+      "id": "guru",
+      "title": "Gentoo GURU repository",
+      "authority": "gentoo-practice",
+      "kind": "git",
+      "url": "https://github.com/gentoo-mirror/guru.git",
+      "ref": "HEAD",
+      "topics": [
+        "guru",
+        "review",
+        "maintenance",
+        "qa"
+      ],
+      "use": "Official Gentoo community repository practice; GURU-specific policy stays local.",
+      "scope": "comparative-evidence"
+    },
+    {
+      "id": "guru-contributors",
+      "title": "GURU information for contributors",
+      "authority": "gentoo-practice",
+      "kind": "mediawiki",
+      "url": "https://wiki.gentoo.org/wiki/Project:GURU/Information_for_Contributors",
+      "api_url": "https://wiki.gentoo.org/api.php?action=query&prop=revisions&titles=Project%3AGURU%2FInformation_for_Contributors&rvprop=ids&format=json&formatversion=2",
+      "topics": [
+        "guru",
+        "commit",
+        "review",
+        "pkgcheck",
+        "pkgdev"
+      ],
+      "use": "Official contributor workflow; do not copy GURU branch or permission rules.",
+      "scope": "comparative-evidence"
+    },
+    {
+      "id": "gentoo-tree-lessons",
+      "title": "gentoo-tree-lessons derived corpus",
+      "authority": "derived-corpus",
+      "kind": "git",
+      "url": "https://github.com/Zakkaus/gentoo-tree-lessons.git",
+      "ref": "HEAD",
+      "topics": [
+        "case-study",
+        "fixture",
+        "commit",
+        "ecosystem"
+      ],
+      "use": "Candidate discovery only; verify every rule against primary evidence.",
+      "scope": "comparative-evidence"
+    },
+    {
+      "id": "chinese-skill",
+      "title": "Chinese-skill reference implementation",
+      "authority": "skill-architecture",
+      "kind": "git",
+      "url": "https://github.com/Zakk-LLM/Chinese-skill.git",
+      "ref": "HEAD",
+      "topics": [
+        "skill",
+        "writing",
+        "installer",
+        "provenance",
+        "eval"
+      ],
+      "use": "Architecture and writing workflow reference, not Gentoo policy.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "agent-skills-spec",
+      "title": "Agent Skills specification",
+      "authority": "skill-architecture",
+      "kind": "http",
+      "url": "https://raw.githubusercontent.com/agentskills/agentskills/main/docs/specification.mdx",
+      "topics": [
+        "skill",
+        "frontmatter",
+        "compatibility"
+      ],
+      "use": "Cross-client skill format baseline.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "openai-skills",
+      "title": "OpenAI official skills repository",
+      "authority": "skill-architecture",
+      "kind": "git",
+      "url": "https://github.com/openai/skills.git",
+      "ref": "HEAD",
+      "topics": [
+        "skill",
+        "eval",
+        "scripts",
+        "references"
+      ],
+      "use": "Official Codex skill architecture examples.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "codex-build-skills",
+      "title": "OpenAI Build skills documentation",
+      "authority": "skill-architecture",
+      "kind": "http",
+      "url": "https://learn.chatgpt.com/docs/build-skills.md",
+      "topics": [
+        "skill",
+        "codex",
+        "install",
+        "symlink",
+        "discovery"
+      ],
+      "use": "Official Codex authoring, discovery, and distribution behavior.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "anthropic-skills",
+      "title": "Anthropic official skills repository",
+      "authority": "skill-architecture",
+      "kind": "git",
+      "url": "https://github.com/anthropics/skills.git",
+      "ref": "HEAD",
+      "topics": [
+        "skill",
+        "claude",
+        "references",
+        "scripts"
+      ],
+      "use": "Official Claude skill architecture examples.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "claude-skills",
+      "title": "Claude Code skills documentation",
+      "authority": "skill-architecture",
+      "kind": "http",
+      "url": "https://code.claude.com/docs/en/skills.md",
+      "topics": [
+        "skill",
+        "claude",
+        "install",
+        "symlink",
+        "discovery"
+      ],
+      "use": "Official Claude Code skill behavior.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "opencode-skills",
+      "title": "OpenCode skills documentation",
+      "authority": "skill-architecture",
+      "kind": "http",
+      "url": "https://opencode.ai/docs/skills",
+      "topics": [
+        "skill",
+        "opencode",
+        "install",
+        "discovery",
+        "collision"
+      ],
+      "use": "Official OpenCode discovery behavior and name uniqueness requirement.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "github-graphql-pagination",
+      "title": "GitHub GraphQL pagination guide",
+      "authority": "skill-architecture",
+      "kind": "http",
+      "url": "https://docs.github.com/en/graphql/guides/using-pagination-in-the-graphql-api.md",
+      "topics": [
+        "github",
+        "graphql",
+        "issue",
+        "pagination"
+      ],
+      "use": "Official cursor pagination contract for complete issue and comment data.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "github-actions-checkout-v7",
+      "title": "GitHub Actions checkout v7",
+      "authority": "skill-architecture",
+      "kind": "git",
+      "url": "https://github.com/actions/checkout.git",
+      "ref": "refs/tags/v7",
+      "topics": [
+        "github",
+        "actions",
+        "checkout",
+        "workflow"
+      ],
+      "use": "Official major tag used by repository workflows.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "github-actions-setup-python-v7",
+      "title": "GitHub Actions setup-python v7",
+      "authority": "skill-architecture",
+      "kind": "git",
+      "url": "https://github.com/actions/setup-python.git",
+      "ref": "refs/tags/v7",
+      "topics": [
+        "github",
+        "actions",
+        "python",
+        "workflow"
+      ],
+      "use": "Official major tag used by repository workflows.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "github-actions-upload-artifact-v7",
+      "title": "GitHub Actions upload-artifact v7",
+      "authority": "skill-architecture",
+      "kind": "git",
+      "url": "https://github.com/actions/upload-artifact.git",
+      "ref": "refs/tags/v7",
+      "topics": [
+        "github",
+        "actions",
+        "artifact",
+        "workflow"
+      ],
+      "use": "Official major tag used by repository workflows.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "python-venv",
+      "title": "Python venv documentation",
+      "authority": "skill-architecture",
+      "kind": "http",
+      "url": "https://docs.python.org/3/library/venv.html",
+      "topics": [
+        "python",
+        "install",
+        "venv",
+        "update"
+      ],
+      "use": "Official isolated-environment behavior used by the gzh installer.",
+      "scope": "skills-maintenance"
+    }
+  ],
+  "scopes": [
+    "portable-core",
+    "portable-tooling",
+    "adapter:gentoo-zh",
+    "comparative-evidence",
+    "skills-maintenance"
+  ]
+}

@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+import importlib.util
+import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parent.parent
 INSTALLER = ROOT / "install.sh"
 UPDATER = ROOT / "update.sh"
-SKILL_NAMES = ("gzh-version-bump", "gzh-bump-from-issues")
+INSTALLER_MODULE = ROOT / "scripts" / "install.py"
+SKILL_NAMES = tuple(sorted(
+    path.name for path in (ROOT / ".agents" / "skills").iterdir()
+    if path.is_dir() and (path / "SKILL.md").is_file()))
 
 
 def environment(tmp_path: Path) -> dict[str, str]:
@@ -34,6 +42,136 @@ def invoke(command: Path, args: list[str], env: dict[str, str],
     return proc
 
 
+def load_installer():
+    spec = importlib.util.spec_from_file_location("install_test", INSTALLER_MODULE)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def installation_state(tmp_path: Path) -> Path:
+    return tmp_path / "data" / "gentoo-zh-skills" / "skill-installations.json"
+
+
+def previous_bundle(tmp_path: Path, mode: str) -> tuple[dict[str, str], Path, str, str]:
+    env = environment(tmp_path)
+    mode_arg = "--copy" if mode == "copy" else "--link"
+    invoke(INSTALLER, ["codex", "--skills-only", mode_arg], env)
+    state_path = installation_state(tmp_path)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    record = state["targets"][0]
+    base = Path(record["target"])
+    added = SKILL_NAMES[-1]
+    retired = "retired-test-skill"
+    if (base / added).is_symlink():
+        (base / added).unlink()
+    else:
+        shutil.rmtree(base / added)
+    retired_path = base / retired
+    if mode == "link":
+        retired_path.symlink_to(ROOT / ".agents" / "skills" / retired)
+    else:
+        retired_path.mkdir()
+        marker = {
+            "schema": 1,
+            "installer": "gentoo-zh/skills",
+            "skill": retired,
+            "mode": "copy",
+        }
+        (retired_path / ".gzh-skill-install.json").write_text(
+            json.dumps(marker, indent=2) + "\n", encoding="utf-8")
+        (retired_path / "old.txt").write_text("old\n", encoding="utf-8")
+    record["skills"] = sorted(set(SKILL_NAMES) - {added} | {retired})
+    state_path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    return env, base, added, retired
+
+
+@pytest.mark.parametrize("mode", ["copy", "link"])
+def test_bundle_upgrade_status_and_refresh(tmp_path, mode):
+    env, base, added, retired = previous_bundle(tmp_path, mode)
+
+    status = invoke(
+        INSTALLER, ["codex", "--skills-only", "--status"], env, expected=1)
+    assert added in status.stdout
+    assert "not installed" in status.stdout
+    assert retired in status.stdout
+    assert "retired" in status.stdout
+
+    invoke(UPDATER, ["--installed-only"], env)
+
+    assert (base / added).is_dir() or (base / added).is_symlink()
+    assert not (base / retired).exists()
+    assert not (base / retired).is_symlink()
+    invoke(INSTALLER, ["codex", "--skills-only", "--status"], env)
+    state = json.loads(installation_state(tmp_path).read_text(encoding="utf-8"))
+    assert state["targets"][0]["skills"] == list(SKILL_NAMES)
+
+
+@pytest.mark.parametrize("mode", ["copy", "link"])
+def test_bundle_upgrade_uninstall_retires_removed_skill(tmp_path, mode):
+    env, base, _added, retired = previous_bundle(tmp_path, mode)
+
+    result = invoke(
+        INSTALLER, ["codex", "--skills-only", "--uninstall"], env)
+
+    assert retired in result.stdout
+    assert not (base / retired).exists()
+    assert not (base / retired).is_symlink()
+    for name in set(SKILL_NAMES) - {_added}:
+        assert not (base / name).exists()
+        assert not (base / name).is_symlink()
+    state = json.loads(installation_state(tmp_path).read_text(encoding="utf-8"))
+    assert state["targets"] == []
+
+
+@pytest.mark.parametrize("mode", ["copy", "link"])
+def test_bundle_refresh_refuses_replaced_retired_skill_without_writes(tmp_path, mode):
+    env, base, added, retired = previous_bundle(tmp_path, mode)
+    retired_path = base / retired
+    if retired_path.is_symlink():
+        retired_path.unlink()
+    else:
+        shutil.rmtree(retired_path)
+    retired_path.mkdir()
+    sentinel = retired_path / "keep.txt"
+    sentinel.write_text("keep\n", encoding="utf-8")
+
+    result = invoke(UPDATER, ["--installed-only"], env, expected=1)
+
+    assert "refusing to replace unowned path" in result.stderr
+    assert sentinel.read_text(encoding="utf-8") == "keep\n"
+    assert not (base / added).exists()
+    assert not (base / added).is_symlink()
+    state = json.loads(installation_state(tmp_path).read_text(encoding="utf-8"))
+    assert retired in state["targets"][0]["skills"]
+
+
+@pytest.mark.parametrize("mode", ["copy", "link"])
+def test_bundle_refresh_rolls_back_when_state_write_fails(
+        tmp_path, mode, monkeypatch):
+    env, base, added, retired = previous_bundle(tmp_path, mode)
+    installer = load_installer()
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    records = installer.read_installation_state()
+    old_record = records[base]
+    new_record = installer.skill_bundle_record(
+        base, old_record["clients"], old_record["mode"], SKILL_NAMES)
+    monkeypatch.setattr(
+        installer, "write_installation_state",
+        lambda _records: (_ for _ in ()).throw(OSError("state write failed")))
+
+    with pytest.raises(OSError, match="state write failed"):
+        installer.synchronize_skill_bundle(records, old_record, new_record)
+
+    assert not (base / added).exists()
+    assert not (base / added).is_symlink()
+    assert (base / retired).exists() or (base / retired).is_symlink()
+    state = json.loads(installation_state(tmp_path).read_text(encoding="utf-8"))
+    assert retired in state["targets"][0]["skills"]
+
+
 def test_default_clients_use_separate_codex_and_opencode_paths_when_configured(tmp_path):
     env = environment(tmp_path)
     invoke(INSTALLER, ["--skills-only"], env)
@@ -45,7 +183,7 @@ def test_default_clients_use_separate_codex_and_opencode_paths_when_configured(t
     status = invoke(INSTALLER, ["--skills-only", "--status"], env)
     assert "codex" in status.stdout
     assert "opencode" in status.stdout
-    assert status.stdout.count("link, current") == 4
+    assert status.stdout.count("link, current") == 2 * len(SKILL_NAMES)
 
 
 def test_default_clients_share_official_agents_scope(tmp_path):
@@ -59,7 +197,7 @@ def test_default_clients_share_official_agents_scope(tmp_path):
         assert not (tmp_path / "xdg" / "opencode" / "skills" / name).exists()
     status = invoke(INSTALLER, ["--skills-only", "--status"], env)
     assert "codex+opencode" in status.stdout
-    assert status.stdout.count("link, current") == 2
+    assert status.stdout.count("link, current") == len(SKILL_NAMES)
 
 
 def test_all_clients_refuse_planned_opencode_duplicates_before_writes(tmp_path):

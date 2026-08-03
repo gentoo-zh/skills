@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parent.parent
 INSTALLER = ROOT / "scripts" / "install.py"
 SOURCE_MANAGER = (
-    ROOT / ".agents" / "skills" / "gzh-version-bump" / "scripts"
+    ROOT / ".agents" / "skills" / "gentoo-overlay-development" / "scripts"
     / "source_manager.py")
 LESSON_LOOKUP = (
     ROOT / ".agents" / "skills" / "gzh-version-bump" / "scripts"
@@ -93,7 +93,8 @@ def update_checkout() -> None:
 
 def audit_references() -> int:
     source = run(
-        [sys.executable, str(SOURCE_MANAGER), "audit", "--fail-on-drift"],
+        [sys.executable, str(SOURCE_MANAGER), "audit", "--all-scopes",
+         "--fail-on-drift"],
         check=False)
     lessons = run(
         [sys.executable, str(LESSON_LOOKUP), "--refresh", "--stats"],

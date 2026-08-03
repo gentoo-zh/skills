@@ -30,4 +30,4 @@ jobs:
       - name: Run tests
         run: python -m pytest -q gzh/tests tests
       - name: Compile Python sources
-        run: python -m compileall -q gzh/gzh scripts .agents/skills/gzh-version-bump/scripts
+        run: python -m compileall -q gzh/gzh scripts .agents/skills
