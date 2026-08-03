@@ -241,10 +241,10 @@
     },
     "python-venv": {
       "kind": "http",
-      "sha256": "1cafb7fbd131e28eafedb59026c525f8dae5417c931a72ca14627a89acdad2e2",
-      "bytes": 103685,
-      "final_url": "https://docs.python.org/3/library/venv.html",
-      "checked_at": "2026-08-03T15:51:50Z"
+      "sha256": "a1d5b2aa944963a9ed53b96b9ef137504280268e33840b95463c8e568622e24a",
+      "bytes": 26896,
+      "final_url": "https://raw.githubusercontent.com/python/cpython/3.11/Doc/library/venv.rst",
+      "checked_at": "2026-08-03T21:29:12Z"
     },
     "overlay-readme": {
       "kind": "http",
@@ -309,7 +309,14 @@
       "kind": "git",
       "revision": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
       "checked_at": "2026-08-03T20:34:24Z"
+    },
+    "python-venv-create": {
+      "kind": "http",
+      "sha256": "03dd8e945e936e3eb1d582be057723e4531b69febe1f1f3d6ca58f2571f125d8",
+      "bytes": 4744,
+      "final_url": "https://raw.githubusercontent.com/python/cpython/3.11/Doc/using/venv-create.inc",
+      "checked_at": "2026-08-03T21:31:32Z"
     }
   },
-  "updated_at": "2026-08-03T20:34:24Z"
+  "updated_at": "2026-08-03T21:31:32Z"
 }

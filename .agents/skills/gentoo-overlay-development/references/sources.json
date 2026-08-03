@@ -737,17 +737,32 @@
     },
     {
       "id": "python-venv",
-      "title": "Python venv documentation",
+      "title": "CPython 3.11 venv documentation source",
       "authority": "skill-architecture",
       "kind": "http",
-      "url": "https://docs.python.org/3/library/venv.html",
+      "url": "https://raw.githubusercontent.com/python/cpython/3.11/Doc/library/venv.rst",
       "topics": [
         "python",
         "install",
         "venv",
         "update"
       ],
-      "use": "Official isolated-environment behavior used by the gzh installer.",
+      "use": "Official minimum-supported-version behavior used by the gzh installer.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "python-venv-create",
+      "title": "CPython 3.11 venv creation documentation source",
+      "authority": "skill-architecture",
+      "kind": "http",
+      "url": "https://raw.githubusercontent.com/python/cpython/3.11/Doc/using/venv-create.inc",
+      "topics": [
+        "python",
+        "install",
+        "venv",
+        "pip"
+      ],
+      "use": "Official minimum-supported-version CLI and pip behavior used by the gzh installer.",
       "scope": "skills-maintenance"
     }
   ],

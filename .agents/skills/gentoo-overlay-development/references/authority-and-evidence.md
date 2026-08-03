@@ -69,6 +69,11 @@ commit. A fingerprint or successful download proves neither meaning nor provenan
 Use the repository's registered source inventory and reviewed locks to locate sources,
 but read current content before changing a rule.
 
+Fingerprint the behavior-bearing official source when a rendered page includes unrelated
+build timestamps or other volatile presentation metadata. Keep the human-readable official
+documentation URL in prose when it is useful, but do not let an unrelated site rebuild
+masquerade as a behavior change.
+
 The machine-readable inventory is [sources.json](sources.json), its reviewed fingerprints
 are in [source-lock.json](source-lock.json), and
 [`source_manager.py`](../scripts/source_manager.py) provides bounded list, audit, and
