@@ -1,4 +1,5 @@
 import difflib
+import json
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -84,13 +85,197 @@ def test_bump_scaffold_rejects_equal_or_lower_version(tmp_path):
 
 def test_build_bump_plan_is_read_only_and_pins_source(tmp_path):
     d = _pkgdir(tmp_path)
-    report = build_bump_plan(tmp_path, "dev-python/foo", "1.2.0")
+    report = build_bump_plan(
+        tmp_path, "dev-python/foo", "1.2.0", package_model="source")
 
     assert report["ok"] is True
     assert report["current_version"] == "1.1.0"
     assert report["retention"]["decision"] == "review-required"
     assert len(report["actions"][0]["source_sha256"]) == 64
     assert not (d / "foo-1.2.0.ebuild").exists()
+
+
+def _asset_evidence(tmp_path, *, decisions=None):
+    path = tmp_path / "release-assets.json"
+    path.write_text(json.dumps({
+        "schema_version": 1,
+        "previous": {
+            "version": "1.1.0", "release_url": "https://example/1.1.0",
+            "complete": True,
+            "assets": [{"filename": "foo-amd64.deb", "architecture": "amd64"}],
+        },
+        "current": {
+            "version": "1.2.0", "release_url": "https://example/1.2.0",
+            "complete": True,
+            "assets": [
+                {"filename": "foo-x86_64.deb", "architecture": "amd64"},
+                {"filename": "foo-arm64.deb", "architecture": "arm64"},
+            ],
+        },
+        "decisions": decisions or {},
+    }), encoding="utf-8")
+    return path
+
+
+def test_prebuilt_plan_requires_complete_release_asset_evidence(tmp_path):
+    package = tmp_path / "app-misc" / "foo-bin"
+    package.mkdir(parents=True)
+    (package / "foo-bin-1.1.0.ebuild").write_text(
+        'EAPI=8\nSRC_URI="https://example/foo-amd64.deb"\n', encoding="utf-8")
+
+    report = build_bump_plan(
+        tmp_path, "app-misc/foo-bin", "1.2.0", package_model="prebuilt")
+
+    assert report["ok"] is False
+    assert report["can_apply"] is False
+    assert report["release_assets"]["required"] is True
+
+
+def test_prebuilt_plan_records_every_architecture_and_asset_decision(tmp_path):
+    package = tmp_path / "app-misc" / "foo-bin"
+    package.mkdir(parents=True)
+    (package / "foo-bin-1.1.0.ebuild").write_text(
+        'EAPI=8\nSRC_URI="https://example/foo-amd64.deb"\n', encoding="utf-8")
+    incomplete = build_bump_plan(
+        tmp_path, "app-misc/foo-bin", "1.2.0",
+        package_model="prebuilt",
+        assets_evidence=_asset_evidence(tmp_path))
+    decisions = {
+        "architecture-added:arm64": "add the published arm64 artifact and keyword",
+        "assets-changed:amd64": "update the amd64 SRC_URI filename",
+    }
+    complete = build_bump_plan(
+        tmp_path, "app-misc/foo-bin", "1.2.0",
+        package_model="prebuilt",
+        assets_evidence=_asset_evidence(tmp_path, decisions=decisions))
+
+    assert incomplete["can_apply"] is False
+    assert {item["id"] for item in incomplete["release_assets"]["changes"]} == {
+        "architecture-added:arm64", "assets-changed:amd64"}
+    assert complete["ok"] is True
+    assert complete["release_assets"]["decisions_complete"] is True
+
+
+def test_plan_requires_explicit_package_model(tmp_path):
+    _pkgdir(tmp_path)
+
+    try:
+        build_bump_plan(tmp_path, "dev-python/foo", "1.2.0")
+    except TypeError as exc:
+        assert "package_model" in str(exc)
+    else:
+        raise AssertionError("expected package_model to be required")
+
+
+def test_ambiguous_package_can_be_explicitly_classified_prebuilt(tmp_path):
+    package = tmp_path / "app-misc" / "foo"
+    package.mkdir(parents=True)
+    (package / "foo-1.1.0.ebuild").write_text(
+        'EAPI=8\nSRC_URI="https://example/foo.tar.gz"\n', encoding="utf-8")
+
+    report = build_bump_plan(
+        tmp_path, "app-misc/foo", "1.2.0", package_model="prebuilt")
+
+    assert report["package_model"]["state"] == "classified"
+    assert report["package_model"]["detected_prebuilt_indicators"] == []
+    assert report["release_assets"]["required"] is True
+    assert report["can_apply"] is False
+
+
+def test_source_model_rejects_deterministic_prebuilt_indicators(tmp_path):
+    cases = (
+        ("foo-bin", 'SRC_URI="https://example/foo.tar.gz"', "package-name:-bin"),
+        ("foo", 'QA_PREBUILT="usr/bin/foo"', "ebuild-variable:QA_PREBUILT"),
+        ("foo", 'SRC_URI="https://example/foo.AppImage"',
+         "src-uri:binary-container"),
+        ("foo", 'SRC_URI="https://example/foo.deb"',
+         "src-uri:binary-container"),
+        ("foo", 'SRC_URI="https://example/foo.rpm"',
+         "src-uri:binary-container"),
+        ("foo", 'inherit rpm\nSRC_URI="https://example/${P}.asset"',
+         "ebuild-eclass:rpm"),
+        ("foo", 'SRC_URI="https://example/foo.jar"', "src-uri:jvm-bytecode"),
+        ("foo", 'SRC_URI="https://example/foo-amd64.tar.xz"',
+         "src-uri:architecture-specific-archive"),
+        ("foo", 'SRC_URI="https://example/install.sh"',
+         "src-uri:standalone-bundle"),
+        ("foo", "SRC_URI=https://example/install.sh",
+         "src-uri:standalone-bundle"),
+    )
+    for index, (name, body, expected) in enumerate(cases):
+        root = tmp_path / str(index)
+        package = root / "app-misc" / name
+        package.mkdir(parents=True)
+        (package / f"{name}-1.1.0.ebuild").write_text(
+            f"EAPI=8\n{body}\n", encoding="utf-8")
+
+        report = build_bump_plan(
+            root, f"app-misc/{name}", "1.2.0", package_model="source")
+
+        assert report["package_model"]["state"] == "conflict"
+        assert expected in report["package_model"]["detected_prebuilt_indicators"]
+        assert report["release_assets"]["required"] is True
+        assert report["can_apply"] is False
+
+
+def test_prebuilt_indicator_follows_simple_src_uri_variable(tmp_path):
+    package = tmp_path / "app-misc" / "foo"
+    package.mkdir(parents=True)
+    (package / "foo-1.1.0.ebuild").write_text(
+        'EAPI=8\nMY_ASSET="foo-amd64.deb"\nSRC_URI="https://example/${MY_ASSET}"\n',
+        encoding="utf-8")
+
+    report = build_bump_plan(
+        tmp_path, "app-misc/foo", "1.2.0", package_model="source")
+
+    assert "src-uri:binary-container" in report[
+        "package_model"]["detected_prebuilt_indicators"]
+    assert report["can_apply"] is False
+
+
+def test_source_model_ignores_source_built_output_names(tmp_path):
+    package = tmp_path / "dev-java" / "foo"
+    package.mkdir(parents=True)
+    (package / "foo-1.1.0.ebuild").write_text(
+        'EAPI=8\nSRC_URI="https://example/${P}.tar.gz"\n'
+        'src_install() { java-pkg_dojar target/foo.jar || die; }\n',
+        encoding="utf-8")
+
+    report = build_bump_plan(
+        tmp_path, "dev-java/foo", "1.2.0", package_model="source")
+
+    assert report["package_model"]["state"] == "classified"
+    assert report["package_model"]["detected_prebuilt_indicators"] == []
+    assert report["can_apply"] is True
+
+
+def test_prebuilt_indicators_ignore_comment_only_lines(tmp_path):
+    package = tmp_path / "app-misc" / "foo"
+    package.mkdir(parents=True)
+    (package / "foo-1.1.0.ebuild").write_text(
+        'EAPI=8\n# Old upstream asset was foo-amd64.deb\n'
+        'SRC_URI="https://example/foo.tar.gz"\n',
+        encoding="utf-8")
+
+    report = build_bump_plan(
+        tmp_path, "app-misc/foo", "1.2.0", package_model="source")
+
+    assert report["package_model"]["state"] == "classified"
+    assert report["package_model"]["detected_prebuilt_indicators"] == []
+    assert report["can_apply"] is True
+
+
+def test_source_model_rejects_unused_asset_evidence(tmp_path):
+    _pkgdir(tmp_path)
+
+    try:
+        build_bump_plan(
+            tmp_path, "dev-python/foo", "1.2.0", package_model="source",
+            assets_evidence=_asset_evidence(tmp_path))
+    except ValueError as exc:
+        assert "prebuilt package model" in str(exc)
+    else:
+        raise AssertionError("expected source model asset evidence to be rejected")
 
 
 def test_resolve_package_directory_rejects_traversal_and_missing(tmp_path):

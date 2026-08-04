@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -27,7 +28,7 @@ def test_check_cli_runs_only_read_only_gates(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_mod, "inspect_repository", lambda *args, **kwargs: {
         "complete": True, "ok": True, "truncated": False})
     monkeypatch.setattr(cli_mod, "parse_ebuild", lambda _path: {})
-    monkeypatch.setattr(cli_mod, "lint_ebuild", lambda _parsed: [])
+    monkeypatch.setattr(cli_mod, "lint_ebuild", lambda _parsed, **_kwargs: [])
     monkeypatch.setattr(cli_mod, "run_pkgcheck", lambda *args, **kwargs: {
         "complete": True, "ok": True, "truncated": False})
 
@@ -139,11 +140,26 @@ def test_legacy_pkgcheck_command_accepts_scan_verb(monkeypatch, tmp_path):
 
 def test_plan_cli_does_not_write(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_mod, "find_overlay_root", lambda: tmp_path)
-    monkeypatch.setattr(cli_mod, "build_bump_plan", lambda *args: {
-        "can_apply": True, "complete": True, "ok": True, "truncated": False})
-    result = CliRunner().invoke(cli_mod.cli, ["plan", "cat/pkg", "2"])
+    calls = []
+
+    def fake_plan(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"can_apply": True, "complete": True, "ok": True,
+                "truncated": False}
+
+    monkeypatch.setattr(cli_mod, "build_bump_plan", fake_plan)
+    result = CliRunner().invoke(cli_mod.cli, [
+        "plan", "cat/pkg", "2", "--package-model", "source"])
     assert result.exit_code == 0
+    assert calls[0][1]["package_model"] == "source"
     assert json.loads(result.output)["can_apply"] is True
+
+
+def test_plan_cli_requires_explicit_package_model():
+    result = CliRunner().invoke(cli_mod.cli, ["plan", "cat/pkg", "2"])
+
+    assert result.exit_code == 2
+    assert "Missing option '--package-model'" in result.output
 
 
 def test_artifacts_cli_requires_evidence(tmp_path):
@@ -163,6 +179,31 @@ def test_binary_and_image_help_are_available():
     assert runner.invoke(cli_mod.cli, ["deps", "diff", "--help"]).exit_code == 0
     assert runner.invoke(cli_mod.cli, ["deps", "reverse", "--help"]).exit_code == 0
     assert runner.invoke(cli_mod.cli, ["test", "--help"]).exit_code == 0
+
+
+def test_image_cli_passes_inventory_and_executable_policy(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_inspect(root, **options):
+        calls.append((root, options))
+        return {"complete": True, "ok": True}
+
+    monkeypatch.setattr(cli_mod, "inspect_image", fake_inspect)
+    result = CliRunner().invoke(cli_mod.cli, [
+        "image", str(tmp_path), "--no-binaries",
+        "--inventory-evidence", "inventory.json",
+        "--allow-executable", "/usr/bin/launcher",
+        "--require-non-elf-allowlist",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert calls == [(tmp_path, {
+        "include_binaries": False,
+        "expected_machine": None,
+        "executable_allowlist": ("/usr/bin/launcher",),
+        "require_non_elf_allowlist": True,
+        "inventory_evidence": Path("inventory.json"),
+    })]
 
 
 def test_deps_inspect_cli_passes_use_and_provider_scope(monkeypatch, tmp_path):
@@ -293,6 +334,61 @@ def test_deps_reverse_cli_fails_on_incomplete_evidence(monkeypatch):
     assert result.exit_code == 1
 
 
+def test_build_cli_uses_durable_default_evidence_and_writes_report(
+        monkeypatch, tmp_path):
+    ebuild = tmp_path / "overlay" / "cat" / "pkg" / "pkg-1.ebuild"
+    ebuild.parent.mkdir(parents=True)
+    ebuild.write_text("EAPI=8\n", encoding="utf-8")
+    state = tmp_path / "state"
+    calls = []
+    monkeypatch.setattr(cli_mod, "_checked_state_dir", lambda: state)
+
+    def fake_build(path, **kwargs):
+        calls.append((path, kwargs))
+        return {
+            "ok": True,
+            "complete": True,
+            "operation": "build-test",
+            "state": "passed",
+        }
+
+    monkeypatch.setattr(cli_mod, "run_build_test", fake_build)
+    result = CliRunner().invoke(cli_mod.cli, ["build", str(ebuild)])
+
+    assert result.exit_code == 0, result.output
+    report = json.loads(result.output)
+    selected = calls[0][1]["logdir"]
+    assert selected.parent == state / "evidence" / "builds"
+    assert selected.name.startswith("pkg-1-")
+    evidence = report["evidence_report"]
+    report_path = Path(evidence["path"])
+    assert report_path == selected / "report.json"
+    content = report_path.read_bytes()
+    assert evidence["bytes"] == len(content)
+    assert evidence["sha256"] == hashlib.sha256(content).hexdigest()
+    persisted = json.loads(content)
+    assert "evidence_report" not in persisted
+    assert persisted["state"] == "passed"
+
+
+def test_build_cli_does_not_replace_existing_report(monkeypatch, tmp_path):
+    ebuild = tmp_path / "pkg-1.ebuild"
+    ebuild.write_text("EAPI=8\n", encoding="utf-8")
+    evidence_dir = tmp_path / "evidence"
+    evidence_dir.mkdir()
+    report_path = evidence_dir / "report.json"
+    report_path.write_text("preexisting\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cli_mod, "run_build_test",
+        lambda *_args, **_kwargs: {"ok": True, "complete": True})
+
+    result = CliRunner().invoke(cli_mod.cli, [
+        "build", str(ebuild), "--logdir", str(evidence_dir)])
+
+    assert result.exit_code == 1
+    assert report_path.read_text(encoding="utf-8") == "preexisting\n"
+
+
 def test_package_test_cli_requires_explicit_execution():
     result = CliRunner().invoke(cli_mod.cli, ["test", "=cat/pkg-1"])
     assert result.exit_code == 2
@@ -339,6 +435,35 @@ allow_dependency_install = true
     assert "--execute is required" in result.output
 
 
+def test_local_executor_cli_passes_selected_overlay_worktree(monkeypatch, tmp_path):
+    config = tmp_path / "executors.toml"
+    config.write_text("version = 1\n[executors.local]\ntype = 'local'\n"
+                      "allow_dependency_install = true\n", encoding="utf-8")
+    root = (tmp_path / "overlay").resolve()
+    captured = []
+
+    class FakeExecutor:
+        def execute(self, request):
+            captured.append(request)
+            return {"ok": True, "digest": "digest"}
+
+    monkeypatch.setattr(cli_mod, "find_overlay_root", lambda: root)
+    monkeypatch.setattr(cli_mod, "_git_output", lambda *_args: "a" * 40)
+    monkeypatch.setattr(cli_mod, "create_executor", lambda _spec: FakeExecutor())
+    monkeypatch.setattr(
+        cli_mod, "verify_evidence",
+        lambda _path, expected_digest=None: {"ok": expected_digest == "digest"})
+
+    result = CliRunner().invoke(cli_mod.cli, [
+        "exec", "=cat/pkg-1::gentoo-zh", "--executor", "local",
+        "--config", str(config), "--evidence-dir", str(tmp_path / "evidence"),
+        "-x",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert captured[0].repository == root
+
+
 def test_bump_issues_cli_passes_typed_selector_and_explicit_issues(monkeypatch):
     calls = []
     monkeypatch.setattr(cli_mod, "find_overlay_root", lambda: Path("/overlay"))
@@ -355,12 +480,14 @@ def test_bump_issues_cli_passes_typed_selector_and_explicit_issues(monkeypatch):
     monkeypatch.setattr(cli_mod, "run_bump_issues", fake_run)
     result = CliRunner().invoke(cli_mod.cli, [
         "bump-issues", "--autobump", "manual-required",
-        "--issue", "12", "--issue", "14", "--no-output",
+        "--issue", "12", "--issue", "14", "--issue-mode", "exact",
+        "--no-output",
     ])
 
     assert result.exit_code == 0, result.output
     assert calls[0]["autobump"] == "manual-required"
     assert calls[0]["issues"] == (12, 14)
+    assert calls[0]["issue_mode"] == "exact"
     assert calls[0]["canonical_remote"] == "canonical"
     assert callable(calls[0]["canonical_loader"])
 

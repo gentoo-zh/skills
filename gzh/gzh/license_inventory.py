@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import bz2
+import errno
 import gzip
 import hashlib
 import lzma
+import os
 import re
 import stat
 import struct
@@ -12,7 +14,7 @@ import tempfile
 import unicodedata
 import zipfile
 import zlib
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Iterator
@@ -25,9 +27,11 @@ DEFAULT_MAX_CANDIDATES = 512
 DEFAULT_MAX_CANDIDATE_BYTES = 16 * 1024 * 1024
 DEFAULT_MAX_TOTAL_CANDIDATE_BYTES = 64 * 1024 * 1024
 DEFAULT_MAX_METADATA_BYTES = 16 * 1024 * 1024
+DEFAULT_MAX_NESTED_PROBE_BYTES = 64 * 1024 * 1024
 MAX_MEMBER_PATH_BYTES = 4096
 MAX_MEMBER_COMPONENT_BYTES = 255
 MAX_CONSECUTIVE_TAR_EXTENSIONS = 16
+NESTED_HEADER_BYTES = 512
 READ_CHUNK_BYTES = 1024 * 1024
 
 _ZIP_EOCD = struct.Struct("<4s4H2LH")
@@ -88,6 +92,7 @@ class InventoryLimits:
     max_candidate_bytes: int = DEFAULT_MAX_CANDIDATE_BYTES
     max_total_candidate_bytes: int = DEFAULT_MAX_TOTAL_CANDIDATE_BYTES
     max_metadata_bytes: int = DEFAULT_MAX_METADATA_BYTES
+    max_nested_probe_bytes: int = DEFAULT_MAX_NESTED_PROBE_BYTES
 
     def as_dict(self) -> dict[str, int]:
         return {
@@ -96,6 +101,7 @@ class InventoryLimits:
             "max_candidates": self.max_candidates,
             "max_members": self.max_members,
             "max_metadata_bytes": self.max_metadata_bytes,
+            "max_nested_probe_bytes": self.max_nested_probe_bytes,
             "max_total_candidate_bytes": self.max_total_candidate_bytes,
             "max_total_member_bytes": self.max_total_member_bytes,
         }
@@ -114,16 +120,24 @@ class _Member:
     source: object
 
 
-def _sha256_path(path: Path, *, maximum_size: int) -> str:
+def _snapshot_archive(
+    source: BinaryIO,
+    snapshot: BinaryIO,
+    *,
+    maximum_size: int,
+) -> tuple[str, int]:
     digest = hashlib.sha256()
     observed = 0
-    with path.open("rb") as stream:
-        while chunk := stream.read(READ_CHUNK_BYTES):
-            observed += len(chunk)
-            if observed > maximum_size:
-                raise LicenseInventoryError("archive size exceeds the limit")
-            digest.update(chunk)
-    return digest.hexdigest()
+    while chunk := source.read(
+            min(READ_CHUNK_BYTES, maximum_size + 1 - observed)):
+        observed += len(chunk)
+        if observed > maximum_size:
+            raise LicenseInventoryError("archive size exceeds the limit")
+        snapshot.write(chunk)
+        digest.update(chunk)
+    snapshot.flush()
+    snapshot.seek(0)
+    return digest.hexdigest(), observed
 
 
 def _file_identity(metadata) -> tuple[int, int, int, int, int, int]:
@@ -239,54 +253,53 @@ def _discard_exact(stream: BinaryIO, size: int, *, label: str,
         remaining -= len(chunk)
 
 
-def _zip_preflight(path: Path, limits: InventoryLimits) -> bool:
-    with path.open("rb") as stream:
-        stream.seek(0, 2)
-        archive_size = stream.tell()
-        tail_size = min(archive_size, 65_557)
-        stream.seek(archive_size - tail_size)
-        tail = stream.read(tail_size)
-        search_end = len(tail)
-        index = -1
-        fields = None
-        while search_end:
-            candidate = tail.rfind(_ZIP_EOCD_SIGNATURE, 0, search_end)
-            if candidate < 0:
+def _zip_preflight(stream: BinaryIO, limits: InventoryLimits) -> bool:
+    stream.seek(0, 2)
+    archive_size = stream.tell()
+    tail_size = min(archive_size, 65_557)
+    stream.seek(archive_size - tail_size)
+    tail = stream.read(tail_size)
+    search_end = len(tail)
+    index = -1
+    fields = None
+    while search_end:
+        candidate = tail.rfind(_ZIP_EOCD_SIGNATURE, 0, search_end)
+        if candidate < 0:
+            break
+        if candidate + _ZIP_EOCD.size <= len(tail):
+            candidate_fields = _ZIP_EOCD.unpack_from(tail, candidate)
+            if candidate + _ZIP_EOCD.size + candidate_fields[-1] == len(tail):
+                index = candidate
+                fields = candidate_fields
                 break
-            if candidate + _ZIP_EOCD.size <= len(tail):
-                candidate_fields = _ZIP_EOCD.unpack_from(tail, candidate)
-                if candidate + _ZIP_EOCD.size + candidate_fields[-1] == len(tail):
-                    index = candidate
-                    fields = candidate_fields
-                    break
-            search_end = candidate
-        if fields is None:
-            return False
-        (_, disk_number, directory_disk, disk_entries, total_entries,
-         directory_size, directory_offset, comment_size) = fields
-        if disk_number != 0 or directory_disk != 0 or disk_entries != total_entries:
-            raise LicenseInventoryError("multi-disk ZIP archives are not supported")
-        if (total_entries == _ZIP64_SENTINEL_16
-                or directory_size == _ZIP64_SENTINEL_32
-                or directory_offset == _ZIP64_SENTINEL_32):
-            raise LicenseInventoryError(
-                "ZIP64 metadata is not supported by the bounded inventory")
-        if total_entries > limits.max_members:
-            raise LicenseInventoryError("archive member count exceeds the limit")
-        if directory_size > limits.max_metadata_bytes:
-            raise LicenseInventoryError(
-                "ZIP central-directory metadata exceeds the limit")
+        search_end = candidate
+    if fields is None:
+        return False
+    (_, disk_number, directory_disk, disk_entries, total_entries,
+     directory_size, directory_offset, comment_size) = fields
+    if disk_number != 0 or directory_disk != 0 or disk_entries != total_entries:
+        raise LicenseInventoryError("multi-disk ZIP archives are not supported")
+    if (total_entries == _ZIP64_SENTINEL_16
+            or directory_size == _ZIP64_SENTINEL_32
+            or directory_offset == _ZIP64_SENTINEL_32):
+        raise LicenseInventoryError(
+            "ZIP64 metadata is not supported by the bounded inventory")
+    if total_entries > limits.max_members:
+        raise LicenseInventoryError("archive member count exceeds the limit")
+    if directory_size > limits.max_metadata_bytes:
+        raise LicenseInventoryError(
+            "ZIP central-directory metadata exceeds the limit")
 
-        eocd_offset = archive_size - tail_size + index
-        prefix_size = eocd_offset - directory_size - directory_offset
-        if prefix_size < 0:
-            raise LicenseInventoryError("invalid ZIP central-directory bounds")
-        central_offset = prefix_size + directory_offset
-        if central_offset + directory_size != eocd_offset:
-            raise LicenseInventoryError("invalid ZIP central-directory bounds")
-        stream.seek(central_offset)
-        directory = _read_exact(
-            stream, directory_size, label="ZIP central directory")
+    eocd_offset = archive_size - tail_size + index
+    prefix_size = eocd_offset - directory_size - directory_offset
+    if prefix_size < 0:
+        raise LicenseInventoryError("invalid ZIP central-directory bounds")
+    central_offset = prefix_size + directory_offset
+    if central_offset + directory_size != eocd_offset:
+        raise LicenseInventoryError("invalid ZIP central-directory bounds")
+    stream.seek(central_offset)
+    directory = _read_exact(
+        stream, directory_size, label="ZIP central directory")
 
     position = 0
     observed_entries = 0
@@ -329,64 +342,63 @@ def _zip_preflight(path: Path, limits: InventoryLimits) -> bool:
 
     metadata_bytes = directory_size
     seen_offsets = set()
-    with path.open("rb") as stream:
-        for local_header_offset, central_name in local_entries:
-            if local_header_offset in seen_offsets:
-                raise LicenseInventoryError("duplicate ZIP local-header offset")
-            seen_offsets.add(local_header_offset)
-            absolute_offset = prefix_size + local_header_offset
-            if (absolute_offset < prefix_size
-                    or absolute_offset + _ZIP_LOCAL_HEADER.size > central_offset):
-                raise LicenseInventoryError("invalid ZIP local-header bounds")
-            stream.seek(absolute_offset)
-            local_header = _read_exact(
-                stream, _ZIP_LOCAL_HEADER.size, label="ZIP local header")
-            local_fields = _ZIP_LOCAL_HEADER.unpack(local_header)
-            if local_fields[0] != _ZIP_LOCAL_SIGNATURE:
-                raise LicenseInventoryError("invalid ZIP local-header entry")
-            compressed_size = local_fields[7]
-            member_size = local_fields[8]
-            name_size, extra_size = local_fields[9:11]
-            metadata_bytes += _ZIP_LOCAL_HEADER.size + name_size + extra_size
-            if metadata_bytes > limits.max_metadata_bytes:
-                raise LicenseInventoryError("ZIP parser metadata exceeds the limit")
-            raw_name = _read_exact(stream, name_size, label="ZIP local member name")
-            extra = _read_exact(stream, extra_size, label="ZIP local extra field")
-            if b"\x00" in raw_name:
-                raise LicenseInventoryError("ZIP member name contains a NUL byte")
-            if raw_name != central_name:
-                raise LicenseInventoryError(
-                    "ZIP local and central member names differ")
-            if (compressed_size == _ZIP64_SENTINEL_32
-                    or member_size == _ZIP64_SENTINEL_32
-                    or _zip_extra_contains_zip64(extra)):
-                raise LicenseInventoryError(
-                    "ZIP64 member metadata is not supported by the bounded inventory")
+    for local_header_offset, central_name in local_entries:
+        if local_header_offset in seen_offsets:
+            raise LicenseInventoryError("duplicate ZIP local-header offset")
+        seen_offsets.add(local_header_offset)
+        absolute_offset = prefix_size + local_header_offset
+        if (absolute_offset < prefix_size
+                or absolute_offset + _ZIP_LOCAL_HEADER.size > central_offset):
+            raise LicenseInventoryError("invalid ZIP local-header bounds")
+        stream.seek(absolute_offset)
+        local_header = _read_exact(
+            stream, _ZIP_LOCAL_HEADER.size, label="ZIP local header")
+        local_fields = _ZIP_LOCAL_HEADER.unpack(local_header)
+        if local_fields[0] != _ZIP_LOCAL_SIGNATURE:
+            raise LicenseInventoryError("invalid ZIP local-header entry")
+        compressed_size = local_fields[7]
+        member_size = local_fields[8]
+        name_size, extra_size = local_fields[9:11]
+        metadata_bytes += _ZIP_LOCAL_HEADER.size + name_size + extra_size
+        if metadata_bytes > limits.max_metadata_bytes:
+            raise LicenseInventoryError("ZIP parser metadata exceeds the limit")
+        raw_name = _read_exact(stream, name_size, label="ZIP local member name")
+        extra = _read_exact(stream, extra_size, label="ZIP local extra field")
+        if b"\x00" in raw_name:
+            raise LicenseInventoryError("ZIP member name contains a NUL byte")
+        if raw_name != central_name:
+            raise LicenseInventoryError(
+                "ZIP local and central member names differ")
+        if (compressed_size == _ZIP64_SENTINEL_32
+                or member_size == _ZIP64_SENTINEL_32
+                or _zip_extra_contains_zip64(extra)):
+            raise LicenseInventoryError(
+                "ZIP64 member metadata is not supported by the bounded inventory")
     return True
 
 
 @contextmanager
-def _open_tar_stream(path: Path) -> Iterator[tuple[BinaryIO, bool]]:
-    with path.open("rb") as raw:
-        magic = raw.read(6)
-        raw.seek(0)
-        if magic.startswith(b"\x1f\x8b"):
-            with gzip.GzipFile(fileobj=raw, mode="rb") as stream:
-                yield stream, True
-        elif magic.startswith(b"BZh"):
-            with bz2.BZ2File(raw, mode="rb") as stream:
-                yield stream, True
-        elif magic.startswith(b"\xfd7zXZ\x00"):
-            with lzma.LZMAFile(raw, mode="rb") as stream:
-                yield stream, True
-        elif magic.startswith(b"\x28\xb5\x2f\xfd"):
-            raise LicenseInventoryError(
-                "Zstandard tar archives are not supported by the bounded inventory")
-        else:
-            yield raw, False
+def _open_tar_stream(raw: BinaryIO) -> Iterator[tuple[BinaryIO, bool]]:
+    raw.seek(0)
+    magic = raw.read(6)
+    raw.seek(0)
+    if magic.startswith(b"\x1f\x8b"):
+        with gzip.GzipFile(fileobj=raw, mode="rb") as stream:
+            yield stream, True
+    elif magic.startswith(b"BZh"):
+        with bz2.BZ2File(raw, mode="rb") as stream:
+            yield stream, True
+    elif magic.startswith(b"\xfd7zXZ\x00"):
+        with lzma.LZMAFile(raw, mode="rb") as stream:
+            yield stream, True
+    elif magic.startswith(b"\x28\xb5\x2f\xfd"):
+        raise LicenseInventoryError(
+            "Zstandard tar archives are not supported by the bounded inventory")
+    else:
+        yield raw, False
 
 
-def _tar_preflight(path: Path, limits: InventoryLimits, *,
+def _tar_preflight(stream: BinaryIO, limits: InventoryLimits, *,
                    compressed_spool: BinaryIO) -> tuple[bool, bool]:
     member_count = 0
     metadata_bytes = 0
@@ -394,7 +406,7 @@ def _tar_preflight(path: Path, limits: InventoryLimits, *,
     consecutive_extensions = 0
     saw_header = False
     saw_end_marker = False
-    with _open_tar_stream(path) as (stream, compressed):
+    with _open_tar_stream(stream) as (stream, compressed):
         while True:
             block = stream.read(tarfile.BLOCKSIZE)
             if not block:
@@ -457,10 +469,19 @@ def _tar_preflight(path: Path, limits: InventoryLimits, *,
                 copy_to=compressed_spool if compressed else None)
 
 
-def _stream_sha256(stream: BinaryIO, *, expected_size: int,
-                   maximum_size: int) -> str:
+def _stream_sha256(
+    stream: BinaryIO,
+    *,
+    expected_size: int,
+    maximum_size: int,
+    prefix: bytes = b"",
+) -> str:
     digest = hashlib.sha256()
-    observed = 0
+    digest.update(prefix)
+    observed = len(prefix)
+    if observed > expected_size:
+        raise LicenseInventoryError(
+            "archive member prefix exceeds its declared size")
     while chunk := stream.read(min(READ_CHUNK_BYTES, maximum_size + 1 - observed)):
         observed += len(chunk)
         if observed > maximum_size:
@@ -471,6 +492,34 @@ def _stream_sha256(stream: BinaryIO, *, expected_size: int,
         raise LicenseInventoryError(
             "archive member size differs from the bytes returned by the archive")
     return digest.hexdigest()
+
+
+def _nested_container_format(header: bytes) -> str | None:
+    if header.startswith(b"\x7fELF") and header[8:11] in {b"AI\x01", b"AI\x02"}:
+        return "appimage"
+    if header.startswith((b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")):
+        return "zip"
+    if header.startswith((b"hsqs", b"sqsh")):
+        return "squashfs"
+    if header.startswith(b"!<arch>\n"):
+        return "ar"
+    if len(header) >= 262 and header[257:262] == b"ustar":
+        return "tar"
+    if header.startswith(b"\x1f\x8b"):
+        return "gzip-stream"
+    if header.startswith(b"BZh"):
+        return "bzip2-stream"
+    if header.startswith(b"\xfd7zXZ\x00"):
+        return "xz-stream"
+    if header.startswith(b"\x28\xb5\x2f\xfd"):
+        return "zstd-stream"
+    if header.startswith(b"7z\xbc\xaf\x27\x1c"):
+        return "7zip"
+    if header.startswith((b"070701", b"070702", b"070707")):
+        return "cpio"
+    if header.startswith(b"\xed\xab\xee\xdb"):
+        return "rpm"
+    return None
 
 
 def _tar_members(archive: tarfile.TarFile) -> Iterator[_Member]:
@@ -523,12 +572,14 @@ def _record_members(
     *,
     limits: InventoryLimits,
     open_member,
-) -> tuple[list[dict[str, object]], int, int]:
+) -> tuple[list[dict[str, object]], list[dict[str, object]], int, int, int]:
     matches: list[dict[str, object]] = []
+    nested_containers: list[dict[str, object]] = []
     seen: dict[str, str] = {}
     member_count = 0
     total_member_bytes = 0
     total_candidate_bytes = 0
+    total_nested_probe_bytes = 0
 
     for member in members:
         member_count += 1
@@ -547,35 +598,64 @@ def _record_members(
                 "archive total declared member size exceeds the limit")
         if member.kind == "directory":
             continue
-        if not _is_license_candidate(member.path):
-            continue
+        candidate = _is_license_candidate(member.path)
         if member.kind != "file":
+            if candidate:
+                raise LicenseInventoryError(
+                    "license-like archive member is not a regular file: "
+                    f"{member.path!r}")
+            continue
+
+        if candidate:
+            if len(matches) >= limits.max_candidates:
+                raise LicenseInventoryError(
+                    "license-like archive member count exceeds the limit")
+            if member.size > limits.max_candidate_bytes:
+                raise LicenseInventoryError(
+                    "license-like archive member exceeds the size limit: "
+                    f"{member.path!r}")
+            total_candidate_bytes += member.size
+            if total_candidate_bytes > limits.max_total_candidate_bytes:
+                raise LicenseInventoryError(
+                    "license-like archive member total size exceeds the limit")
+
+        probe_size = min(member.size, NESTED_HEADER_BYTES)
+        total_nested_probe_bytes += probe_size
+        if total_nested_probe_bytes > limits.max_nested_probe_bytes:
             raise LicenseInventoryError(
-                f"license-like archive member is not a regular file: {member.path!r}")
-        if len(matches) >= limits.max_candidates:
-            raise LicenseInventoryError(
-                "license-like archive member count exceeds the limit")
-        if member.size > limits.max_candidate_bytes:
-            raise LicenseInventoryError(
-                f"license-like archive member exceeds the size limit: {member.path!r}")
-        total_candidate_bytes += member.size
-        if total_candidate_bytes > limits.max_total_candidate_bytes:
-            raise LicenseInventoryError(
-                "license-like archive member total size exceeds the limit")
+                "nested-container probe bytes exceed the limit")
         with open_member(member.source) as stream:
-            digest = _stream_sha256(
+            prefix = _read_exact(
+                stream, probe_size, label="archive member prefix")
+            nested_format = _nested_container_format(prefix)
+            digest = (_stream_sha256(
                 stream,
                 expected_size=member.size,
                 maximum_size=limits.max_candidate_bytes,
-            )
-        matches.append({
-            "path": member.path,
-            "sha256": digest,
-            "size": member.size,
-        })
+                prefix=prefix,
+            ) if candidate else None)
+        if nested_format is not None:
+            nested_containers.append({
+                "format": nested_format,
+                "path": member.path,
+                "size": member.size,
+            })
+        if candidate:
+            matches.append({
+                "path": member.path,
+                "sha256": digest,
+                "size": member.size,
+            })
 
     matches.sort(key=lambda item: str(item["path"]))
-    return matches, member_count, total_member_bytes
+    nested_containers.sort(key=lambda item: str(item["path"]))
+    return (
+        matches,
+        nested_containers,
+        member_count,
+        total_member_bytes,
+        total_nested_probe_bytes,
+    )
 
 
 def inspect_license_archive(
@@ -586,82 +666,134 @@ def inspect_license_archive(
     limits = limits or InventoryLimits()
     limits.validate()
     requested = Path(archive_path)
-    if requested.is_symlink():
-        raise LicenseInventoryError("archive path must not be a symbolic link")
+    path = Path(os.path.abspath(requested))
     try:
-        metadata = requested.stat()
+        path_metadata = path.lstat()
     except OSError as exc:
         raise LicenseInventoryError(f"cannot stat archive: {exc}") from exc
-    if not stat.S_ISREG(metadata.st_mode):
+    if stat.S_ISLNK(path_metadata.st_mode):
+        raise LicenseInventoryError("archive path must not be a symbolic link")
+    if not stat.S_ISREG(path_metadata.st_mode):
         raise LicenseInventoryError("archive path must be a regular file")
-    if metadata.st_size > limits.max_archive_bytes:
-        raise LicenseInventoryError("archive size exceeds the limit")
-    try:
-        compressed_tar_spool = tempfile.TemporaryFile(mode="w+b")
-    except OSError as exc:
+
+    flags = (os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+             | getattr(os, "O_NONBLOCK", 0))
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if nofollow is None:
         raise LicenseInventoryError(
-            f"cannot create bounded archive workspace: {exc}") from exc
-    with compressed_tar_spool:
-        try:
-            path = requested.resolve(strict=True)
-            initial_digest = _sha256_path(
-                path, maximum_size=limits.max_archive_bytes)
-            is_zip = _zip_preflight(path, limits)
-            is_tar, tar_is_spooled = _tar_preflight(
-                path, limits, compressed_spool=compressed_tar_spool)
-        except (OSError, EOFError, gzip.BadGzipFile, lzma.LZMAError,
-                zlib.error) as exc:
-            raise LicenseInventoryError(f"cannot read archive: {exc}") from exc
-        if is_zip and is_tar:
-            raise LicenseInventoryError("archive format is ambiguous")
-        if not is_zip and not is_tar:
+            "this platform cannot open archives without following symbolic links")
+    try:
+        descriptor = os.open(path, flags | nofollow)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
             raise LicenseInventoryError(
-                "archive is neither a supported tar nor ZIP file")
-
-        try:
-            if is_zip:
-                with zipfile.ZipFile(path, "r") as archive:
-                    matches, member_count, total_member_bytes = _record_members(
-                        _zip_members(archive), limits=limits,
-                        open_member=archive.open)
-                archive_type = "zip"
-            else:
-                if tar_is_spooled:
-                    compressed_tar_spool.flush()
-                    compressed_tar_spool.seek(0)
-                    tar_context = tarfile.open(
-                        fileobj=compressed_tar_spool, mode="r|")
-                else:
-                    tar_context = tarfile.open(path, "r|")
-                with tar_context as archive:
-                    def open_tar_member(source: object) -> BinaryIO:
-                        assert isinstance(source, tarfile.TarInfo)
-                        stream = archive.extractfile(source)
-                        if stream is None:
-                            raise LicenseInventoryError(
-                                f"cannot read archive member: {source.name!r}")
-                        return stream
-
-                    matches, member_count, total_member_bytes = _record_members(
-                        _tar_members(archive), limits=limits,
-                        open_member=open_tar_member)
-                archive_type = "tar"
-        except (OSError, EOFError, tarfile.TarError, UnicodeError,
-                zipfile.BadZipFile, lzma.LZMAError, NotImplementedError,
-                RuntimeError, zlib.error) as exc:
-            raise LicenseInventoryError(f"cannot inspect archive: {exc}") from exc
+                "archive path must not be a symbolic link") from exc
+        raise LicenseInventoryError(f"cannot open archive: {exc}") from exc
 
     try:
-        final_metadata = path.stat()
-        final_digest = _sha256_path(
-            path, maximum_size=limits.max_archive_bytes)
+        source_stream = os.fdopen(descriptor, "rb")
     except OSError as exc:
-        raise LicenseInventoryError(
-            f"cannot re-read archive after inspection: {exc}") from exc
-    if (_file_identity(final_metadata) != _file_identity(metadata)
-            or final_digest != initial_digest):
-        raise LicenseInventoryError("archive changed during inspection")
+        os.close(descriptor)
+        raise LicenseInventoryError(f"cannot read archive: {exc}") from exc
 
+    with source_stream as source:
+        metadata = os.fstat(source.fileno())
+        if not stat.S_ISREG(metadata.st_mode):
+            raise LicenseInventoryError("archive path must be a regular file")
+        if _file_identity(metadata) != _file_identity(path_metadata):
+            raise LicenseInventoryError("archive changed while it was opened")
+        if metadata.st_size > limits.max_archive_bytes:
+            raise LicenseInventoryError("archive size exceeds the limit")
+
+        try:
+            stack = ExitStack()
+            archive_snapshot = stack.enter_context(
+                tempfile.TemporaryFile(mode="w+b"))
+            compressed_tar_spool = stack.enter_context(
+                tempfile.TemporaryFile(mode="w+b"))
+        except OSError as exc:
+            stack.close()
+            raise LicenseInventoryError(
+                f"cannot create bounded archive workspace: {exc}") from exc
+        with stack:
+            try:
+                initial_digest, snapshot_size = _snapshot_archive(
+                    source, archive_snapshot,
+                    maximum_size=limits.max_archive_bytes)
+                copied_metadata = os.fstat(source.fileno())
+                if (snapshot_size != metadata.st_size
+                        or _file_identity(copied_metadata)
+                        != _file_identity(metadata)):
+                    raise LicenseInventoryError(
+                        "archive changed while it was copied")
+                is_zip = _zip_preflight(archive_snapshot, limits)
+                is_tar, tar_is_spooled = _tar_preflight(
+                    archive_snapshot, limits,
+                    compressed_spool=compressed_tar_spool)
+            except (OSError, EOFError, gzip.BadGzipFile, lzma.LZMAError,
+                    zlib.error) as exc:
+                raise LicenseInventoryError(
+                    f"cannot read archive: {exc}") from exc
+            if is_zip and is_tar:
+                raise LicenseInventoryError("archive format is ambiguous")
+            if not is_zip and not is_tar:
+                raise LicenseInventoryError(
+                    "archive is neither a supported tar nor ZIP file")
+
+            try:
+                if is_zip:
+                    archive_snapshot.seek(0)
+                    with zipfile.ZipFile(archive_snapshot, "r") as archive:
+                        (matches, nested_containers, member_count,
+                         total_member_bytes,
+                         nested_probe_bytes) = _record_members(
+                             _zip_members(archive), limits=limits,
+                             open_member=archive.open)
+                    archive_type = "zip"
+                else:
+                    if tar_is_spooled:
+                        compressed_tar_spool.flush()
+                        compressed_tar_spool.seek(0)
+                        tar_context = tarfile.open(
+                            fileobj=compressed_tar_spool, mode="r|")
+                    else:
+                        archive_snapshot.seek(0)
+                        tar_context = tarfile.open(
+                            fileobj=archive_snapshot, mode="r|")
+                    with tar_context as archive:
+                        def open_tar_member(source: object) -> BinaryIO:
+                            assert isinstance(source, tarfile.TarInfo)
+                            stream = archive.extractfile(source)
+                            if stream is None:
+                                raise LicenseInventoryError(
+                                    "cannot read archive member: "
+                                    f"{source.name!r}")
+                            return stream
+
+                        (matches, nested_containers, member_count,
+                         total_member_bytes,
+                         nested_probe_bytes) = _record_members(
+                             _tar_members(archive), limits=limits,
+                             open_member=open_tar_member)
+                    archive_type = "tar"
+            except (OSError, EOFError, tarfile.TarError, UnicodeError,
+                    zipfile.BadZipFile, lzma.LZMAError, NotImplementedError,
+                    RuntimeError, zlib.error) as exc:
+                raise LicenseInventoryError(
+                    f"cannot inspect archive: {exc}") from exc
+
+            try:
+                final_metadata = os.fstat(source.fileno())
+                final_path_metadata = path.lstat()
+            except OSError as exc:
+                raise LicenseInventoryError(
+                    f"cannot verify archive after inspection: {exc}") from exc
+            if (_file_identity(final_metadata) != _file_identity(metadata)
+                    or _file_identity(final_path_metadata)
+                    != _file_identity(metadata)):
+                raise LicenseInventoryError("archive changed during inspection")
+
+    nested_scope_unreviewed = bool(nested_containers)
     return {
         "archive": {
             "path": str(path),
@@ -669,16 +801,20 @@ def inspect_license_archive(
             "size": metadata.st_size,
             "type": archive_type,
         },
-        "complete": True,
+        "complete": not nested_scope_unreviewed,
         "legal_conclusion": None,
         "license_like_members": matches,
         "limitations": [
             "Filename matching inventories evidence; it does not identify applicable terms.",
             "This report makes no legal, compatibility, or redistribution conclusion.",
+            "Nested container members are detected but are not traversed.",
         ],
         "limits": limits.as_dict(),
         "members_scanned": member_count,
-        "ok": True,
+        "nested_containers": nested_containers,
+        "nested_probe_bytes": nested_probe_bytes,
+        "nested_scope_unreviewed": nested_scope_unreviewed,
+        "ok": not nested_scope_unreviewed,
         "schema_version": 1,
         "total_declared_member_bytes": total_member_bytes,
         "truncated": False,

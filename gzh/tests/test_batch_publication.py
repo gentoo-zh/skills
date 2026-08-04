@@ -16,14 +16,57 @@ OBSERVED_AT = "2026-08-04T03:00:00Z"
 
 def _report():
     return {
-        "schema_version": 7,
+        "schema_version": 2,
         "batch_id": "fixture-batch",
+        "created_at": "2026-08-04T01:00:00Z",
+        "selection_snapshot": {
+            "path": "/state/queues/bump-issues.json",
+            "sha256": "f" * 64,
+            "schema_version": 2,
+            "selection_expression": {
+                "issue_mode": "exact",
+                "composition": "explicit_only",
+                "queue": {
+                    "evaluated": False,
+                    "repository": "gentoo-zh/overlay",
+                    "label": "nvchecker",
+                    "state": "open",
+                    "limit": 100,
+                    "maintainer": None,
+                    "package": None,
+                    "autobump": "any",
+                },
+                "explicit_issues": [123],
+            },
+            "resulting_issues": [123],
+        },
         "items": [{
             "id": "app-misc/demo@1.2.3",
             "issue": 123,
+            "package": "app-misc/demo",
+            "target_version": "1.2.3",
             "branch": "app-misc-demo-1.2.3",
             "commit": COMMIT,
             "committed_at": "2026-08-04T01:00:00Z",
+            "outcome": {
+                "state": "local_committed",
+                "transitions": [
+                    {
+                        "from_state": None,
+                        "state": "pending",
+                        "at": "2026-08-04T00:30:00Z",
+                        "reason": "The queue snapshot selected this item for processing.",
+                        "evidence": {"selection_snapshot_sha256": "f" * 64},
+                    },
+                    {
+                        "from_state": "pending",
+                        "state": "local_committed",
+                        "at": "2026-08-04T01:00:00Z",
+                        "reason": "The verified change is committed locally.",
+                        "evidence": {"commit": COMMIT},
+                    },
+                ],
+            },
             "qa": {"state": "passed", "commands": ["gzh qa"]},
         }],
         "skips": [{"issue": 99, "reason": "dependency unavailable"}],

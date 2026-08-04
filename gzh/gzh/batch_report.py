@@ -18,6 +18,44 @@ from gzh.ci_observation import summarize_checks
 
 
 _FULL_OID_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}", re.IGNORECASE)
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
+_UTC_RE = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    r"(?:\.[0-9]+)?Z")
+_PACKAGE_RE = re.compile(r"[A-Za-z0-9+_.-]+/[A-Za-z0-9+_.-]+")
+BATCH_REPORT_SCHEMA_VERSION = 2
+BATCH_OUTCOME_STATES = (
+    "pending",
+    "blocked",
+    "local_committed",
+    "superseded_by_external_merge",
+    "pushed",
+    "pr_open",
+    "checks_passed",
+    "merged",
+)
+BATCH_UPDATE_STATES = BATCH_OUTCOME_STATES[1:]
+_OUTCOME_TRANSITIONS = {
+    None: frozenset({"pending"}),
+    "pending": frozenset({
+        "blocked", "local_committed", "superseded_by_external_merge",
+    }),
+    "blocked": frozenset({
+        "local_committed", "superseded_by_external_merge",
+    }),
+    "local_committed": frozenset({
+        "pushed", "superseded_by_external_merge",
+    }),
+    "pushed": frozenset({"pr_open", "superseded_by_external_merge"}),
+    "pr_open": frozenset({
+        "checks_passed", "superseded_by_external_merge",
+    }),
+    "checks_passed": frozenset({
+        "merged", "superseded_by_external_merge",
+    }),
+    "superseded_by_external_merge": frozenset(),
+    "merged": frozenset(),
+}
 
 
 class BatchReportConflict(RuntimeError):
@@ -43,6 +81,246 @@ def _sequence(value: Any, name: str) -> Sequence[Mapping[str, Any]]:
             or any(not isinstance(item, Mapping) for item in value)):
         raise BatchReportSchemaError(f"{name} must be a sequence of mappings")
     return value
+
+
+def _plain_list(value: Any, name: str) -> list[Any]:
+    if not isinstance(value, list):
+        raise BatchReportSchemaError(f"{name} must be an array")
+    return value
+
+
+def _nonempty_string(value: Any, name: str, *, maximum: int = 4096) -> str:
+    if (not isinstance(value, str) or not value.strip()
+            or len(value.encode("utf-8")) > maximum
+            or any(ord(character) < 32 for character in value)):
+        raise BatchReportSchemaError(f"{name} must be a bounded non-empty string")
+    return value
+
+
+def _valid_utc_timestamp(value: Any) -> bool:
+    if not isinstance(value, str) or not _UTC_RE.fullmatch(value):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError:
+        return False
+    return parsed.utcoffset() is not None and parsed.utcoffset().total_seconds() == 0
+
+
+def _validate_outcome(
+        outcome: Any, item_id: str, *, selection_snapshot_sha256: str) -> None:
+    if not isinstance(outcome, Mapping):
+        raise BatchReportSchemaError(f"item {item_id!r} outcome must be a mapping")
+    state = outcome.get("state")
+    if state not in BATCH_OUTCOME_STATES:
+        raise BatchReportSchemaError(f"item {item_id!r} has an invalid outcome state")
+    transitions = _sequence(
+        outcome.get("transitions"), f"item {item_id!r} outcome transitions")
+    if not transitions:
+        raise BatchReportSchemaError(
+            f"item {item_id!r} outcome transitions must not be empty")
+    previous = None
+    for index, transition in enumerate(transitions):
+        source = transition.get("from_state")
+        target = transition.get("state")
+        if source != previous:
+            raise BatchReportSchemaError(
+                f"item {item_id!r} transition {index} has a discontinuous source")
+        if target not in _OUTCOME_TRANSITIONS.get(source, frozenset()):
+            raise BatchReportSchemaError(
+                f"item {item_id!r} transition {index} is not allowed")
+        if not _valid_utc_timestamp(transition.get("at")):
+            raise BatchReportSchemaError(
+                f"item {item_id!r} transition {index} has an invalid UTC time")
+        _nonempty_string(
+            transition.get("reason"),
+            f"item {item_id!r} transition {index} reason")
+        evidence = transition.get("evidence")
+        if not isinstance(evidence, Mapping):
+            raise BatchReportSchemaError(
+                f"item {item_id!r} transition {index} evidence must be a mapping")
+        if (index == 0
+                and evidence.get("selection_snapshot_sha256")
+                != selection_snapshot_sha256):
+            raise BatchReportSchemaError(
+                f"item {item_id!r} pending transition must bind the selection snapshot")
+        previous = target
+    if previous != state:
+        raise BatchReportSchemaError(
+            f"item {item_id!r} outcome state does not match its transitions")
+
+
+def validate_batch_report(report: Any) -> None:
+    """Validate the durable structured batch-report schema."""
+    if not isinstance(report, Mapping):
+        raise BatchReportSchemaError("batch report must be a mapping")
+    if report.get("schema_version") != BATCH_REPORT_SCHEMA_VERSION:
+        raise BatchReportSchemaError(
+            f"batch report schema_version must be {BATCH_REPORT_SCHEMA_VERSION}")
+    _nonempty_string(report.get("batch_id"), "batch_id", maximum=256)
+    if not _valid_utc_timestamp(report.get("created_at")):
+        raise BatchReportSchemaError("created_at must be a UTC timestamp ending in Z")
+
+    snapshot = report.get("selection_snapshot")
+    if not isinstance(snapshot, Mapping):
+        raise BatchReportSchemaError("selection_snapshot must be a mapping")
+    _nonempty_string(snapshot.get("path"), "selection_snapshot.path")
+    if not _SHA256_RE.fullmatch(snapshot.get("sha256") or ""):
+        raise BatchReportSchemaError("selection_snapshot.sha256 must be a SHA-256 digest")
+    if snapshot.get("schema_version") != 2:
+        raise BatchReportSchemaError("selection_snapshot.schema_version must be 2")
+    selection_expression = snapshot.get("selection_expression")
+    if not isinstance(selection_expression, Mapping):
+        raise BatchReportSchemaError(
+            "selection_snapshot.selection_expression must be a mapping")
+    resulting_issues = _plain_list(
+        snapshot.get("resulting_issues"),
+        "selection_snapshot.resulting_issues")
+    if (any(not isinstance(issue, int) or isinstance(issue, bool) or issue < 1
+            for issue in resulting_issues)
+            or len(resulting_issues) != len(set(resulting_issues))):
+        raise BatchReportSchemaError(
+            "selection_snapshot.resulting_issues must contain unique issue numbers")
+    issue_mode = selection_expression.get("issue_mode")
+    explicit_issues = selection_expression.get("explicit_issues")
+    queue_expression = selection_expression.get("queue")
+    if (issue_mode not in {"include", "exact"}
+            or selection_expression.get("composition") != (
+                "explicit_only" if issue_mode == "exact"
+                else "filtered_queue_or_explicit")
+            or not isinstance(queue_expression, Mapping)
+            or not isinstance(explicit_issues, list)
+            or any(not isinstance(issue, int) or isinstance(issue, bool) or issue < 1
+                   for issue in explicit_issues)
+            or len(explicit_issues) != len(set(explicit_issues))):
+        raise BatchReportSchemaError(
+            "selection_snapshot.selection_expression is incomplete")
+    _nonempty_string(
+        queue_expression.get("repository"),
+        "selection_snapshot queue repository", maximum=256)
+    if (queue_expression.get("evaluated") != (issue_mode == "include")
+            or queue_expression.get("label") != "nvchecker"
+            or queue_expression.get("state") not in {"open", "closed", "all"}
+            or not isinstance(queue_expression.get("limit"), int)
+            or isinstance(queue_expression.get("limit"), bool)
+            or not 1 <= queue_expression["limit"] <= 1000
+            or (queue_expression.get("maintainer") is not None
+                and not isinstance(queue_expression.get("maintainer"), str))
+            or (queue_expression.get("package") is not None
+                and not isinstance(queue_expression.get("package"), str))
+            or queue_expression.get("autobump") not in {
+                "any", "off", "on", "manual-required"}):
+        raise BatchReportSchemaError(
+            "selection_snapshot queue expression is incomplete")
+    if issue_mode == "exact" and resulting_issues != explicit_issues:
+        raise BatchReportSchemaError(
+            "exact selection_snapshot issues must match its expression")
+
+    items = _sequence(report.get("items"), "batch report items")
+    item_ids = set()
+    item_issues = set()
+    for item in items:
+        item_id = _nonempty_string(item.get("id"), "item.id", maximum=256)
+        issue = item.get("issue")
+        package = item.get("package")
+        _nonempty_string(item.get("target_version"), f"item {item_id!r} target_version")
+        if item_id in item_ids:
+            raise BatchReportSchemaError(f"duplicate batch item id: {item_id}")
+        if not isinstance(issue, int) or isinstance(issue, bool) or issue < 1:
+            raise BatchReportSchemaError(
+                f"item {item_id!r} must reference one positive issue number")
+        if issue in item_issues:
+            raise BatchReportSchemaError(f"duplicate batch item issue: {issue}")
+        if not isinstance(package, str) or not _PACKAGE_RE.fullmatch(package):
+            raise BatchReportSchemaError(
+                f"item {item_id!r} package must be category/package")
+        _validate_outcome(
+            item.get("outcome"), item_id,
+            selection_snapshot_sha256=snapshot["sha256"])
+        if item.get("branch") is not None:
+            _nonempty_string(item["branch"], f"item {item_id!r} branch")
+        if (item.get("commit") is not None
+                and not _FULL_OID_RE.fullmatch(item["commit"] or "")):
+            raise BatchReportSchemaError(
+                f"item {item_id!r} commit must be a full object ID")
+        state = item["outcome"]["state"]
+        if state in {
+                "local_committed", "pushed", "pr_open", "checks_passed", "merged"}:
+            _nonempty_string(item.get("branch"), f"item {item_id!r} branch")
+            if not _FULL_OID_RE.fullmatch(item.get("commit") or ""):
+                raise BatchReportSchemaError(
+                    f"item {item_id!r} commit must be a full object ID")
+        item_ids.add(item_id)
+        item_issues.add(issue)
+
+    if item_issues != set(resulting_issues):
+        raise BatchReportSchemaError(
+            "batch item issues must exactly match selection_snapshot.resulting_issues")
+
+    for name in ("failures", "skips", "escalations"):
+        if name in report:
+            _sequence(report[name], name)
+    for name in ("checks_skipped", "warnings", "residual_risks"):
+        if name in report:
+            _plain_list(report[name], name)
+    if "publication_observations" in report:
+        _sequence(report["publication_observations"], "publication_observations")
+
+
+def update_batch_outcome(
+        report: Mapping[str, Any], *, expected_input_sha256: str,
+        item_id: str, state: str, at: str, reason: str,
+        evidence: Mapping[str, Any], branch: str | None = None,
+        commit: str | None = None,
+) -> dict[str, Any]:
+    """Append one validated item outcome transition without rewriting evidence."""
+    validate_batch_report(report)
+    current_sha256 = batch_report_digest(report)
+    if not hmac.compare_digest(current_sha256, expected_input_sha256):
+        raise BatchReportConflict(
+            "batch report changed: expected "
+            f"{expected_input_sha256}, found {current_sha256}")
+    _nonempty_string(item_id, "item_id", maximum=256)
+    if state not in BATCH_UPDATE_STATES:
+        raise BatchReportSchemaError(f"invalid batch outcome update state: {state!r}")
+    if not _valid_utc_timestamp(at):
+        raise BatchReportSchemaError("outcome transition time must be UTC and end in Z")
+    _nonempty_string(reason, "outcome transition reason")
+    if not isinstance(evidence, Mapping):
+        raise BatchReportSchemaError("outcome transition evidence must be a mapping")
+
+    updated = deepcopy(dict(report))
+    matches = [item for item in updated["items"] if item.get("id") == item_id]
+    if len(matches) != 1:
+        raise BatchReportSchemaError(
+            f"batch report must contain exactly one item with id {item_id!r}")
+    item = matches[0]
+    outcome = item["outcome"]
+    source = outcome["state"]
+    if state not in _OUTCOME_TRANSITIONS[source]:
+        raise BatchReportSchemaError(
+            f"batch outcome transition {source!r} -> {state!r} is not allowed")
+    if branch is not None:
+        _nonempty_string(branch, "outcome transition branch")
+        if item.get("branch") not in {None, branch}:
+            raise BatchReportSchemaError("outcome transition branch conflicts with report")
+        item["branch"] = branch
+    if commit is not None:
+        if not _FULL_OID_RE.fullmatch(commit):
+            raise BatchReportSchemaError("outcome transition commit must be a full object ID")
+        if item.get("commit") not in {None, commit}:
+            raise BatchReportSchemaError("outcome transition commit conflicts with report")
+        item["commit"] = commit
+    outcome["transitions"].append({
+        "from_state": source,
+        "state": state,
+        "at": at,
+        "reason": reason,
+        "evidence": deepcopy(dict(evidence)),
+    })
+    outcome["state"] = state
+    validate_batch_report(updated)
+    return updated
 
 
 def _publication_field(value: Mapping[str, Any], *names: str) -> Any:
@@ -294,6 +572,7 @@ def reconcile_batch_report(
         observed_at: str,
 ) -> dict[str, Any]:
     """Add publication observations without changing original report fields."""
+    validate_batch_report(report)
     current_sha256 = batch_report_digest(report)
     if not hmac.compare_digest(current_sha256, expected_input_sha256):
         raise BatchReportConflict(
@@ -313,6 +592,7 @@ def reconcile_batch_report(
     }
     reconciled = deepcopy(dict(report))
     reconciled["publication_observations"] = deepcopy(observations) + [observation]
+    validate_batch_report(reconciled)
     return reconciled
 
 

@@ -6,6 +6,7 @@ ebuild manual, Portage behavior, and upstream primary material are authoritative
 
 ## Contents
 
+- [Package model gate](#package-model-gate)
 - [Provenance, license, and architecture](#provenance-license-and-architecture)
 - [Ebuild declarations](#ebuild-declarations)
 - [Audit every installed object](#audit-every-installed-object)
@@ -15,10 +16,67 @@ ebuild manual, Portage behavior, and upstream primary material are authoritative
 - [Heuristic review targets](#heuristic-review-targets)
 - [Primary references](#primary-references)
 
+## Package model gate
+
+Every bump plan requires an explicit installed-payload model. Use
+`gzh plan <category/package> <version> --package-model source` only when the installed
+programs and libraries are built from source and the package installs no upstream-built
+native object, platform package, JVM bytecode, architecture-specific binary archive,
+executable application bundle, or executable script bundle. A source-built output name,
+such as a JAR passed to an install helper, is not an upstream-built input. Use
+`--package-model prebuilt`
+when any such payload exists, even when the package name does not end in `-bin`.
+
+The plan records the caller classification and deterministic indicators found in the
+ebuild. A `-bin` package name, `QA_PREBUILT`, `rpm.eclass`, a recognized binary container
+or JVM archive, a standalone executable or script asset, or an architecture-specific
+archive prevents a `source` result. These indicators can prove a contradiction but their
+absence cannot prove that an archive contains source. Inspect ambiguous tar, ZIP, and
+script bundles, then select the model from upstream content and installed behavior. The
+classification is reviewed input, not independent provenance evidence.
+
+For the prebuilt model, `--assets-evidence` is mandatory. A package without a detected
+indicator may still be classified prebuilt; this is the fail-closed path for ambiguous
+payloads.
+
 ## Provenance, license, and architecture
 
+- For non-trivial work, follow the live overlay policy by searching for and using a
+  genuinely comparable current Gentoo package when one exists. Compare the source model,
+  eclass stack, archive layout, install helpers, and source and installed file modes.
+  Record the comparison when it informs the change. Missing precedent alone does not
+  block pull request readiness; treat every comparison as advisory and confirm portable
+  rules in official material.
 - Verify every downloaded asset on the upstream release or distribution page. Record
   the release, filename, architecture, size, and available signature or digest evidence.
+- Before writing, pass a complete previous/current release inventory to
+  `gzh plan <category/package> <version> --package-model prebuilt --assets-evidence <file>`.
+  Use this schema:
+
+  ```json
+  {
+    "schema_version": 1,
+    "previous": {
+      "version": "1.0",
+      "release_url": "https://upstream.example/releases/1.0",
+      "complete": true,
+      "assets": [{"filename": "package-amd64.deb", "architecture": "amd64"}]
+    },
+    "current": {
+      "version": "2.0",
+      "release_url": "https://upstream.example/releases/2.0",
+      "complete": true,
+      "assets": [{"filename": "package-x86_64.deb", "architecture": "amd64"}]
+    },
+    "decisions": {
+      "assets-changed:amd64": "update the amd64 SRC_URI and Manifest entry"
+    }
+  }
+  ```
+
+  The inventory is reviewed input, not proof of upstream authenticity. Stop when either
+  release is incomplete or an `architecture-added`, `architecture-removed`, or
+  `assets-changed` result has no evidence-based decision.
 - Read the license and redistribution terms for the exact binary distribution. Set
   `LICENSE` and `RESTRICT` from those terms; do not infer them from the source repository.
 - Follow [license-validation.md](license-validation.md). A website agreement, privacy
@@ -52,7 +110,7 @@ ebuild manual, Portage behavior, and upstream primary material are authoritative
 ## Audit every installed object
 
 Enumerate the installed ELF objects for every shipped architecture. Use non-executing
-tools such as `file`, `readelf`, `scanelf`, and `patchelf` to inspect untrusted or
+tools such as `file`, `readelf`, `lddtree`, `scanelf`, and `patchelf` to inspect untrusted or
 foreign-architecture files.
 
 Check each object for:
@@ -71,6 +129,10 @@ Check each object for:
 
 Do not run `ldd` on an untrusted executable. If runtime loader testing is necessary, use
 an isolated environment and a trusted artifact on its matching architecture.
+`gzh binary` uses `lddtree` without executing the target and fails when the host-visible
+interpreter or a runtime dependency is unresolved. Its result is limited to the current
+filesystem and ELF loader search paths; it does not establish Gentoo provider atoms,
+`dlopen` targets, helper processes, or compatibility on another profile.
 
 ## Dependencies and binary changes
 
@@ -93,6 +155,11 @@ an isolated environment and a trusted artifact on its matching architecture.
 
 - Preserve executable bits for programs and helpers. Verify modes in the final image;
   helpers installed with a data-file helper may lose execution permission.
+- For every prebuilt installed image, count executable regular files and classify each as
+  ELF, script, or unexpected data. Require an exact path allowlist for every executable
+  non-ELF file; package size does not change this gate. Verify each allowlisted script or
+  data file before accepting it, and reject unexplained executable resource trees.
+  Exclude symlinks from permission findings and inspect their targets separately.
 - Validate installed desktop files, service definitions, icons, MIME data, wrappers, and
   absolute paths with the relevant official tools.
 - Compare the installed file list with the previous version and upstream package. Check
@@ -115,6 +182,16 @@ an isolated environment and a trusted artifact on its matching architecture.
 
 CI is a final verification layer, not a substitute for checks required before the push.
 Report every architecture not exercised locally and every accepted QA warning.
+
+For an upstream binary that is verified to require glibc, retain the accurate keyword and
+`REQUIRED_USE` constraints. An exact `RequiredUseDefaults` result may be recorded as a
+package-specific gentoo-zh limitation only when it is caused solely by musl profile
+defaults conflicting with the verified `elibc_glibc` requirement and every supported
+glibc profile resolves. Keep the exact profiles and scanner output in the completion
+report. This classification does not apply to another pkgcheck result, an unsatisfiable
+supported profile, or an unverified libc requirement. Do not call it a generic pass,
+weaken the constraint merely to silence pkgcheck, or assume the overlay owns main-tree
+profile masks.
 
 ## Heuristic review targets
 

@@ -61,3 +61,135 @@ def test_liveup_skips_missing_src_uri():
     bad["PV"] = "9999"
     issues = lint_ebuild(bad)
     assert not any(i["rule"] == "missing-src_uri" for i in issues)
+
+
+def test_unpacked_deb_bypass_is_a_review_finding():
+    parsed = _good()
+    parsed["inherit"] = ["unpacker"]
+    source = """\
+inherit unpacker
+
+src_unpack() {
+    ar x "${DISTDIR}/${A}"
+}
+
+src_install() {
+    tar -xf "${WORKDIR}/data.tar.xz" -C "${D}" || die
+}
+"""
+
+    issues = lint_ebuild(parsed, source_text=source)
+
+    assert {(issue["rule"], issue["severity"]) for issue in issues} >= {
+        ("unpacker-helper-bypassed", "warning"),
+        ("archive-extraction-in-src-install", "warning"),
+    }
+
+
+def test_unpacked_deb_helper_avoids_bypass_finding():
+    parsed = _good()
+    parsed["inherit"] = ["unpacker"]
+    source = """\
+inherit unpacker
+
+src_unpack() {
+    unpack_deb "${DISTDIR}/${A}"
+}
+
+src_install() {
+    doins -r usr
+}
+"""
+
+    issues = lint_ebuild(parsed, source_text=source)
+
+    assert not any(issue["rule"] == "unpacker-helper-bypassed" for issue in issues)
+    assert not any(
+        issue["rule"] == "archive-extraction-in-src-install" for issue in issues)
+
+
+def test_non_debian_unpacker_override_does_not_claim_unpack_deb_is_required():
+    parsed = _good()
+    parsed["inherit"] = ["unpacker"]
+    source = """\
+inherit unpacker
+
+src_unpack() {
+    unpack_makeself "${A}"
+}
+"""
+
+    issues = lint_ebuild(parsed, source_text=source)
+
+    assert not any(issue["rule"] == "unpacker-helper-bypassed" for issue in issues)
+
+
+def test_archive_extraction_in_src_install_does_not_require_unpacker():
+    source = """\
+src_install() {
+    tar -xf payload.tar -C "${D}" || die
+}
+"""
+
+    issues = lint_ebuild(_good(), source_text=source)
+
+    assert any(
+        issue["rule"] == "archive-extraction-in-src-install" for issue in issues)
+
+
+def test_inline_comment_cannot_claim_unpack_deb_was_called():
+    parsed = _good()
+    parsed["inherit"] = ["unpacker"]
+    source = """\
+src_unpack() {
+    ar x "${DISTDIR}/${A}" # unpack_deb
+}
+"""
+
+    issues = lint_ebuild(parsed, source_text=source)
+
+    assert any(issue["rule"] == "unpacker-helper-bypassed" for issue in issues)
+
+
+def test_quoted_helper_name_cannot_claim_unpack_deb_was_called():
+    parsed = _good()
+    parsed["inherit"] = ["unpacker"]
+    source = """\
+src_unpack() {
+    einfo "not using unpack_deb"
+    ar x "${DISTDIR}/${A}"
+}
+"""
+
+    issues = lint_ebuild(parsed, source_text=source)
+
+    assert any(issue["rule"] == "unpacker-helper-bypassed" for issue in issues)
+
+
+def test_additional_archive_extractors_in_src_install_are_review_findings():
+    source = """\
+src_install() {
+    bsdtar -xf payload.tar -C "${D}"
+    rpm2cpio payload.rpm | cpio -id
+}
+"""
+
+    issues = lint_ebuild(_good(), source_text=source)
+
+    assert sum(
+        issue["rule"] == "archive-extraction-in-src-install"
+        for issue in issues) == 1
+
+
+def test_comments_and_quoted_extractor_names_are_not_commands():
+    source = """\
+src_install() {
+    # bsdtar -xf payload.tar -C "${D}"
+    einfo "rpm2cpio payload.rpm | cpio -id"
+}
+"""
+
+    issues = lint_ebuild(_good(), source_text=source)
+
+    assert not any(
+        issue["rule"] == "archive-extraction-in-src-install" for issue in issues)

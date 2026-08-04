@@ -74,8 +74,9 @@ gzh artifacts <Manifest> --evidence <reviewed-artifacts.json> \
   [--distdir <writable-directory>]
 ```
 
-The report proves Manifest coverage and any available local digest match. It does not
-infer upstream authorship, archive completeness, license terms, or redistribution
+The report proves Manifest coverage and, for a selected distdir, accepts only stable
+regular files whose size, `BLAKE2B`, and `SHA512` all match. It does not follow symlinks
+or infer upstream authorship, archive completeness, license terms, or redistribution
 permission.
 
 ## 4. Run Package QA
@@ -107,8 +108,17 @@ proves ABI compatibility or replaces dependency resolution, build, or install ev
 Use the phase runner for focused build diagnosis:
 
 ```bash
-gzh build <changed-ebuild>
+gzh build <changed-ebuild> [--logdir <evidence-directory>]
 ```
+
+Without `--logdir`, the CLI creates a unique durable directory below the `gzh` state
+directory and writes `report.json` there with an output SHA-256 digest. The bounded report
+records the exact ebuild content hash and available Git worktree revision, the active
+architecture and profile, the allowlisted Portage environment, every executed command,
+and every saved elog file digest. A timeout, truncated command output, incomplete
+environment evidence, incomplete elog inventory, failed phase, or saved `qa`, `warn`, or
+`error` elog fails the build report. This phase runner does not resolve dependencies or
+perform a real package merge.
 
 Then run the install and elog helper:
 
@@ -116,14 +126,16 @@ Then run the install and elog helper:
 gzh merge <changed-ebuild> [--logdir <evidence-directory>]
 ```
 
-`gzh merge` derives an exact repository-qualified atom, disables binary package
-selection so the changed ebuild is built from source, and emerges its dependencies before
-the target. It saves `qa`, `warn`, and `error` classes in one isolated
-`PORTAGE_LOGDIR` and fails when either emerge fails or either step produces an elog file.
-Dependency elog evidence is retained and blocks the target merge. The target command uses
-`--oneshot --selective=n` so an installed exact version is remerged without adding it to
-the world set. Inspect every saved elog file; do not substitute console output for the
-file gate.
+`gzh merge` derives an exact repository-qualified atom and binds Portage to the selected
+development worktree. It runs one bounded pretend with the actual install arguments,
+prefers binary packages for dependencies, and uses `--usepkg-exclude=<category/package>`
+to force the target ebuild through the source path. Only the exact target and new
+dependencies are authorized by default; pass an exact `--allow-plan-package` only after
+reviewing a required rebuild, upgrade, or downgrade. An uninstall, unknown plan action,
+incomplete plan, or unapproved existing-package change stops before installation. The one
+authorized merge uses `--oneshot --selective=n`, retains every `qa`, `warn`, and `error`
+elog in the isolated `PORTAGE_LOGDIR`, and fails on any saved entry. Inspect those files;
+do not substitute console output for the file gate.
 
 The live emerge workflow remains authoritative. It currently tests every selected target
 on the amd64 desktop OpenRC and systemd profiles, and also tests arm64-keyworded targets
@@ -143,10 +155,25 @@ gzh test '=category/package-version::gentoo-zh' -x \
   [--use-combos <count>] [--use-preference default]
 ```
 
-After a staged or real install, run `gzh image <image-root>`. For a prebuilt package,
-also run `gzh binary <installed-object-or-image>` before executing any trusted runtime
-smoke test. These static reports complement the merge and saved-elog gate; they do not
-replace it.
+After a staged or real install, run `gzh image <image-root>`. For every prebuilt installed
+image, use strict mode and write the complete inventory to a new relative path outside the
+image root:
+
+```bash
+gzh image <image-root> \
+  --inventory-evidence <new-relative-inventory.json> \
+  --require-non-elf-allowlist \
+  [--allow-executable /exact/image/path ...]
+```
+
+Add one exact `--allow-executable` entry for each verified executable non-ELF regular
+file; do not allowlist unexplained data merely to pass the gate. Require `ok=true`,
+`complete=true`, and an inventory result with `written=true`, its relative path, and its
+SHA-256 digest. A missing allowlist entry, inventory write failure, incomplete scan, or
+error finding blocks completion. Symlinks are not executable-file allowlist entries;
+review their targets separately. Also run `gzh binary <installed-object-or-image>` before
+executing any trusted runtime smoke test. These static reports complement the merge and
+saved-elog gate; they do not replace it.
 
 When the local host cannot perform the required install and an authorized named executor
 exists, read [executors.md](executors.md) and run `gzh exec` with the exact atom, commit,
@@ -187,10 +214,24 @@ overlay policy for sign-off, identity, signing, atomic commits, and the 69-chara
 subject limit. Do not add AI attribution. When the requested body language is Chinese,
 load `chinese-skill`; do not translate the `pkgdev` subject.
 
+Before drafting a Chinese body, reduce every proposed explanation to verified facts: who
+changed what, which packaging consequence follows, and why the Gentoo-side change is
+required. Rewrite those facts in natural Chinese sentence order with terminology already
+accepted by the live repository and Gentoo. Keep a precise technical identifier in
+English when a Chinese substitute would lose meaning. Never translate source wording
+word by word or coin a generic Chinese artifact term. In particular, the phrase `new
+upstream binary package` alone does not establish whether it means a new repository
+package, an upstream prebuilt archive, or a changed distribution model; obtain the
+missing evidence before writing a body.
+
+Carry only verified cause and effect into the commit and pull request bodies. If the
+subject already says everything established by the evidence, omit the commit body and do
+not invent a rationale for the pull request.
+
 Chinese PR body example:
 
 ```text
-因为上游将运行时组件改为共享库，所以新增对应的 `RDEPEND`。
+因为上游改为按架构发布预编译包，所以 `SRC_URI` 需要按架构选择对应的发布文件。
 ```
 
 Verify the result:

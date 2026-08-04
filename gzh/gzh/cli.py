@@ -1,3 +1,4 @@
+import hashlib
 import json as _json
 import os
 import re
@@ -13,12 +14,14 @@ from gzh.artifacts import ArtifactError, audit_artifacts
 from gzh.binary_qa import inspect_binaries
 from gzh.bump import (bump_scaffold, diff_ebuild, highest_ebuild,
                       resolve_package_directory)
-from gzh.bump_plan import build_bump_plan
+from gzh.bump_plan import PACKAGE_MODELS, build_bump_plan
 from gzh.bump_issues import (get_issue_updated_at, load_canonical_config,
                              run_bump_issues, write_output)
-from gzh.batch_report import (BatchReportConflict, checkpoint_batch_report,
-                              batch_report_digest, create_batch_report,
-                              reconcile_batch_report, report_sha256)
+from gzh.batch_report import (BATCH_UPDATE_STATES, BatchReportConflict,
+                              batch_report_digest, checkpoint_batch_report,
+                              create_batch_report, reconcile_batch_report,
+                              report_sha256, update_batch_outcome,
+                              validate_batch_report)
 from gzh.buildtest import run_build_test
 from gzh.capabilities import inspect_repository, load_bundled_adapter
 from gzh.check import Gate, run_read_only_checks
@@ -138,6 +141,52 @@ def _package_test_evidence_dir(atom: str) -> Path:
     safe_atom = re.sub(r"[^A-Za-z0-9._-]+", "-", atom).strip(".-_")[:80]
     timestamp = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S%f%z")
     return _checked_state_dir() / "evidence" / "tests" / f"{safe_atom}-{timestamp}"
+
+
+def _build_evidence_dir(ebuild: Path) -> Path:
+    safe_name = re.sub(
+        r"[^A-Za-z0-9._-]+", "-", Path(ebuild).stem).strip(".-_")[:80]
+    timestamp = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S%f%z")
+    return _checked_state_dir() / "evidence" / "builds" / f"{safe_name}-{timestamp}"
+
+
+def _write_build_report(report: dict, evidence_dir: Path) -> dict:
+    evidence_dir = Path(evidence_dir).expanduser()
+    if evidence_dir.is_symlink():
+        raise ValueError(f"evidence directory must not be a symlink: {evidence_dir}")
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    if not evidence_dir.is_dir():
+        raise ValueError(f"evidence directory is not a directory: {evidence_dir}")
+    report_path = evidence_dir.resolve() / "report.json"
+    content = (_json.dumps(
+        report, indent=2, ensure_ascii=False, sort_keys=True) + "\n").encode()
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = None
+    created = False
+    try:
+        descriptor = os.open(report_path, flags, 0o600)
+        created = True
+        with os.fdopen(descriptor, "wb") as handle:
+            descriptor = None
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except OSError:
+        if descriptor is not None:
+            os.close(descriptor)
+        if created:
+            try:
+                report_path.unlink()
+            except FileNotFoundError:
+                pass
+        raise
+    return {
+        "path": str(report_path),
+        "bytes": len(content),
+        "sha256": hashlib.sha256(content).hexdigest(),
+    }
 
 
 def _executor_evidence_dir(atom: str) -> Path:
@@ -346,7 +395,9 @@ def check_cmd(target, adapter_id, min_severity, net, profiles, arches):
     ]
     if target.is_file() and target.suffix == ".ebuild":
         def run_lint(_root):
-            issues = lint_ebuild(parse_ebuild(target))
+            issues = lint_ebuild(
+                parse_ebuild(target),
+                source_text=target.read_text(encoding="utf-8"))
             return {
                 "complete": True,
                 "issues": issues,
@@ -386,7 +437,9 @@ def ebuild_parse_cmd(ebuild):
 @click.argument("ebuild", type=click.Path(exists=True, path_type=Path))
 def lint_cmd(ebuild):
     """Run fast structural checks; pkgcheck and installation remain required."""
-    issues = lint_ebuild(parse_ebuild(ebuild))
+    issues = lint_ebuild(
+        parse_ebuild(ebuild),
+        source_text=Path(ebuild).read_text(encoding="utf-8"))
     click.echo(_json.dumps(issues, indent=2, ensure_ascii=False))
     if any(i["severity"] == "error" for i in issues):
         raise SystemExit(1)
@@ -402,6 +455,8 @@ def license_cmd(archive):
     except LicenseInventoryError as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
+    if not report["ok"] or not report["complete"]:
+        raise SystemExit(1)
 
 
 @cli.command("upstream-version")
@@ -429,13 +484,24 @@ def bump_scaffold_cmd(cat_pkg, new_pv):
 @cli.command("plan")
 @click.argument("cat_pkg")
 @click.argument("new_pv")
-def bump_plan_cmd(cat_pkg, new_pv):
+@click.option("--package-model", required=True, type=click.Choice(PACKAGE_MODELS),
+              help="reviewed installed-payload model; prebuilt requires asset evidence")
+@click.option("--assets-evidence", type=click.Path(exists=True, dir_okay=False,
+                                                    path_type=Path),
+              default=None,
+              help="complete previous/current prebuilt release asset inventory")
+def bump_plan_cmd(cat_pkg, new_pv, package_model, assets_evidence):
     """Create a read-only, source-pinned bump plan."""
     try:
-        report = build_bump_plan(find_overlay_root(), cat_pkg, new_pv)
+        report = build_bump_plan(
+            find_overlay_root(), cat_pkg, new_pv,
+            package_model=package_model,
+            assets_evidence=assets_evidence)
     except (FileExistsError, FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
+    if not report["ok"] or not report["complete"] or not report["can_apply"]:
+        raise SystemExit(1)
 
 
 @cli.command("diff-ebuild")
@@ -667,12 +733,24 @@ def binary_cmd(target, expected_machine, max_files):
 @click.option("--expected-machine", default=None,
               help="exact readelf Machine value required for every ELF")
 @click.option("--binaries/--no-binaries", default=True, show_default=True)
-def image_cmd(root, expected_machine, binaries):
+@click.option("--inventory-evidence", type=click.Path(dir_okay=False,
+                                                       path_type=Path),
+              default=None,
+              help="new relative file for the complete image inventory")
+@click.option("--allow-executable", multiple=True,
+              help="exact image-relative executable path to allow")
+@click.option("--require-non-elf-allowlist", is_flag=True, default=False,
+              help="require every executable non-ELF file to be allowlisted")
+def image_cmd(root, expected_machine, binaries, inventory_evidence,
+              allow_executable, require_non_elf_allowlist):
     """Audit an installed or staged filesystem image without executing it."""
     try:
         report = inspect_image(
             root, include_binaries=binaries,
-            expected_machine=expected_machine)
+            expected_machine=expected_machine,
+            executable_allowlist=allow_executable,
+            require_non_elf_allowlist=require_non_elf_allowlist,
+            inventory_evidence=inventory_evidence)
     except (OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
@@ -684,9 +762,16 @@ def image_cmd(root, expected_machine, binaries):
 @click.argument("ebuild", type=click.Path(exists=True, path_type=Path))
 @click.option("--level", default="full",
               type=click.Choice(["none", "quick", "full"]))
-def build_test_cmd(ebuild, level):
+@click.option("--logdir", type=click.Path(file_okay=False, path_type=Path),
+              default=None, help="isolated PORTAGE_LOGDIR to retain as evidence")
+def build_test_cmd(ebuild, level, logdir):
     """Run a staged ebuild build test (none/quick/full)."""
-    res = run_build_test(ebuild, level=level)
+    selected_logdir = logdir if logdir is not None else _build_evidence_dir(ebuild)
+    try:
+        res = run_build_test(ebuild, level=level, logdir=selected_logdir)
+        res["evidence_report"] = _write_build_report(res, selected_logdir)
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
     if not res["ok"]:
         raise SystemExit(1)
@@ -744,7 +829,7 @@ def package_test_cmd(atom, execute, evidence_dir, job_name, use_combos,
 @click.option("--evidence-dir", type=click.Path(file_okay=False, path_type=Path),
               default=None, help="new durable evidence directory")
 @click.option("--execute", "allow_execute", "-x", is_flag=True, default=False,
-              help="acknowledge dependency installation and exact package merge")
+              help="acknowledge the authorized pretend plan and exact package merge")
 def executor_cmd(atom, executor_name, config, commit, owned_paths, use_state,
                  evidence_dir, allow_execute):
     """Run the local or configured SSH install contract with durable evidence."""
@@ -778,6 +863,7 @@ def executor_cmd(atom, executor_name, config, commit, owned_paths, use_state,
                 evidence_dir=selected_evidence,
                 use_state=tuple(use_state),
                 transfer=transfer,
+                repository=root if spec.type == "local" else None,
             ))
     except click.ClickException:
         raise
@@ -795,9 +881,12 @@ def executor_cmd(atom, executor_name, config, commit, owned_paths, use_state,
 @click.argument("ebuild", type=click.Path(exists=True, path_type=Path))
 @click.option("--logdir", type=click.Path(file_okay=False, path_type=Path),
               default=None, help="isolated PORTAGE_LOGDIR to retain as evidence")
-def verify_install_cmd(ebuild, logdir):
+@click.option("--allow-plan-package", "authorized_packages", multiple=True,
+              help="category/package allowed to rebuild, upgrade, or downgrade")
+def verify_install_cmd(ebuild, logdir, authorized_packages):
     """Merge an exact ebuild and fail on the overlay CI elog classes."""
-    res = run_verify_install(ebuild, logdir=logdir)
+    res = run_verify_install(
+        ebuild, logdir=logdir, authorized_packages=authorized_packages)
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
     if not res["ok"]:
         raise SystemExit(1)
@@ -842,6 +931,9 @@ def recommit_cmd(paths, message):
               help="select from canonical autobump config or current bot status")
 @click.option("--issue", "issues", multiple=True, type=click.IntRange(min=1),
               help="include an exact issue with complete revision evidence")
+@click.option("--issue-mode", default="include", show_default=True,
+              type=click.Choice(["include", "exact"]),
+              help="union explicit issues with the queue or select only them")
 @click.option("--git-remote", default=None,
               help="fetched canonical remote used for selector provenance")
 @click.option("--limit", default=100, show_default=True,
@@ -849,7 +941,7 @@ def recommit_cmd(paths, message):
 @click.option("--no-output", is_flag=True, default=False,
               help="skip writing the state/queues/bump-issues-<ts>.json snapshot")
 def bump_issues_cmd(repo, state, maintainer, pkg, comments, autobump, issues,
-                    git_remote, limit, no_output):
+                    issue_mode, git_remote, limit, no_output):
     """List nvchecker bump-reminder issues as a JSON queue (read-only)."""
     selected_remote = git_remote
     canonical_loader = None
@@ -866,6 +958,7 @@ def bump_issues_cmd(repo, state, maintainer, pkg, comments, autobump, issues,
     res = run_bump_issues(repo=repo, state=state, maintainer=maintainer, pkg=pkg,
                           with_comments=comments, limit=limit,
                           autobump=autobump, issues=issues,
+                          issue_mode=issue_mode,
                           canonical_remote=selected_remote,
                           canonical_loader=canonical_loader)
     exit_code = res.pop("exit_code", 0)
@@ -1099,6 +1192,10 @@ def batch_report_create_cmd(input_stream, report_format):
             raise click.UsageError(f"invalid JSON report: {exc}") from exc
         if not isinstance(value, dict):
             raise click.UsageError("JSON batch report must be an object")
+        try:
+            validate_batch_report(value)
+        except ValueError as exc:
+            raise click.UsageError(str(exc)) from exc
         content = _json.dumps(
             value, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
         suffix = ".json"
@@ -1127,6 +1224,10 @@ def batch_report_checkpoint_cmd(report, expected_sha256, input_stream):
             raise click.UsageError(f"invalid JSON report: {exc}") from exc
         if not isinstance(value, dict):
             raise click.UsageError("JSON batch report must be an object")
+        try:
+            validate_batch_report(value)
+        except ValueError as exc:
+            raise click.UsageError(str(exc)) from exc
         content = _json.dumps(
             value, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
     try:
@@ -1135,6 +1236,67 @@ def batch_report_checkpoint_cmd(report, expected_sha256, input_stream):
     except (BatchReportConflict, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(_json.dumps({"path": str(report), "sha256": digest}, indent=2))
+
+
+@batch_report_group.command("update")
+@click.argument("report", type=click.Path(exists=True, dir_okay=False,
+                                            path_type=Path))
+@click.option("--expected-sha256", required=True,
+              help="file sha256 returned by the preceding checkpoint")
+@click.option("--item-id", required=True, help="stable batch item ID")
+@click.option("--state", required=True, type=click.Choice(BATCH_UPDATE_STATES))
+@click.option("--reason", required=True, help="evidence-based transition reason")
+@click.option("--at", "recorded_at", default=None,
+              help="UTC transition time; defaults to the current time")
+@click.option("--evidence", type=click.Path(exists=True, dir_okay=False,
+                                             path_type=Path), required=True,
+              help="JSON object containing transition evidence")
+@click.option("--branch", default=None,
+              help="exact branch identity when first recording a local commit")
+@click.option("--commit", default=None,
+              help="full commit identity when first recording a local commit")
+def batch_report_update_cmd(report, expected_sha256, item_id, state, reason,
+                            recorded_at, evidence, branch, commit):
+    """Append one typed batch item outcome through compare-and-swap."""
+    report = _owned_batch_report(report, suffixes={".json"})
+    current_file_sha = report_sha256(report)
+    if current_file_sha != expected_sha256:
+        raise click.ClickException(
+            f"batch report changed: expected {expected_sha256}, "
+            f"found {current_file_sha}")
+    try:
+        value = _json.loads(report.read_text(encoding="utf-8"))
+        evidence_value = _json.loads(evidence.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("batch report must contain a JSON object")
+        if not isinstance(evidence_value, dict):
+            raise ValueError("outcome transition evidence must be a JSON object")
+        timestamp = recorded_at or datetime.now(timezone.utc).isoformat().replace(
+            "+00:00", "Z")
+        updated = update_batch_outcome(
+            value,
+            expected_input_sha256=batch_report_digest(value),
+            item_id=item_id,
+            state=state,
+            at=timestamp,
+            reason=reason,
+            evidence=evidence_value,
+            branch=branch,
+            commit=commit,
+        )
+        content = _json.dumps(
+            updated, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+        digest = checkpoint_batch_report(
+            report, content, expected_sha256=expected_sha256)
+    except (_json.JSONDecodeError, BatchReportConflict, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    item = next(item for item in updated["items"] if item["id"] == item_id)
+    click.echo(_json.dumps({
+        "path": str(report),
+        "sha256": digest,
+        "item_id": item_id,
+        "outcome": item["outcome"],
+    }, indent=2, ensure_ascii=False))
 
 
 @batch_report_group.command("reconcile")

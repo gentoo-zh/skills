@@ -23,7 +23,7 @@ write when the target repository does not define the required capability.
    a way that changes the result.
 
 Query the registered inventory with
-`python3 scripts/source_manager.py list --scope portable-core --topic <topic>` from this
+`python3 scripts/source_manager.py list --capability <capability-id>` from this
 skill directory. A lock is a reviewed locator, not a substitute for reading the current
 source.
 

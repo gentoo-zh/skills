@@ -15,6 +15,7 @@ _REPO_PART_RE = re.compile(r"[A-Za-z0-9_.-]+")
 _REMOTE_RE = re.compile(r"[A-Za-z0-9_.-]+")
 _OID_RE = re.compile(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})")
 _AUTOBUMP_SELECTORS = frozenset({"any", "off", "on", "manual-required"})
+_ISSUE_MODES = frozenset({"include", "exact"})
 _CONFIG_PATH = ".github/workflows/overlay.toml"
 _STATUS_MARKER = "<!-- autobump-status -->"
 _STATUS_AUTHOR = "gentoo-zh-autobump[bot]"
@@ -668,6 +669,7 @@ def run_bump_issues(repo: str = "gentoo-zh/overlay", state: str = "open",
                     maintainer: str | None = None, pkg: str | None = None,
                     with_comments: bool = True, limit: int = 100,
                     runner=None, *, autobump: str = "any", issues=None,
+                    issue_mode: str = "include",
                     canonical_remote: str | None = None,
                     canonical_loader=None) -> dict:
     if runner is None:
@@ -683,6 +685,9 @@ def run_bump_issues(repo: str = "gentoo-zh/overlay", state: str = "open",
     if not isinstance(autobump, str) or autobump not in _AUTOBUMP_SELECTORS:
         return {"ok": False, "exit_code": 1,
                 "error": f"invalid autobump selector: {autobump!r}"}
+    if not isinstance(issue_mode, str) or issue_mode not in _ISSUE_MODES:
+        return {"ok": False, "exit_code": 1,
+                "error": f"invalid issue selection mode: {issue_mode!r}"}
     original_limit = limit
     try:
         limit = int(limit)
@@ -696,6 +701,9 @@ def run_bump_issues(repo: str = "gentoo-zh/overlay", state: str = "open",
     explicit_issues, issue_error = _normalise_issues(issues)
     if issue_error:
         return {"ok": False, "exit_code": 1, "error": issue_error}
+    if issue_mode == "exact" and not explicit_issues:
+        return {"ok": False, "exit_code": 1,
+                "error": "exact issue selection requires at least one --issue"}
     if (autobump == "manual-required" or explicit_issues) and not with_comments:
         return {"ok": False, "exit_code": 1,
                 "error": "manual and explicit issue selection require complete comments"}
@@ -724,7 +732,7 @@ def run_bump_issues(repo: str = "gentoo-zh/overlay", state: str = "open",
     seen_cursors = set()
     reported_total = None
     more_available = False
-    while len(nodes) < limit:
+    while issue_mode == "include" and len(nodes) < limit:
         requested = min(100, limit - len(nodes))
         query = build_query(owner, name, gstate, requested,
                             with_comments, after=cursor)
@@ -802,11 +810,14 @@ def run_bump_issues(repo: str = "gentoo-zh/overlay", state: str = "open",
                 "error": ("explicit issue comments are incomplete: "
                           + ", ".join(f"#{number}" for number
                                       in incomplete_explicit))}
+    explicit_set = set(explicit_issues)
     filtered_numbers = {item["issue"] for item in apply_filters(
         queue, maintainer=maintainer, pkg=pkg)}
-    explicit_set = set(explicit_issues)
-    candidates = [item for item in queue
-                  if item["issue"] in filtered_numbers or item["issue"] in explicit_set]
+    candidates = [
+        item for item in queue
+        if (item["issue"] in explicit_set if issue_mode == "exact" else
+            item["issue"] in filtered_numbers or item["issue"] in explicit_set)
+    ]
     results = []
     selected = []
     for item in candidates:
@@ -825,11 +836,30 @@ def run_bump_issues(repo: str = "gentoo-zh/overlay", state: str = "open",
             })
     fetched_count = len(nodes)
     total_count = reported_total if reported_total is not None else 0
+    selection_expression = {
+        "issue_mode": issue_mode,
+        "composition": ("explicit_only" if issue_mode == "exact"
+                        else "filtered_queue_or_explicit"),
+        "queue": {
+            "evaluated": issue_mode == "include",
+            "repository": repo,
+            "label": "nvchecker",
+            "state": state,
+            "limit": limit,
+            "maintainer": maintainer,
+            "package": pkg,
+            "autobump": autobump,
+        },
+        "explicit_issues": explicit_issues,
+    }
     return {
         "schema_version": 2,
         "ok": True,
         "selector": autobump,
+        "issue_mode": issue_mode,
         "explicit_issues": explicit_issues,
+        "selection_expression": selection_expression,
+        "resulting_issues": [item["issue"] for item in results],
         "canonical": canonical,
         "results": results,
         "candidates": candidates,
@@ -850,6 +880,39 @@ def reconstruct_selected_results(snapshot: dict) -> list[dict]:
     selector = snapshot.get("selector")
     if selector not in _AUTOBUMP_SELECTORS:
         raise ValueError("snapshot has an invalid selector")
+    issue_mode = snapshot.get("issue_mode")
+    if issue_mode not in _ISSUE_MODES:
+        raise ValueError("snapshot has an invalid issue selection mode")
+    expression = snapshot.get("selection_expression")
+    explicit_issues = snapshot.get("explicit_issues")
+    queue_expression = expression.get("queue") if isinstance(expression, dict) else None
+    if (not isinstance(expression, dict)
+            or expression.get("issue_mode") != issue_mode
+            or expression.get("composition") != (
+                "explicit_only" if issue_mode == "exact"
+                else "filtered_queue_or_explicit")
+            or not isinstance(queue_expression, dict)
+            or expression.get("explicit_issues") != explicit_issues):
+        raise ValueError("snapshot selection expression is incomplete")
+    normalised_explicit, explicit_error = _normalise_issues(explicit_issues)
+    if explicit_error or normalised_explicit != explicit_issues:
+        raise ValueError("snapshot explicit issue set is invalid")
+    try:
+        split_repo(queue_expression.get("repository"))
+    except ValueError as exc:
+        raise ValueError("snapshot queue repository is invalid") from exc
+    if (queue_expression.get("label") != "nvchecker"
+            or queue_expression.get("evaluated") != (issue_mode == "include")
+            or queue_expression.get("state") not in _STATE_MAP
+            or queue_expression.get("autobump") != selector
+            or not isinstance(queue_expression.get("limit"), int)
+            or isinstance(queue_expression.get("limit"), bool)
+            or not 1 <= queue_expression["limit"] <= 1000
+            or (queue_expression.get("maintainer") is not None
+                and not isinstance(queue_expression.get("maintainer"), str))
+            or (queue_expression.get("package") is not None
+                and not isinstance(queue_expression.get("package"), str))):
+        raise ValueError("snapshot queue selection expression is incomplete")
     results = snapshot.get("results")
     selected = snapshot.get("selected")
     candidates = snapshot.get("candidates")
@@ -866,6 +929,13 @@ def reconstruct_selected_results(snapshot: dict) -> list[dict]:
             or result_ids != selected_ids or len(result_ids) != len(set(result_ids))
             or any(not isinstance(number, int) or number < 1 for number in result_ids)):
         raise ValueError("snapshot selected issue list is inconsistent")
+    if snapshot.get("resulting_issues") != result_ids:
+        raise ValueError("snapshot resulting issue set is inconsistent")
+    if (issue_mode == "exact"
+            and (not isinstance(explicit_issues, list)
+                 or not explicit_issues
+                 or result_ids != explicit_issues)):
+        raise ValueError("snapshot exact issue set is inconsistent")
     for result, summary in zip(results, selected, strict=True):
         selection = result.get("selection")
         if (not isinstance(selection, dict) or selection.get("selected") is not True

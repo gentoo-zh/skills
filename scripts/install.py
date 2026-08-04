@@ -29,6 +29,7 @@ GZH_MARKER = ".gzh-install.json"
 INSTALLATION_STATE = "skill-installations.json"
 CLIENT_NAMES = {"claude", "codex", "opencode"}
 IGNORED_NAMES = {".git", ".hg", ".svn", "__pycache__", SKILL_MARKER}
+MAX_MARKER_BYTES = 4096
 
 
 class InstallError(RuntimeError):
@@ -267,13 +268,58 @@ def write_installation_state(records: dict[Path, dict]) -> None:
 
 def read_marker(path: Path, marker_name: str) -> dict | None:
     marker = path / marker_name
-    if not marker.is_file():
+    try:
+        expected = marker.lstat()
+    except OSError:
+        return None
+    if (not stat.S_ISREG(expected.st_mode)
+            or expected.st_size > MAX_MARKER_BYTES):
+        return None
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(marker, flags)
+        with os.fdopen(descriptor, "rb") as handle:
+            opened = os.fstat(handle.fileno())
+            if (not stat.S_ISREG(opened.st_mode)
+                    or (expected.st_dev, expected.st_ino) !=
+                    (opened.st_dev, opened.st_ino)):
+                return None
+            content = handle.read(MAX_MARKER_BYTES + 1)
+            final = os.fstat(handle.fileno())
+    except OSError:
+        return None
+    if (len(content) > MAX_MARKER_BYTES
+            or (opened.st_dev, opened.st_ino, opened.st_mode, opened.st_size,
+                opened.st_mtime_ns, opened.st_ctime_ns) !=
+            (final.st_dev, final.st_ino, final.st_mode, final.st_size,
+             final.st_mtime_ns, final.st_ctime_ns)):
         return None
     try:
-        data = json.loads(marker.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        data = json.loads(content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
         return None
-    return data if data.get("installer") == INSTALLER_ID else None
+    if not isinstance(data, dict):
+        return None
+    if marker_name == SKILL_MARKER:
+        valid = (
+            set(data) == {"schema", "installer", "skill", "mode"}
+            and data.get("schema") == 1
+            and data.get("installer") == INSTALLER_ID
+            and valid_skill_name(data.get("skill"))
+            and data.get("mode") == "copy"
+        )
+    elif marker_name == GZH_MARKER:
+        valid = (
+            set(data) == {"schema", "installer", "component"}
+            and data.get("schema") == 1
+            and data.get("installer") == INSTALLER_ID
+            and data.get("component") == "gzh"
+        )
+    else:
+        valid = False
+    return data if valid else None
 
 
 def owned_skill(destination: Path, source: Path) -> tuple[bool, str | None]:
@@ -282,6 +328,8 @@ def owned_skill(destination: Path, source: Path) -> tuple[bool, str | None]:
             return destination.resolve(strict=False) == source.resolve(), "link"
         except OSError:
             return False, None
+    if not destination.is_dir():
+        return False, None
     marker = read_marker(destination, SKILL_MARKER)
     if marker and marker.get("skill") == source.name:
         return True, marker.get("mode")
@@ -414,21 +462,25 @@ def stage_skill(source: Path, base: Path, mode: str) -> Path:
     base.mkdir(parents=True, exist_ok=True)
     stage_parent = Path(tempfile.mkdtemp(prefix=f".{source.name}.new.", dir=base))
     staged = stage_parent / source.name
-    if mode == "link":
-        staged.symlink_to(source)
-    else:
-        shutil.copytree(
-            source, staged, symlinks=True,
-            ignore=shutil.ignore_patterns(
-                ".git", ".hg", ".svn", "__pycache__", "*.pyc", "*.pyo"))
-        marker = {
-            "schema": 1,
-            "installer": INSTALLER_ID,
-            "skill": source.name,
-            "mode": "copy",
-        }
-        (staged / SKILL_MARKER).write_text(
-            json.dumps(marker, indent=2) + "\n", encoding="utf-8")
+    try:
+        if mode == "link":
+            staged.symlink_to(source)
+        else:
+            shutil.copytree(
+                source, staged, symlinks=True,
+                ignore=shutil.ignore_patterns(
+                    ".git", ".hg", ".svn", "__pycache__", "*.pyc", "*.pyo"))
+            marker = {
+                "schema": 1,
+                "installer": INSTALLER_ID,
+                "skill": source.name,
+                "mode": "copy",
+            }
+            (staged / SKILL_MARKER).write_text(
+                json.dumps(marker, indent=2) + "\n", encoding="utf-8")
+    except Exception:
+        shutil.rmtree(stage_parent, ignore_errors=True)
+        raise
     return staged
 
 
@@ -591,6 +643,8 @@ def executable_owned(executable: Path, install_root: Path) -> bool:
 
 
 def gzh_owned(install_root: Path) -> bool:
+    if install_root.is_symlink() or not install_root.is_dir():
+        return False
     marker = read_marker(install_root, GZH_MARKER)
     return bool(marker and marker.get("component") == "gzh")
 
@@ -676,7 +730,7 @@ def validate_gzh_destination(install_root: Path, executable: Path) -> None:
 
 def gzh_status() -> tuple[str, bool]:
     install_root, executable = gzh_paths()
-    if not install_root.exists() and not executable.exists() and not executable.is_symlink():
+    if not path_present(install_root) and not path_present(executable):
         return "not installed", False
     if not gzh_owned(install_root):
         return f"unowned ({install_root})", False
@@ -691,18 +745,27 @@ def gzh_status() -> tuple[str, bool]:
 
 def uninstall_gzh() -> str:
     install_root, executable = gzh_paths()
-    if not install_root.exists() and not executable.exists() and not executable.is_symlink():
+    validate_gzh_removal(install_root, executable)
+    if not path_present(install_root) and not path_present(executable):
         return "not installed"
-    if install_root.exists() and not gzh_owned(install_root):
-        raise InstallError(f"refusing to remove unowned path: {install_root}")
-    if (executable.exists() or executable.is_symlink()
-            ) and not executable_owned(executable, install_root):
-        raise InstallError(f"refusing to remove unowned path: {executable}")
-    if executable.exists() or executable.is_symlink():
+
+    if path_present(executable):
         executable.unlink()
     if install_root.exists():
         shutil.rmtree(install_root)
     return "removed"
+
+
+def validate_gzh_removal(
+        install_root: Path | None = None,
+        executable: Path | None = None,
+) -> None:
+    if install_root is None or executable is None:
+        install_root, executable = gzh_paths()
+    if path_present(install_root) and not gzh_owned(install_root):
+        raise InstallError(f"refusing to remove unowned path: {install_root}")
+    if path_present(executable) and not executable_owned(executable, install_root):
+        raise InstallError(f"refusing to remove unowned path: {executable}")
 
 
 def run_install(clients: list[str], mode: str, include_skills: bool,
@@ -843,6 +906,12 @@ def run_status(clients: list[str], include_skills: bool,
 def run_uninstall(clients: list[str], include_skills: bool,
                   include_gzh: bool, scan_all: bool = False) -> int:
     failed = False
+    if include_gzh:
+        try:
+            validate_gzh_removal()
+        except InstallError as exc:
+            print(f"{'gzh':<18} {'CLI':<23} {exc}", file=sys.stderr)
+            return 1
     if include_skills:
         records = read_installation_state()
         targets = selected_skill_targets(clients, scan_all, records)

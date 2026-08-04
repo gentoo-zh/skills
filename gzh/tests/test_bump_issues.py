@@ -591,7 +591,7 @@ def test_manual_required_rejects_ambiguous_marked_comments():
     assert len(status["candidates"]) == 2
 
 
-def test_explicit_issue_outside_queue_is_or_included_with_complete_comments():
+def test_explicit_issue_include_mode_unions_it_with_the_filtered_queue():
     queued = _selector_node(1, cat_pkg="app-misc/queued")
     explicit_node = _selector_node(
         2, cat_pkg="app-misc/explicit",
@@ -605,6 +605,23 @@ def test_explicit_issue_outside_queue_is_or_included_with_complete_comments():
     assert result["total_count"] == 1
     assert result["fetched_count"] == 2
     assert result["selected_count"] == 1
+    assert result["issue_mode"] == "include"
+    assert result["selection_expression"] == {
+        "issue_mode": "include",
+        "composition": "filtered_queue_or_explicit",
+        "queue": {
+            "evaluated": True,
+            "repository": "gentoo-zh/overlay",
+            "label": "nvchecker",
+            "state": "open",
+            "limit": 100,
+            "maintainer": None,
+            "package": None,
+            "autobump": "off",
+        },
+        "explicit_issues": [2],
+    }
+    assert result["resulting_issues"] == [2]
     item = result["results"][0]
     assert item["issue"] == 2
     assert item["comments_complete"] is True
@@ -616,6 +633,32 @@ def test_explicit_issue_outside_queue_is_or_included_with_complete_comments():
         "selection_reason": "explicit-issue",
         "selection_reasons": ["explicit-issue"],
     }]
+
+
+def test_exact_issue_mode_fetches_and_selects_only_explicit_issues():
+    queued = _selector_node(1, cat_pkg="app-misc/queued")
+    explicit_nodes = {
+        3: _selector_node(3, cat_pkg="app-misc/three"),
+        2: _selector_node(2, cat_pkg="app-misc/two"),
+    }
+    result = _run_selector(
+        "any", "", [queued], issues=[3, 2], issue_mode="exact",
+        explicit=explicit_nodes)
+
+    assert result["ok"] is True
+    assert result["total_count"] == 0
+    assert result["fetched_count"] == 2
+    assert result["truncated"] is False
+    assert result["resulting_issues"] == [3, 2]
+    assert [item["issue"] for item in result["candidates"]] == [3, 2]
+    assert result["selection_expression"]["composition"] == "explicit_only"
+
+
+def test_exact_issue_mode_requires_an_explicit_issue():
+    result = run_bump_issues(
+        issue_mode="exact", runner=lambda *_args, **_kwargs: None)
+    assert result["ok"] is False
+    assert "requires at least one --issue" in result["error"]
 
 
 def test_explicit_issue_fails_closed_on_incomplete_comments():
@@ -677,6 +720,11 @@ def test_snapshot_reconstruction_uses_stored_selection_without_body_parsing():
         assert "counts" in str(exc)
     else:
         raise AssertionError("expected inconsistent snapshot to fail")
+
+    broken = json.loads(json.dumps(result))
+    broken["resulting_issues"] = []
+    with pytest.raises(ValueError, match="resulting issue set"):
+        reconstruct_selected_results(broken)
 
 
 def test_graphql_queries_request_stable_comment_evidence():

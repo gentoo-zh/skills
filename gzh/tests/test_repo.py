@@ -161,6 +161,11 @@ def test_fetch_canonical_remote_records_exact_ref_update(tmp_path):
         if args[:4] == ["git", "remote", "get-url", "canonical"]:
             return subprocess.CompletedProcess(
                 args, 0, stdout="git@github.com:gentoo-zh/overlay.git\n", stderr="")
+        if args == ["git", "remote", "-v"]:
+            return subprocess.CompletedProcess(
+                args, 0,
+                stdout="canonical\tgit@github.com:gentoo-zh/overlay.git (fetch)\n",
+                stderr="")
         if args[:3] == ["git", "rev-parse", "--verify"]:
             return subprocess.CompletedProcess(args, 0, stdout=next(oids) + "\n", stderr="")
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
@@ -170,3 +175,59 @@ def test_fetch_canonical_remote_records_exact_ref_update(tmp_path):
     assert report["after_oid"] == "b" * 40
     assert ["git", "fetch", "canonical", "master"] in calls
     assert ["git", "remote", "set-head", "canonical", "master"] in calls
+    assert report["aliases_verified"] == ["canonical"]
+
+
+def test_fetch_canonical_remote_updates_and_verifies_equivalent_aliases(tmp_path):
+    calls = []
+    oids = {
+        "refs/remotes/upstream/master": iter(("a" * 40, "c" * 40)),
+        "refs/remotes/canonical/master": iter(("b" * 40, "c" * 40)),
+    }
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        if args[:4] == ["git", "remote", "get-url", "upstream"]:
+            return subprocess.CompletedProcess(
+                args, 0, stdout="git@github.com:gentoo-zh/overlay.git\n", stderr="")
+        if args == ["git", "remote", "-v"]:
+            return subprocess.CompletedProcess(
+                args, 0,
+                stdout=("canonical\thttps://github.com/gentoo-zh/overlay.git (fetch)\n"
+                        "upstream\tgit@github.com:gentoo-zh/overlay.git (fetch)\n"),
+                stderr="")
+        if args[:3] == ["git", "rev-parse", "--verify"]:
+            return subprocess.CompletedProcess(
+                args, 0, stdout=next(oids[args[-1]]) + "\n", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    report = fetch_canonical_remote(tmp_path, "upstream", runner=fake_run)
+    assert report["after_oid"] == "c" * 40
+    assert report["aliases_verified"] == ["upstream", "canonical"]
+    assert ["git", "fetch", "upstream", "master"] in calls
+    assert ["git", "fetch", "canonical", "master"] in calls
+
+
+def test_fetch_canonical_remote_rejects_divergent_aliases_after_fetch(tmp_path):
+    oids = {
+        "refs/remotes/upstream/master": iter(("a" * 40, "c" * 40)),
+        "refs/remotes/canonical/master": iter(("b" * 40, "d" * 40)),
+    }
+
+    def fake_run(args, **kwargs):
+        if args[:4] == ["git", "remote", "get-url", "upstream"]:
+            return subprocess.CompletedProcess(
+                args, 0, stdout="git@github.com:gentoo-zh/overlay.git\n", stderr="")
+        if args == ["git", "remote", "-v"]:
+            return subprocess.CompletedProcess(
+                args, 0,
+                stdout=("canonical\thttps://github.com/gentoo-zh/overlay.git (fetch)\n"
+                        "upstream\tgit@github.com:gentoo-zh/overlay.git (fetch)\n"),
+                stderr="")
+        if args[:3] == ["git", "rev-parse", "--verify"]:
+            return subprocess.CompletedProcess(
+                args, 0, stdout=next(oids[args[-1]]) + "\n", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    with pytest.raises(RuntimeError, match="fetched divergent master OIDs"):
+        fetch_canonical_remote(tmp_path, "upstream", runner=fake_run)

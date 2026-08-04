@@ -143,43 +143,82 @@ def validate_canonical_remote(cwd: Path, remote: str,
 
 def fetch_canonical_remote(cwd: Path, remote: str,
                            runner=subprocess.run) -> dict:
-    """Fetch one explicitly selected canonical remote and bind its HEAD to master."""
+    """Fetch every equivalent canonical alias and bind each HEAD to master."""
     validate_canonical_remote(cwd, remote, runner=runner)
 
-    def oid() -> str | None:
+    selected_url = runner(
+        ["git", "remote", "get-url", remote], cwd=str(cwd),
+        capture_output=True, text=True)
+    selected_slug = github_slug((selected_url.stdout or "").strip())
+    remotes = runner(["git", "remote", "-v"], cwd=str(cwd),
+                     capture_output=True, text=True)
+    if remotes.returncode != 0:
+        raise RuntimeError(f"cannot list remotes in {cwd}: {remotes.stderr.strip()}")
+    aliases: set[str] = set()
+    for line in (remotes.stdout or "").splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[2] == "(fetch)" and github_slug(parts[1]) == selected_slug:
+            aliases.add(parts[0])
+    if remote not in aliases:
+        raise RuntimeError(
+            f"selected canonical remote {remote!r} has no matching fetch entry")
+    ordered_aliases = [remote, *sorted(aliases - {remote})]
+
+    def oid(name: str) -> str | None:
         proc = runner(
             ["git", "rev-parse", "--verify",
-             f"refs/remotes/{remote}/{_DEFAULT_BRANCH}"],
+             f"refs/remotes/{name}/{_DEFAULT_BRANCH}"],
             cwd=str(cwd), capture_output=True, text=True)
         value = (proc.stdout or "").strip()
         return value if proc.returncode == 0 and value else None
 
-    before = oid()
-    fetch = runner(["git", "fetch", remote, _DEFAULT_BRANCH], cwd=str(cwd),
-                   capture_output=True, text=True)
-    if fetch.returncode != 0:
+    updates = []
+    for alias in ordered_aliases:
+        before = oid(alias)
+        fetch = runner(["git", "fetch", alias, _DEFAULT_BRANCH], cwd=str(cwd),
+                       capture_output=True, text=True)
+        if fetch.returncode != 0:
+            raise RuntimeError(
+                f"cannot fetch {alias}/{_DEFAULT_BRANCH}: {fetch.stderr.strip()}")
+        after = oid(alias)
+        if after is None:
+            raise RuntimeError(
+                f"fetch completed without {alias}/{_DEFAULT_BRANCH}")
+        set_head = runner(
+            ["git", "remote", "set-head", alias, _DEFAULT_BRANCH], cwd=str(cwd),
+            capture_output=True, text=True)
+        if set_head.returncode != 0:
+            raise RuntimeError(
+                f"cannot set {alias}/HEAD to {_DEFAULT_BRANCH}: "
+                f"{set_head.stderr.strip()}")
+        updates.append({
+            "after_oid": after,
+            "before_oid": before,
+            "changed": before != after,
+            "fetch_command": ["git", "fetch", alias, _DEFAULT_BRANCH],
+            "remote": alias,
+            "stderr": fetch.stderr,
+            "stdout": fetch.stdout,
+        })
+    final_oids = {item["after_oid"] for item in updates}
+    if len(final_oids) != 1:
+        detail = ", ".join(
+            f"{item['remote']}={item['after_oid']}" for item in updates)
         raise RuntimeError(
-            f"cannot fetch {remote}/{_DEFAULT_BRANCH}: {fetch.stderr.strip()}")
-    after = oid()
-    if after is None:
-        raise RuntimeError(
-            f"fetch completed without {remote}/{_DEFAULT_BRANCH}")
-    set_head = runner(
-        ["git", "remote", "set-head", remote, _DEFAULT_BRANCH], cwd=str(cwd),
-        capture_output=True, text=True)
-    if set_head.returncode != 0:
-        raise RuntimeError(
-            f"cannot set {remote}/HEAD to {_DEFAULT_BRANCH}: {set_head.stderr.strip()}")
+            f"equivalent canonical aliases fetched divergent master OIDs: {detail}")
+    selected = updates[0]
     return {
-        "after_oid": after,
-        "before_oid": before,
-        "changed": before != after,
+        "after_oid": selected["after_oid"],
+        "alias_updates": updates,
+        "aliases_verified": ordered_aliases,
+        "before_oid": selected["before_oid"],
+        "changed": any(item["changed"] for item in updates),
         "complete": True,
         "default_branch": _DEFAULT_BRANCH,
-        "fetch_command": ["git", "fetch", remote, _DEFAULT_BRANCH],
+        "fetch_command": selected["fetch_command"],
         "ok": True,
         "remote": remote,
-        "stderr": fetch.stderr,
-        "stdout": fetch.stdout,
+        "stderr": selected["stderr"],
+        "stdout": selected["stdout"],
         "truncated": False,
     }

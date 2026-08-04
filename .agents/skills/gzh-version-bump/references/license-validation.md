@@ -14,9 +14,11 @@ artifacts, license text, or distribution terms. Read the live overlay `README`,
    Run `gzh license <archive>` for each changed local supported tar or ZIP archive to
    record bounded paths, sizes, and SHA-256 values without extraction. It accepts plain,
    gzip, bzip2, or xz tar streams and non-ZIP64 ZIP metadata; unsupported formats require
-   another bounded read-only procedure. Read the matched material and inspect other
-   upstream evidence because filename matching cannot determine which terms apply or
-   whether every relevant document was found.
+   another bounded read-only procedure. It marks the report incomplete when a member is
+   itself a recognized archive or container because nested content is listed but not
+   traversed. Inspect each listed member separately. Read the matched material and inspect
+   other upstream evidence because filename matching cannot determine which terms apply
+   or whether every relevant document was found.
 3. Follow references from the shipped client or archive to the vendor's current software
    terms. Record the release, artifact, path or URL, retrieval date, and relevant clause.
 4. Distinguish software terms from a privacy policy, website or account terms, service

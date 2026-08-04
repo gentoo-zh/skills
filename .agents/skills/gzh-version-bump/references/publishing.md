@@ -11,15 +11,18 @@ Complete the local finish pipeline before preparing publication.
 4. Build the pull request body above the live template marker. Preserve the template and
    tick only checks that actually ran. Follow the live `AGENTS.md` for the description;
    do not turn broader checklist wording into routine passing-test or tested-architecture
-   prose. Do not let an agent attest the human review box. Invoke `chinese-skill` when the
-   repository policy requires a Chinese pull request body; keep its writing rules and
-   examples in that skill.
+   prose. Do not let an agent attest the human review box. Reuse only the verified causal
+   rationale established for the commit; do not infer a new reason from release-note or
+   upstream wording during publication. Invoke `chinese-skill` when the repository policy
+   requires a Chinese pull request body. Rewrite the verified meaning in natural Chinese
+   with the live repository's Gentoo terminology instead of translating word by word or
+   coining a term. Keep the exact `pkgdev` English subject unchanged.
 5. Write the complete body to a file and run
    `gzh pr-plan --title '<pkgdev subject>' --body <body-file>`. Show the user its immutable
-   plan ID, exact title, complete body, and file list. Obtain confirmation for every
-   identified plan before running `gh pr create` or `gh pr edit`. One response may approve
-   several separately enumerated exact plan IDs. A request made before the plans were
-   rendered, a wildcard, or draft status does not satisfy this gate.
+   plan ID, exact title, complete body, and file list. Obtain a separate confirmation for
+   this one rendered pull request before running `gh pr create` or `gh pr edit`. Batch
+   approval, a request made before the plan was rendered, a wildcard, or draft status does
+   not satisfy this gate.
 6. Recompute every confirmed plan immediately before publication. Stop when its head SHA,
    base SHA, base-sensitive file set, title, body, or live template changes.
 7. Push only the topic branch to the uniquely identified personal fork. Resolve the fork

@@ -106,4 +106,6 @@ masquerade as a behavior change.
 The machine-readable inventory is [sources.json](sources.json), its reviewed fingerprints
 are in [source-lock.json](source-lock.json), and
 [`source_manager.py`](../scripts/source_manager.py) provides bounded list, audit, and
-review-only lock refresh commands.
+review-only lock refresh commands. Use `--capability <id>` to select the exact registered
+source route for one behavior, optionally intersected with topic, authority, scope, or
+explicit source IDs.

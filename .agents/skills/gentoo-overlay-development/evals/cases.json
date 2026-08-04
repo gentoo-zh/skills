@@ -31,8 +31,21 @@
       "expected": [
         "verify each exact upstream artifact",
         "apply the live keyword policy",
+        "use genuinely comparable current Gentoo packages as advisory evidence without making precedent a readiness gate or portable rule",
         "inspect every installed binary object",
+        "classify executable regular files and audit symlink targets separately",
         "scope QA exceptions to reviewed paths"
+      ]
+    },
+    {
+      "id": "prebuilt-no-comparable-precedent",
+      "prompt": "Review a prebuilt package in an independent overlay after a bounded search found no genuinely comparable current Gentoo package, while upstream and official Gentoo evidence are complete.",
+      "should_trigger": true,
+      "expected": [
+        "report the bounded precedent search as advisory evidence",
+        "do not block readiness solely because no comparable package exists",
+        "derive portable decisions from official Gentoo and upstream primary evidence",
+        "do not turn a superficially similar package into a general rule"
       ]
     },
     {
@@ -239,6 +252,23 @@
         "use the generic new-package procedure with live gentoo-zh capabilities",
         "do not force the existing-package bump skill to accept a new package",
         "stop before publication until the live procedure and approval are resolved"
+      ]
+    },
+    {
+      "id": "gentoo-zh-new-package-chinese-pr-wording",
+      "prompt": "Add a new prebuilt package to gentoo-zh and prepare its local commit and PR text without publishing. The live procedure produced the subject app-misc/example-bin: add 1.0.0 and requires a Simplified Chinese body. The only upstream description supplied is new upstream binary package.",
+      "should_trigger": true,
+      "expected_skills": [
+        "gentoo-overlay-development"
+      ],
+      "publication_boundary": "stop-before-publish",
+      "expected": [
+        "apply the live gentoo-zh commit and PR text procedure as a resolved repository capability",
+        "keep the exact pkgdev-generated English subject unchanged for the commit and PR title",
+        "distinguish a new repository package from an upstream prebuilt archive or distribution-model change before drafting the body",
+        "do not translate the upstream phrase word by word or coin a Chinese artifact term",
+        "write only verified causal rationale in natural Chinese with live Gentoo and repository terminology",
+        "stop before publication until the exact plan receives the required approval"
       ]
     },
     {

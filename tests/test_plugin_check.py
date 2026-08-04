@@ -52,7 +52,7 @@ def test_current_plugin_package_contract_is_consistent():
     assert report["ok"] is True
     assert report["plugin"] == "gentoo-overlay-skills"
     assert report["marketplace"] == "gentoo-zh-skills"
-    assert report["versions"] == {"codex": "0.2.0", "claude": "0.2.0"}
+    assert report["versions"] == {"codex": "0.3.0", "claude": "0.3.0"}
     assert report["skills"] == [
         "gentoo-overlay-development",
         "gzh-bump-from-issues",
@@ -110,7 +110,7 @@ def test_plugin_package_rejects_inferred_license(tmp_path):
 def test_plugin_package_rejects_cross_client_version_drift(tmp_path):
     root = fixture_package(tmp_path)
     manifest = root / ".agents/.claude-plugin/plugin.json"
-    rewrite_json(manifest, lambda data: data.update(version="0.3.0"))
+    rewrite_json(manifest, lambda data: data.update(version="0.4.0"))
 
     report = plugin_check.plugin_report(root)
 

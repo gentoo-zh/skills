@@ -107,6 +107,41 @@ def test_inspection_resolves_clean_synchronized_direct_checkout(tmp_path):
     require_operation_ready(report)
 
 
+def test_topic_branch_descending_from_current_canonical_base_is_synchronized(tmp_path):
+    repository = make_repository(tmp_path / "overlay")
+    git(repository, "switch", "--quiet", "-c", "app-misc-example-2")
+    (repository / "topic").write_text("change\n", encoding="utf-8")
+    git(repository, "add", "topic")
+    git(repository, "commit", "--quiet", "-m", "app-misc/example: add 2")
+
+    report = inspect_repository(
+        repository, load_bundled_adapter("gentoo-zh"),
+        operation="repository-write-preflight")
+
+    assert report["repository"]["current_branch"]["value"] == "app-misc-example-2"
+    assert report["repository"]["ahead"]["value"] == 1
+    assert report["repository"]["behind"]["value"] == 0
+    assert report["repository"]["base_synchronized"]["value"] is True
+    assert report["operation"]["write_ready"] is True
+
+
+def test_default_branch_ahead_of_canonical_base_is_not_synchronized(tmp_path):
+    repository = make_repository(tmp_path / "overlay")
+    (repository / "local-master-change").write_text("change\n", encoding="utf-8")
+    git(repository, "add", "local-master-change")
+    git(repository, "commit", "--quiet", "-m", "repository: local change")
+
+    report = inspect_repository(
+        repository, load_bundled_adapter("gentoo-zh"),
+        operation="repository-write-preflight")
+
+    assert report["repository"]["current_branch"]["value"] == "master"
+    assert report["repository"]["ahead"]["value"] == 1
+    assert report["repository"]["behind"]["value"] == 0
+    assert report["repository"]["base_synchronized"]["value"] is False
+    assert report["operation"]["write_ready"] is False
+
+
 def test_canonical_remote_uses_url_and_preserves_upstream_preference(tmp_path):
     repository = make_repository(
         tmp_path / "overlay",

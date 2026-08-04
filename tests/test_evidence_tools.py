@@ -41,6 +41,18 @@ def test_source_registry_is_queryable_by_topic():
     assert any(source["authority"] == "gentoo-standard" for source in selected)
 
 
+def test_source_registry_is_queryable_by_capability():
+    registry = source_manager.load_registry()
+    selected = source_manager.select_sources(
+        registry, ids=[], topic=None, authority=None,
+        capability="prebuilt-image-review")
+    assert selected
+    assert {source["scope"] for source in selected} == {
+        "portable-core", "portable-tooling"}
+    assert {source["id"] for source in selected} == set(
+        registry["capability_sources"]["prebuilt-image-review"])
+
+
 def test_source_registry_rejects_duplicate_ids(tmp_path):
     path = tmp_path / "sources.json"
     source = {
@@ -58,6 +70,8 @@ def test_source_registry_rejects_duplicate_ids(tmp_path):
         "authorities": ["official"],
         "authority_scopes": {"official": ["portable-core"]},
         "scopes": ["portable-core"],
+        "capability_sources": {"test": ["duplicate"]},
+        "capability_scopes": {"test": ["portable-core"]},
         "sources": [source, source],
     }))
     with pytest.raises(ValueError, match="duplicate source id"):
@@ -71,6 +85,8 @@ def test_source_registry_rejects_authority_outside_allowed_scope(tmp_path):
         "authorities": ["official"],
         "authority_scopes": {"official": ["portable-core"]},
         "scopes": ["portable-core", "comparative-evidence"],
+        "capability_sources": {"test": ["misclassified"]},
+        "capability_scopes": {"test": ["comparative-evidence"]},
         "sources": [{
             "id": "misclassified",
             "title": "Misclassified source",

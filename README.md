@@ -8,6 +8,7 @@
 - Git；
 - 目标 overlay 的可写开发副本；
 - Portage、`pkgdev` 和 `pkgcheck`；
+- 使用 ELF 或 installed-image 检查时所需的 `file`、binutils 和 `pax-utils`；
 - 读取 GitHub issue 或准备 PR 时所需的 GitHub CLI `gh`；
 - Python `venv` 和 `pip`。安装缺失依赖时还需要网络连接和可用的 CA 证书。
 
@@ -136,7 +137,7 @@ gentoo-zh 单包升级使用 `$gzh-version-bump`。它核对实时仓库约定�
 
 维护本仓库、处理来源漂移、修复 CI、扩展验证或提取可复用行为时，使用 `$gzh-maintain-skills`。一次迭代只修改一个有证据支持的行为边界；没有行为变化时，干净的 no-op 是有效结果。
 
-PR 正文需要中文时，使用 `chinese-skill` 检查措辞和术语。`pkgdev` 生成的英文 subject 保持原文，不翻译。
+PR 正文需要中文时，使用 `chinese-skill` 检查措辞和术语。先核实原文事实，再按 Gentoo 和仓库术语改写为自然中文；不要逐词翻译，也不要补写未经证实的原因。`pkgdev` 生成的英文 subject 保持原文，不翻译。
 
 ## 通用验证工具
 
@@ -169,7 +170,7 @@ gentoo-zh 的常用确定性命令优先使用短名称。开始写入前先核�
 export GZH_OVERLAY_DIR=/path/to/overlay
 gzh repo
 gzh doctor --operation repository-write-preflight
-gzh plan category/package 1.2.3
+gzh plan category/package 1.2.3 --package-model source
 gzh latest category/package
 gzh bump category/package 1.2.3
 gzh lint category/package/package-1.2.3.ebuild
@@ -186,28 +187,43 @@ gzh commit category/package/package-1.2.3.ebuild
 gzh urls
 ```
 
-`gzh lint` 只执行已实现的快速结构检查，不代替 Gentoo Devmanual、eclass reference、`pkgcheck` 或实际安装。目标仓库规定的 `lint`、Manifest、package QA、构建、安装 elog 和网络检查仍是硬门。
+`gzh lint` 只执行已实现的快速结构检查，不代替 Gentoo Devmanual、eclass reference、`pkgcheck` 或实际安装。它会提示继承 `unpacker` 却绕过 `unpack_deb`，以及在 `src_install` 中解包的情况；这些结果需要人工核对，不表示所有自定义格式都有错误。目标仓库规定的 `lint`、Manifest、package QA、构建、安装 elog 和网络检查仍是硬门。
 
 附加工具按改动面启用，不要求每个包无条件执行全部命令：
 
 | 改动面 | 命令 | 结果 |
 | --- | --- | --- |
-| 单个 ebuild 的依赖或 USE | `gzh deps inspect <ebuild> --use +flag` | 从匹配的 Portage cache 解析依赖，不执行 ebuild |
+| 单个 ebuild 的依赖或 USE | `gzh deps inspect <ebuild> --use +flag` | 验证现有 Portage cache；缺失或过期时，在隔离目录为当前工作树生成 metadata |
 | 两个版本的依赖差异 | `gzh deps diff <old-ebuild> <new-ebuild>` | 比较 potential declaration；指定完整 USE 状态时另给 reduced delta |
 | 直接反向依赖候选 | `gzh deps reverse <atom>` | 通过 `pquery` 查询已配置 ebuild repository 的 raw potential 关系 |
 | profile 或 architecture QA 范围 | `gzh qa <target> --profile stable --arch amd64` | 使用 `pkgcheck` 官方 selector 缩限静态 QA 范围 |
-| distfile 或架构产物 | `gzh artifacts <Manifest> --evidence <json>` | 核对每个 `DIST` 条目、来源记录和可选本地 digest |
+| distfile 或架构产物 | `gzh artifacts <Manifest> --evidence <json>` | 分别记录产物身份、内容可检查状态和 Portage fetch 状态；指定 `--distdir` 时再核对本地 digest |
 | release archive 的 license 材料 | `gzh license <archive>` | 不解压 archive，记录 license-like 文件的路径、大小和 SHA-256 |
-| 预编译 ELF | `gzh binary <path>` | 使用 `file` 和 `readelf` 静态检查，不执行目标文件 |
-| 安装结果 | `gzh image <image-root>` | 检查 symlink、mode、desktop、systemd 和 ELF metadata |
+| 预编译 ELF | `gzh binary <path>` | 使用 `file`、`readelf` 和 `lddtree` 检查 ELF 及 host-visible runtime dependency，不执行目标文件 |
+| 预编译安装结果 | `gzh image <image-root> --inventory-evidence <new-relative-file> --require-non-elf-allowlist [--allow-executable <path>]` | 检查 symlink、mode、desktop、systemd、ELF metadata 和 executable non-ELF allowlist，并把完整文件清单写入独立证据文件 |
 | 支持的测试矩阵 | `gzh test =category/package-version::gentoo-zh -x` | 通过 `pkgdev tatt` 保存有界测试证据 |
-| 本地或 SSH 安装 | `gzh exec =category/package-version::gentoo-zh --executor <name> -x` | 运行同一 exact-atom 和隔离 elog 合同，并保存可校验记录 |
+| 本地或 SSH 安装 | `gzh exec =category/package-version::gentoo-zh --executor <name> -x` | 预演 exact atom 的安装计划，确认授权后安装，并保存可校验记录 |
 
-`gzh deps inspect` 和 `gzh deps diff` 只读取不超过 1 MiB 的一般 ebuild 文件与匹配的 `metadata/md5-cache` 快照，并核对 cache 内的 `_md5_`。`diff` 始终保留 disabled USE branch 的 potential declaration 差异；只有调用方提供两个版本共同且完整的 USE 状态时，才增加 reduced delta。slot、blocker 和条件变化只是复核候选，不能证明 provider 兼容性、ABI 或 revbump 需求。
+`gzh deps inspect` 和 `gzh deps diff` 按以下规则取得 dependency metadata：
+
+- 先读取不超过 1 MiB 的一般 ebuild 文件，并核对现有 `metadata/md5-cache` 的 `_md5_`。
+- 单独核对 ebuild 无法证明 inherited eclass 未漂移。含 `_eclasses_`、缺失或过期的 cache 都由官方 `egencache --external-cache-only` 在私有临时目录中重新生成。
+- Portage 会读取当时的 ebuild 和 eclass，但不会写入 overlay 或系统 cache。报告保留 ebuild 与生成结果的 hash；ebuild 在生成期间变化时，命令会失败。
+- 工具不会把全部 eclass、profile 和 repository configuration 封存为不可变快照。并发修改这些输入时，应停止并重新执行。
+
+`diff` 始终保留 disabled USE branch 的 potential declaration 差异。只有两个版本都提供完整的 USE 状态时，报告才增加 reduced delta。slot、blocker 和条件变化只是复核候选，不能证明 provider 兼容性、ABI 或 revbump 需求。
 
 `gzh deps reverse` 调用 `pquery --raw --ebuild-repos --restrict-revdep`，结果只表示已配置 ebuild repository 中可能存在直接依赖的版本。它不解析 active profile，不计算 transitive graph，也不判断 ABI。`gzh qa` 的 `--profile` 和 `--arch` 可重复使用；未指定时保留 `pkgcheck` 的默认范围。selector 只影响静态 QA，不代表对应 profile 或 architecture 已完成构建和安装。
 
-`gzh merge` 和 `gzh exec` 通过 `--usepkg=n` 请求 exact atom 的 source merge，并在同一个隔离目录中保存 `qa`、`warn` 和 `error` elog。依赖安装或目标安装只要产生受监控的 elog，命令就会保留证据并失败；不会清除依赖阶段的 elog 后继续安装目标。active profile 使用 `eselect --brief profile show` 记录，`ARCH` 使用 `portageq envvar ARCH` 记录，多行或不完整的环境输出会在安装前失败。
+`gzh plan` 要求明确指定 `--package-model source|prebuilt`。只有确认安装的程序和库均由源码构建，且不安装上游提供的预编译内容、JVM 字节码、平台安装包或可执行脚本集合时，才使用 `source`；只要包含其中一项，就使用 `prebuilt`。工具会检查 `-bin` 包名、`QA_PREBUILT`、`rpm.eclass`，以及 `SRC_URI` 引用的 AppImage、DEB、RPM、JAR、独立可执行文件和带架构的压缩包。源码构建产生的 JAR 等输出文件不会因此被误判。未命中信号不能证明该包是源码包；tar、ZIP 或脚本集合的内容不明确时，仍须根据上游内容分类。
+
+prebuilt bump 使用 `gzh plan <package> <version> --package-model prebuilt --assets-evidence <json>`，并提供前后两个 release 的完整产物清单。工具会按 architecture 比较新增、删除或改名的文件，并要求每项变化都有明确决定；清单缺失、不完整或变化未处理时，计划不会进入可执行状态。分类和清单都是经过复核的输入，不是上游真实性证明；release URL、文件名、architecture 和实际内容仍须依据上游原始资料核对。
+
+`gzh artifacts` 的 evidence 为每个 `DIST` 文件分别保存 `inspection_available`、`portage_fetch_state` 和对应证据。人工下载成功不能代替 Portage 默认 fetch；工具也不会自行认证调用方提供的 CI 或来源说明。`gzh binary` 会拒绝缺失 interpreter、未解析的 `DT_NEEDED` 和未展开的 AppImage、ZIP、SquashFS、ar 或 tar 容器。runtime dependency 结果仅覆盖当前主机可见的 filesystem 与 ELF loader search path，不会判断 Gentoo provider、`dlopen` 目标或 helper process。
+
+`gzh build` 在新的 evidence 目录中保存 ebuild hash、Git 状态、active ARCH/profile、限定环境、完整命令、bounded output 和 elog hash。它执行 phase 级构建与 image preparation，不解析依赖，也不执行真实 merge；仍须运行 `gzh merge` 或授权的 `gzh exec`，并以 overlay CI 作为最终验收。
+
+`gzh merge` 和 `gzh exec` 先使用实际安装参数执行 `emerge --pretend`。依赖优先使用 binary package，`--usepkg-exclude` 强制目标版本从 ebuild 安装；计划中出现未授权的重建、升级、降级、卸载或未知操作时不会安装。本地执行会把 Portage 绑定到 `gzh repo` 选择的开发工作树，SSH executor 则使用经过校验的远端开发工作树。命令在同一个隔离目录中保存 `qa`、`warn` 和 `error` elog，任一受监控的 elog 都会保留为证据并使安装失败。active profile 使用 `eselect --brief profile show` 记录，`ARCH` 使用 `portageq envvar ARCH` 记录；环境输出包含多行或不完整时，安装会在预演前停止。
 
 `gzh license` 支持未压缩、gzip、bzip2 或 xz 压缩的 tar，以及不含 ZIP64 metadata 的 ZIP archive。命令会在创建 archive parser 前限制 ZIP central directory 和 tar extended header，再限制成员数量、声明大小和 license-like 文件读取量。Zstandard tar 和 ZIP64 metadata 尚无等价的有界预检，因此命令会明确拒绝。报告只提供文件名 inventory 与 hash，不判断适用条款、license 兼容性、镜像权限或二进制再发布权限。相关结论仍须依据当前 release 的原始条款和 Gentoo 官方 license 文档人工复核。
 
@@ -230,17 +246,19 @@ remote_overlay_path = "/srv/gentoo-zh-overlay"
 allow_dependency_install = true
 ```
 
-批量队列和发布收尾也使用短命令。队列 selector 保存 canonical base、配置条目、issue revision、bot marker 和选择原因。publication 命令只生成计划或读取状态，不会 push、创建 PR、merge 或删除 worktree：
+批量队列和发布收尾也使用短命令。`include` 模式合并筛选结果与明确指定的 issue；`exact` 模式只读取并选择明确指定的 issue。schema v2 快照保存完整选择表达式、最终 issue 集合、canonical base、配置条目、issue revision 和 bot marker。publication 命令只生成计划、更新结构化状态或读取状态，不会 push、创建 PR、merge 或删除 worktree：
 
 ```bash
-gzh bump-issues --autobump off --issue 11700 --limit 1000
+gzh bump-issues --autobump off --issue-mode include --issue 11700 --limit 1000
+gzh bump-issues --issue-mode exact --issue 11700 --issue 11701
 gzh pr-plan --title 'category/package: add 1.2.3' --body /tmp/pr-body.md
 gzh ci 11714 --watch
+gzh batch-report update <report.json> --expected-sha256 <sha256> --item-id <id> --state pushed --reason <reason> --evidence <evidence.json>
 gzh batch-report reconcile <report.json> --expected-sha256 <sha256>
 gzh batch cleanup <report.json> --dry-run
 ```
 
-新的可恢复批次应使用 `gzh batch-report create --format json`。JSON report 保留原始 QA、skip、failure 和风险字段，并追加 `local_commit -> pushed -> pr_open -> checks_passed -> merged` 观察记录。旧的 Markdown report 仍可 checkpoint，但不能依赖文本解析执行 publication reconciliation。
+新的可恢复批次应使用 `gzh batch-report create --format json`。schema v2 要求绑定来源队列快照，并在处理前为每个 issue 创建 `null -> pending` 的 item；`pending` 只表示该项已入选，不表示分类失败。分类后只能进入 `blocked`、`local_committed` 或 `superseded_by_external_merge`，发布状态再按 `local_committed -> pushed -> pr_open -> checks_passed -> merged` 推进。命令会保留原始 QA、skip、failure、风险和未知扩展字段。旧的 Markdown report 仍可 checkpoint，但不能依赖文本解析更新状态或执行 publication reconciliation。
 
 旧名称继续兼容现有脚本，但 `gzh --help` 和 shell completion 只显示短名称：
 
@@ -300,7 +318,7 @@ gzh batch cleanup <report.json> --dry-run
 版本号必须在 `gzh/pyproject.toml`、`gzh.__version__`、`gzh --version` 和两个 plugin manifest 中保持一致，tag 使用 `v<version>`。发布前执行：
 
 ```bash
-python3 scripts/release_check.py --mode source-only --tag v0.2.0
+python3 scripts/release_check.py --mode source-only --tag v0.3.0
 ```
 
 本仓库当前没有根目录 license 文件，也没有 `project.license` metadata。发布过程不会推断或添加法律条款；在仓库所有者明确选择 license 前，只发布 tag 对应的源码快照，不上传 wheel、sdist、可执行文件或其他自定义产物。GitHub 自动生成的源码 archive 以 tag 指向的 commit 内容为准，但外层压缩字节不属于稳定身份。`--mode package` 当前始终失败；根目录 license 和 package metadata 只能作为前提，后续还须实现并复核确定性的 rights-decision contract。
@@ -319,7 +337,7 @@ release tag 不会固定已有安装的版本。`install.sh` 安装当前 checko
 
 相似目录结构不能证明两个 overlay 使用相同的 remote、branch、keyword、CI、review 或发布规则。只约束 Gentoo ebuild repository 的 GLEP 也不会自动成为通用 overlay 规则。`gentoo-tree-lessons` 只提供候选 commit 和测试样本，任何硬规则都需要当前官方资料或目标仓库政策支持。
 
-机器可读来源位于 [`sources.json`](.agents/skills/gentoo-overlay-development/references/sources.json)，当前登记 71 个官方或明确标注的次级来源。人工复核后的 revision 或 SHA-256 位于 [`source-lock.json`](.agents/skills/gentoo-overlay-development/references/source-lock.json)。查询时必须指定 `--scope`、`--all-scopes` 或 `--id`：
+机器可读来源位于 [`sources.json`](.agents/skills/gentoo-overlay-development/references/sources.json)，当前登记 75 个官方或明确标注的次级来源。人工复核后的 revision 或 SHA-256 位于 [`source-lock.json`](.agents/skills/gentoo-overlay-development/references/source-lock.json)。查询时必须指定 `--capability`、`--scope`、`--all-scopes` 或 `--id`：
 
 ```bash
 python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py \
@@ -379,7 +397,7 @@ Git bootstrap 明确禁用 binary package，避免 rolling binary host 的 build
 
 workflow 执行两个 EAPI 8 source-merge fixture。正常 fixture 必须产生 VDB、预期 artifact 且没有保存的 elog；边界 fixture 必须在 emerge 成功后因 `qa` elog 被拒绝。workflow 还在隔离 Git 副本中直接执行正式 `run_verify_install`，并要求两个 fixture 得出相同的接受或拒绝结果。该验证不代表 overlay、profile 或 architecture matrix；真实 package 仍须按目标 repository 的实时政策执行 `pkgcheck`、构建、安装和 CI。
 
-静态 eval 当前覆盖 73 个 activation、exclusion 和行为案例。外部 runner 通过显式 JSON protocol 接入，不会把预期答案写入待测 prompt。安装测试只写入临时目录。
+静态 eval 当前覆盖 81 个 activation、exclusion 和行为案例。外部 runner 通过显式 JSON protocol 接入，不会把预期答案写入待测 prompt。安装测试只写入临时目录。
 
 ## 目录
 

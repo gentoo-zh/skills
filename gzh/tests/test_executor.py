@@ -5,18 +5,19 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path, PurePosixPath
 
 import pytest
 
 from gzh.executor import (
-    ExecutorAuthorizationError,
     ExecutorConfigError,
     ExecutorError,
     ExecutorSpec,
     ExecutorValidationError,
     InstallRequest,
     LocalExecutor,
+    MAX_COMMAND_OUTPUT_BYTES,
     OwnedTransfer,
     SSHExecutor,
     SSHTransport,
@@ -25,6 +26,7 @@ from gzh.executor import (
     load_executor_config,
     merge_argv,
     validate_remote_repository,
+    _executor_plan,
     _REMOTE_ELOG_COLLECTOR,
 )
 from gzh.executor_evidence import verify_evidence
@@ -40,13 +42,41 @@ def _proc(args, returncode=0, stdout="", stderr=""):
 
 
 class LocalRunner:
-    def __init__(self, failure=None):
+    def __init__(
+        self, repository=None, failure=None, *, dependencies=True,
+        git_root=None, dirty=False, head=COMMIT, canonical=True,
+    ):
+        self.repository = repository
         self.failure = failure
+        self.dependencies = dependencies
+        self.git_root = git_root or repository
+        self.dirty = dirty
+        self.head = head
+        self.canonical = canonical
         self.calls = []
         self.inventory_calls = 0
 
     def __call__(self, args, **kwargs):
         self.calls.append((list(args), kwargs))
+        if args == ["git", "rev-parse", "--show-toplevel"]:
+            return _proc(args, stdout=f"{self.git_root}\n")
+        if args == ["git", "remote", "-v"]:
+            url = ("git@github.com:gentoo-zh/overlay.git" if self.canonical
+                   else "git@github.com:someone/fork.git")
+            return _proc(args, stdout=f"origin\t{url} (fetch)\n")
+        if args == ["git", "status", "--porcelain=v1", "--untracked-files=all"]:
+            return _proc(
+                args, stdout=" M app-misc/foo/foo-1.2.3.ebuild\n"
+                if self.dirty else "")
+        if args == ["git", "rev-parse", "HEAD"]:
+            return _proc(args, stdout=f"{self.head}\n")
+        if args == ["portageq", "envvar", "PORTAGE_REPOSITORIES"]:
+            return _proc(args, stdout=(
+                "[DEFAULT]\nmain-repo = gentoo\n\n"
+                "[gentoo]\nlocation = /var/db/repos/gentoo\n\n"
+                "[gentoo-zh]\nlocation = /var/db/repos/gentoo-zh\n"))
+        if args == ["portageq", "get_repo_path", "/", "gentoo-zh"]:
+            return _proc(args, stdout=f"{self.repository}\n")
         if args == ["portageq", "envvar", "ARCH"]:
             return _proc(args, stdout="amd64\n")
         if args == ["eselect", "--brief", "profile", "show"]:
@@ -55,26 +85,36 @@ class LocalRunner:
             self.inventory_calls += 1
             output = "sys-libs/zlib-1\n"
             if self.inventory_calls > 1:
-                output += "dev-libs/new-dependency-2\n"
+                output += "app-misc/foo-1.2.3\n"
+                if self.dependencies:
+                    output += "dev-libs/new-dependency-2\n"
             return _proc(args, stdout=output)
         if args == ["qlist", "-e", ATOM]:
             return _proc(args, stdout="/usr/bin/foo\n")
-        if "--onlydeps" in args:
-            if self.failure == "onlydeps":
-                return _proc(args, returncode=1, stderr="dependency failure")
-            if self.failure == "dependency-elog":
+        if args and args[0] == "emerge":
+            if "--pretend" in args:
+                if self.failure == "pretend":
+                    return _proc(args, returncode=1, stderr="pretend failed")
+                if self.failure == "pretend-large":
+                    return _proc(args, stdout="x" * (1024 * 1024))
+                dependency = (
+                    "[binary  N     ] dev-libs/new-dependency-2::gentoo\n"
+                    if self.dependencies else "")
+                if self.failure == "plan-upgrade":
+                    dependency = (
+                        "[binary     U ] dev-libs/existing-2::gentoo [1]\n")
+                return _proc(args, stdout=(
+                    dependency
+                    + "[ebuild  N     ] app-misc/foo-1.2.3::gentoo-zh\n"
+                    + f"Total: {2 if dependency else 1} packages\n"))
+            if self.failure == "elog":
                 elog = Path(kwargs["env"]["PORTAGE_LOGDIR"]) / "elog"
-                (elog / "dependency.log").write_text("dependency warning\n")
-            if self.failure == "dependency-elog-overflow":
+                (elog / "app-misc:foo-1.2.3:0.log").write_text("QA Notice\n")
+            if self.failure == "elog-overflow":
                 elog = Path(kwargs["env"]["PORTAGE_LOGDIR"]) / "elog"
                 for index in range(9):
                     (elog / f"dependency-{index}.log").write_bytes(
                         b"x" * (240 * 1024))
-            return _proc(args, stdout="dependencies installed\n")
-        if args and args[0] == "emerge":
-            if self.failure == "elog":
-                elog = Path(kwargs["env"]["PORTAGE_LOGDIR"]) / "elog"
-                (elog / "app-misc:foo-1.2.3:0.log").write_text("QA Notice\n")
             return _proc(
                 args,
                 returncode=1 if self.failure == "merge" else 0,
@@ -90,24 +130,50 @@ def _local_spec(allow=True):
     )
 
 
+def _overlay(tmp_path):
+    root = (tmp_path / "overlay").resolve()
+    (root / "profiles").mkdir(parents=True)
+    (root / "profiles" / "repo_name").write_text("gentoo-zh\n")
+    return root
+
+
 def test_local_executor_preserves_merge_contract_and_console_warning_is_evidence(tmp_path):
-    runner = LocalRunner()
+    repository = _overlay(tmp_path)
+    runner = LocalRunner(repository)
     executor = LocalExecutor(_local_spec(), runner=runner)
     result = executor.execute(InstallRequest(
         atom=ATOM,
         commit=COMMIT,
         evidence_dir=tmp_path / "evidence",
         use_state=("+ssl",),
+        repository=repository,
     ))
 
     emerges = [args for args, _kwargs in runner.calls if args[0] == "emerge"]
     assert emerges == [
-        ["emerge", "--usepkg=n", "--onlydeps", ATOM],
-        ["emerge", "--usepkg=n", "--oneshot", "--selective=n", ATOM],
+        merge_argv(ATOM, pretend=True),
+        merge_argv(ATOM, pretend=False),
     ]
     assert result["ok"] is True
     assert result["elog_inventory"] == []
     assert result["retained_dependencies"] == ["dev-libs/new-dependency-2"]
+    assert result["provenance"]["plan"]["authorized"] is True
+    binding = result["provenance"]["repository_binding"]
+    assert binding["complete"] is True
+    assert binding["worktree"] == str(repository)
+    assert binding["git"] == {
+        "path": str(repository),
+        "git_root": str(repository),
+        "canonical_urls": ["git@github.com:gentoo-zh/overlay.git"],
+        "clean": True,
+        "head": COMMIT,
+        "commit_matches": True,
+        "complete": True,
+    }
+    merge_environment = next(
+        kwargs["env"] for args, kwargs in runner.calls
+        if args == merge_argv(ATOM, pretend=False))
+    assert f"location = {repository}" in merge_environment["PORTAGE_REPOSITORIES"]
     assert "warning: normal compiler output" in (tmp_path / "evidence/logs/final.log").read_text()
     assert result["cleanup"]["ok"] is True
     assert not Path(result["cleanup"]["removed_paths"][0]).exists()
@@ -117,8 +183,9 @@ def test_local_executor_preserves_merge_contract_and_console_warning_is_evidence
 @pytest.mark.parametrize(
     ("failure", "failed_step", "merge_count"),
     [
-        ("onlydeps", "onlydeps", 1),
-        ("dependency-elog", "elog", 1),
+        ("pretend", "pretend", 1),
+        ("pretend-large", "evidence", 1),
+        ("plan-upgrade", "plan-authorization", 1),
         ("merge", "merge", 2),
         ("elog", "elog", 2),
     ],
@@ -126,33 +193,160 @@ def test_local_executor_preserves_merge_contract_and_console_warning_is_evidence
 def test_local_executor_dependency_merge_and_saved_elog_failures(
     tmp_path, failure, failed_step, merge_count,
 ):
-    runner = LocalRunner(failure)
+    repository = _overlay(tmp_path)
+    runner = LocalRunner(repository, failure)
     result = LocalExecutor(_local_spec(), runner=runner).execute(InstallRequest(
         atom=ATOM, commit=COMMIT, evidence_dir=tmp_path / failure,
+        repository=repository,
     ))
 
     assert result["ok"] is False
     assert result["failed_step"] == failed_step
     assert len([args for args, _kwargs in runner.calls if args[0] == "emerge"]) == merge_count
-    assert bool(result["elog_inventory"]) is (
-        failure in {"dependency-elog", "elog"})
+    assert bool(result["elog_inventory"]) is (failure == "elog")
 
 
 def test_dependency_install_requires_explicit_executor_authorization(tmp_path):
-    runner = LocalRunner()
-    with pytest.raises(ExecutorAuthorizationError, match="not authorized"):
-        LocalExecutor(_local_spec(False), runner=runner).execute(InstallRequest(
+    repository = _overlay(tmp_path)
+    runner = LocalRunner(repository)
+    result = LocalExecutor(_local_spec(False), runner=runner).execute(InstallRequest(
+        atom=ATOM, commit=COMMIT, evidence_dir=tmp_path / "evidence",
+        repository=repository,
+    ))
+
+    assert result["ok"] is False
+    assert result["failed_step"] == "plan-authorization"
+    assert result["provenance"]["plan"]["unauthorized"][0]["category"] == (
+        "new_dependency")
+    assert len([args for args, _kwargs in runner.calls if args[0] == "emerge"]) == 1
+
+
+def test_executor_without_dependency_authorization_accepts_target_only_plan(tmp_path):
+    repository = _overlay(tmp_path)
+    runner = LocalRunner(repository, dependencies=False)
+    result = LocalExecutor(_local_spec(False), runner=runner).execute(InstallRequest(
+        atom=ATOM, commit=COMMIT, evidence_dir=tmp_path / "evidence",
+        repository=repository,
+    ))
+
+    assert result["ok"] is True
+    assert result["provenance"]["plan"]["authorization"] == {
+        "new_dependency_install": False,
+        "rebuild": False,
+        "upgrade": False,
+        "downgrade": False,
+        "other": False,
+    }
+
+
+@pytest.mark.parametrize(
+    ("runner_options", "message"),
+    [
+        ({"dirty": True}, "must be clean"),
+        ({"head": "c" * 40}, "does not match the evidence commit"),
+        ({"git_root": Path("/wrong/root")}, "not its Git worktree root"),
+        ({"canonical": False}, "no fetch remote"),
+    ],
+)
+def test_local_repository_identity_stops_before_portage(
+    tmp_path, runner_options, message,
+):
+    repository = _overlay(tmp_path)
+    runner = LocalRunner(repository, **runner_options)
+
+    with pytest.raises(ExecutorValidationError, match=message):
+        LocalExecutor(_local_spec(), runner=runner).execute(InstallRequest(
             atom=ATOM, commit=COMMIT, evidence_dir=tmp_path / "evidence",
+            repository=repository,
         ))
-    assert runner.calls == []
+
+    assert not any(args[0] in {"portageq", "emerge"} for args, _kwargs in runner.calls)
+
+
+def _assert_child_stopped(pid_path):
+    child_pid = int(pid_path.read_text(encoding="utf-8"))
+    for _attempt in range(100):
+        try:
+            state = (Path("/proc") / str(child_pid) / "stat").read_text(
+                encoding="utf-8").split(") ", 1)[1][0]
+        except FileNotFoundError:
+            return
+        if state in {"X", "Z"}:
+            return
+        time.sleep(0.01)
+    pytest.fail("executor child remained running after bounded execution stopped")
+
+
+def test_local_executor_bounds_flood_output_and_stops_process_group(
+    tmp_path, monkeypatch,
+):
+    executable = tmp_path / "flood"
+    child_pid_path = tmp_path / "child.pid"
+    executable.write_text("""\
+#!/bin/sh
+(
+    trap '' TERM
+    while :; do
+        printf '%8192s' x
+    done
+) &
+echo "$!" > "${GZH_TEST_CHILD_PID}"
+wait
+""", encoding="utf-8")
+    executable.chmod(0o755)
+    monkeypatch.setenv("GZH_TEST_CHILD_PID", str(child_pid_path))
+    executor = LocalExecutor(_local_spec())
+    executor.timeout = 10
+
+    started = time.monotonic()
+    result = executor._run([str(executable)])
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 5
+    assert result.returncode == 125
+    assert "output limit exceeded" in result.stderr
+    assert len(result.stdout.encode()) + len(result.stderr.encode()) <= (
+        MAX_COMMAND_OUTPUT_BYTES)
+    _assert_child_stopped(child_pid_path)
+
+
+def test_local_executor_timeout_stops_process_group(tmp_path, monkeypatch):
+    executable = tmp_path / "wait"
+    child_pid_path = tmp_path / "child.pid"
+    executable.write_text("""\
+#!/bin/sh
+(
+    trap '' TERM
+    while :; do
+        sleep 60
+    done
+) &
+echo "$!" > "${GZH_TEST_CHILD_PID}"
+wait
+""", encoding="utf-8")
+    executable.chmod(0o755)
+    monkeypatch.setenv("GZH_TEST_CHILD_PID", str(child_pid_path))
+    executor = LocalExecutor(_local_spec())
+    executor.timeout = 1
+
+    started = time.monotonic()
+    result = executor._run([str(executable)])
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 4
+    assert result.returncode == 124
+    assert "timed out" in result.stderr
+    _assert_child_stopped(child_pid_path)
 
 
 def test_local_executor_records_aggregate_elog_overflow_before_cleanup(tmp_path):
-    runner = LocalRunner("dependency-elog-overflow")
+    repository = _overlay(tmp_path)
+    runner = LocalRunner(repository, "elog-overflow")
     evidence = tmp_path / "overflow"
 
     result = LocalExecutor(_local_spec(), runner=runner).execute(InstallRequest(
         atom=ATOM, commit=COMMIT, evidence_dir=evidence,
+        repository=repository,
     ))
 
     assert result["ok"] is False
@@ -164,7 +358,7 @@ def test_local_executor_records_aggregate_elog_overflow_before_cleanup(tmp_path)
     assert error["message_bytes"] == len(error["message"].encode())
     assert len(error["message_sha256"]) == 64
     assert error["truncated"] is False
-    assert len([args for args, _kwargs in runner.calls if args[0] == "emerge"]) == 1
+    assert len([args for args, _kwargs in runner.calls if args[0] == "emerge"]) == 2
     assert verify_evidence(evidence)["ok"] is True
     assert not Path(result["cleanup"]["removed_paths"][0]).exists()
 
@@ -227,16 +421,53 @@ allow_dependency_install = true
 
 
 def test_exact_atom_is_structured_and_always_posix_quoted():
-    assert merge_argv(ATOM, onlydeps=True)[-1] == ATOM
+    pretend = merge_argv(ATOM, pretend=True)
+    assert pretend[-1] == ATOM
+    assert "--ignore-default-opts" in pretend
+    assert "--autounmask=n" in pretend
+    assert "--usepkg=y" in pretend
+    assert f"--usepkg-exclude={ATOM}" in pretend
+    assert "--onlydeps" not in pretend
+    assert "--usepkg=n" not in pretend
     command = build_remote_command(
-        merge_argv(ATOM, onlydeps=False),
+        merge_argv(ATOM, pretend=False),
         cwd=PurePosixPath("/srv/overlay"),
         environment={"PORTAGE_ELOG_CLASSES": "qa warn error"},
     )
     assert f"'{ATOM}'" in command
     assert "'PORTAGE_ELOG_CLASSES'" not in command
     with pytest.raises(ValueError, match="exact"):
-        merge_argv("app-misc/foo", onlydeps=True)
+        merge_argv("app-misc/foo", pretend=True)
+
+
+@pytest.mark.parametrize(
+    ("row", "expected_category", "complete"),
+    [
+        ("[binary    R    ] dev-libs/existing-2::gentoo", "rebuild", True),
+        ("[binary     U   ] dev-libs/existing-2::gentoo", "upgrade", True),
+        ("[binary    UD   ] dev-libs/existing-1::gentoo", "downgrade", True),
+        ("[binary         ] dev-libs/existing-2::gentoo", "other", True),
+        ("[uninstall     ] dev-libs/existing-1", None, False),
+        ("[fetch         ] dev-libs/existing-1", None, False),
+    ],
+)
+def test_executor_plan_fails_closed_on_non_install_actions(
+    row, expected_category, complete,
+):
+    plan = _executor_plan(
+        "\n".join([
+            row,
+            "[ebuild  N     ] app-misc/foo-1.2.3::gentoo-zh",
+            "Total: 2 packages" if expected_category else "Total: 1 package",
+        ]),
+        ATOM,
+        allow_dependency_install=True,
+    )
+
+    assert plan["complete"] is complete
+    assert plan["authorized"] is False
+    if expected_category is not None:
+        assert plan["unauthorized"][0]["category"] == expected_category
 
 
 def test_ssh_transport_uses_no_local_shell_or_unrestricted_environment(tmp_path, monkeypatch):
@@ -255,7 +486,7 @@ def test_ssh_transport_uses_no_local_shell_or_unrestricted_environment(tmp_path,
         identity_file=identity, remote_overlay_path=PurePosixPath("/srv/overlay"),
     )
     SSHTransport(spec, runner=runner).run(
-        merge_argv(ATOM, onlydeps=False),
+        merge_argv(ATOM, pretend=False),
         cwd=PurePosixPath("/srv/overlay"),
         environment={"PORTAGE_ELOG_SYSTEM": "save"},
     )
@@ -333,12 +564,18 @@ class FakeTransport:
             return _proc(argv, stdout=value)
         if argv == ["qlist", "-e", ATOM]:
             return _proc(argv, stdout="/usr/bin/foo\n")
-        if "--onlydeps" in argv:
-            return _proc(
-                argv, returncode=1 if self.failure == "onlydeps" else 0,
-                stderr="deps failed" if self.failure == "onlydeps" else "",
-            )
         if argv and argv[0] == "emerge":
+            if "--pretend" in argv:
+                if self.failure == "pretend":
+                    return _proc(argv, returncode=1, stderr="pretend failed")
+                dependency = (
+                    "[binary     U ] dev-libs/existing-2::gentoo [1]\n"
+                    if self.failure == "plan-upgrade"
+                    else "[binary  N     ] dev-libs/new-dependency-2::gentoo\n")
+                return _proc(argv, stdout=(
+                    dependency
+                    + "[ebuild  N     ] app-misc/foo-1.2.3::gentoo-zh\n"
+                    + "Total: 2 packages\n"))
             self.target_merge_seen = True
             return _proc(
                 argv, returncode=1 if self.failure == "merge" else 0,
@@ -351,18 +588,14 @@ class FakeTransport:
                     stderr="remote elog changed while evidence was collected\n")
             if self.failure == "remote-elog-large-error":
                 return _proc(argv, returncode=2, stderr="x" * (600 * 1024))
-            has_elog = (
-                self.failure == "dependency-elog" and not self.target_merge_seen
-            ) or (self.failure == "elog" and self.target_merge_seen)
+            has_elog = self.failure == "elog" and self.target_merge_seen
             files = ({"app-misc:foo-1.2.3:0.log": base64.b64encode(
                 b"QA Notice\n").decode("ascii")} if has_elog else {})
             return _proc(argv, stdout=json.dumps({"files": files}))
         if argv[0] == "find" and "-delete" in argv:
             return _proc(argv)
         if argv[0] == "find" and "-printf" in argv:
-            has_elog = (
-                self.failure == "dependency-elog" and not self.target_merge_seen
-            ) or (self.failure == "elog" and self.target_merge_seen)
+            has_elog = self.failure == "elog" and self.target_merge_seen
             output = "app-misc:foo-1.2.3:0.log\n" if has_elog else ""
             return _proc(argv, stdout=output)
         if argv[0] == "stat":
@@ -517,8 +750,8 @@ def _transfer(tmp_path):
     ("failure", "failed_step"),
     [
         (None, None),
-        ("onlydeps", "onlydeps"),
-        ("dependency-elog", "elog"),
+        ("pretend", "pretend"),
+        ("plan-upgrade", "plan-authorization"),
         ("merge", "merge"),
         ("elog", "elog"),
     ],
@@ -543,7 +776,21 @@ def test_ssh_executor_validates_transfers_persists_and_cleans_exact_paths(
     assert result["provenance"]["owned_transfer"]["sha256"] == _transfer(
         tmp_path).sha256
     assert result["provenance"]["remote_repository"]["clean"] is True
+    assert result["provenance"]["repository_binding"]["complete"] is True
+    expected_plan_state = (
+        "pretend-failed" if failure == "pretend"
+        else "rejected" if failure == "plan-upgrade"
+        else "authorized")
+    assert result["provenance"]["plan"]["state"] == expected_plan_state
     assert verify_evidence(tmp_path / "evidence")["ok"] is True
+    if failure is None:
+        emerge_commands = [
+            event[1] for event in transport.events
+            if event[0] == "run" and event[1][0] == "emerge"]
+        assert emerge_commands == [
+            merge_argv(ATOM, pretend=True),
+            merge_argv(ATOM, pretend=False),
+        ]
     cleanup_commands = [
         event[1] for event in transport.events
         if event[0] == "run" and event[1][0] in {"git", "rm"}

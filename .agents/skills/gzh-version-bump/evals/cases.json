@@ -30,7 +30,46 @@
       "expected": [
         "verify each referenced upstream artifact",
         "apply the prebuilt package review",
+        "use reverified comparable Gentoo precedent as advisory evidence without making it a readiness gate",
+        "run strict image inspection for every prebuilt installed image with a new relative inventory evidence file and exact allowlist entries for verified executable non-ELF paths",
+        "require a complete successful report and a written inventory path and SHA-256 digest",
         "run build and install elog verification"
+      ]
+    },
+    {
+      "id": "prebuilt-image-strict-mode",
+      "prompt": "A staged prebuilt image contains an ELF program, a launcher script, and an executable data file under usr/share. Finish the image review; the package is small.",
+      "should_trigger": true,
+      "expected": [
+        "apply strict image mode because every prebuilt installed image uses it regardless of package size",
+        "write the complete inventory to a new relative evidence path outside the image root",
+        "allowlist the verified launcher by exact image path and do not allowlist unexplained executable data",
+        "require ok and complete results plus written inventory path and SHA-256 digest",
+        "stop when the unexpected executable or evidence write remains unresolved"
+      ]
+    },
+    {
+      "id": "explicit-package-model-gate",
+      "prompt": "The package is not named -bin, but its release archive installs an upstream-built JAR and executable launcher scripts. Run the bump plan as a source package without release asset evidence.",
+      "should_trigger": true,
+      "expected": [
+        "classify the installed payload from the archive contents rather than the package name alone",
+        "reject the source model because upstream-built bytecode and executable script bundles require the prebuilt model",
+        "rerun gzh plan with --package-model prebuilt and complete previous/current release asset evidence",
+        "treat the explicit classification and asset inventory as reviewed input rather than upstream authenticity proof",
+        "stop before writing while the model or asset decisions remain incomplete"
+      ]
+    },
+    {
+      "id": "glibc-only-overlay-profile-finding",
+      "prompt": "Bump an amd64-only upstream prebuilt package in gentoo-zh. The binary requires glibc, the ebuild uses KEYWORDS=\"-* ~amd64\" and REQUIRED_USE=\"elibc_glibc\", required glibc profiles resolve, and pkgcheck reports RequiredUseDefaults for amd64 musl profiles.",
+      "should_trigger": true,
+      "expected": [
+        "retain the verified glibc constraint instead of weakening metadata to silence pkgcheck",
+        "classify only the exact musl-profile RequiredUseDefaults results as a package-specific gentoo-zh limitation rather than a generic pass",
+        "record the exact profiles and evidence that every supported glibc profile resolves",
+        "do not apply the classification to another pkgcheck result or an unverified libc requirement",
+        "do not assume the overlay owns main-tree profile masks"
       ]
     },
     {
@@ -87,6 +126,23 @@
         "show the exact title body and file list",
         "obtain confirmation for this specific PR",
         "treat a draft PR as subject to the same confirmation gate"
+      ]
+    },
+    {
+      "id": "chinese-pr-meaning-first",
+      "prompt": "The existing gentoo-zh package bump is ready for its local commit and PR plan. pkgdev produced the subject app-misc/example-bin: add 2.0.0. The requester wants a Simplified Chinese body, but the only upstream wording supplied is new upstream binary package. Prepare the commit and PR text without publishing.",
+      "should_trigger": true,
+      "expected_skills": [
+        "gzh-version-bump"
+      ],
+      "publication_boundary": "stop-before-publish",
+      "expected": [
+        "keep the exact pkgdev-generated English subject unchanged for the commit and PR title",
+        "treat the upstream phrase as ambiguous and obtain evidence for the actual package or artifact model",
+        "do not translate the phrase word by word or coin a Chinese artifact term",
+        "write natural Chinese with live Gentoo and repository terminology only from verified facts",
+        "include only verified causal rationale and omit the body when the subject is sufficient",
+        "stop before publication and obtain confirmation for the exact PR plan"
       ]
     },
     {

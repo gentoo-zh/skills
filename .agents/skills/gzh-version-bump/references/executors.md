@@ -33,10 +33,17 @@ The remote path must be a non-root development checkout and must not be under
 the canonical fetch URL, and the exact parent commit before transferring any bytes. It
 does not forward the caller's environment or GitHub credentials.
 
+`allow_dependency_install` authorizes only packages classified as new dependencies by
+the pretend plan. It does not authorize rebuilds, upgrades, downgrades, removals, or
+unclassified actions.
+
 ## Execution
 
-Use an exact repository-qualified atom. Local execution records the selected commit.
-SSH execution additionally requires every path changed by that commit:
+Use an exact repository-qualified atom. Local execution requires the overlay selected by
+`gzh repo` to be the exact Git root, have a canonical fetch remote and a clean worktree,
+and have `HEAD` equal the full recorded commit before binding Portage to that path. SSH
+execution remains bound to `remote_overlay_path` and additionally requires every path
+changed by that commit:
 
 ```bash
 gzh exec '=category/package-version::gentoo-zh' \
@@ -49,11 +56,19 @@ gzh exec '=category/package-version::gentoo-zh' \
   --use +flag -x
 ```
 
+Both executors run one `emerge --pretend` with the exact arguments intended for the real
+merge. The command uses `--ignore-default-opts`, disables autounmask, prefers binary
+packages for dependencies, and excludes only the exact target atom from binary-package
+selection. The executor stops before the merge unless the plan contains the exact target
+ebuild once and every other action is an authorized new dependency. Rebuilds, upgrades,
+downgrades, removals, unknown rows, incomplete output, and an unexpected binary target
+fail closed. There is no separate source-only `--onlydeps` phase.
+
 The SSH path set must exactly match the commit diff. `gzh` creates a bounded binary
 patch, verifies its digest remotely, applies it only after repository validation, runs
-the same dependency and exact-atom merge contract as the local executor, downloads
-bounded evidence, reverses the patch, and removes only its run directory. It never runs
-`git clean`, `git checkout`, or `git reset` on the remote checkout.
+the pretend and merge contract, downloads bounded evidence, reverses the patch, and
+removes only its run directory. It never runs `git clean`, `git checkout`, or `git reset`
+on the remote checkout.
 
 ## Evidence
 
@@ -61,8 +76,8 @@ Each run creates a fresh directory under `$(gzh state-dir)/evidence/executors/` 
 `--evidence-dir` selects another new path. The manifest records executor type and name,
 package, commit, redacted commands, times, USE state, architecture, profile, exit state,
 final-log digest, saved elog inventory, installed-file inventory, retained dependencies,
-and cleanup state. Resume only after `verify_evidence()` confirms the stored digest and
-every declared artifact.
+repository binding, authorized pretend plan, and cleanup state. Resume only after
+`verify_evidence()` confirms the stored digest and every declared artifact.
 
 Only saved `qa`, `warn`, and `error` elog files fail the elog gate. Warning-like compiler
 or phase output remains build evidence and must not be reclassified as an elog file.

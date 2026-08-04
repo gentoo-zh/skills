@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -18,18 +19,24 @@ def _owned_paths(paths: list[Path], cwd: Path) -> tuple[list[str], list[str]]:
     exact: list[Path] = []
     scopes: list[Path] = []
     for raw in paths:
-        candidate = (raw if raw.is_absolute() else root / raw).resolve(strict=False)
+        requested = raw if raw.is_absolute() else root / raw
+        candidate = Path(os.path.abspath(requested))
         try:
             relative = candidate.relative_to(root)
         except ValueError as exc:
             raise ValueError(f"commit path is outside the overlay: {raw}") from exc
         if relative == Path("."):
             raise ValueError("the overlay root is not an allowed commit path")
+        parent = candidate.parent
+        while parent != root:
+            if parent.is_symlink():
+                raise ValueError(f"commit path traverses a symlink: {raw}")
+            parent = parent.parent
         if relative not in exact:
             exact.append(relative)
 
         scope = candidate
-        while scope != root and not scope.exists():
+        while scope != root and not (scope.exists() or scope.is_symlink()):
             scope = scope.parent
         relative_scope = scope.relative_to(root)
         if relative_scope not in scopes:
@@ -91,6 +98,16 @@ def _expected_bump_subject(name_status: str) -> str | None:
     return subject
 
 
+def _restore_owned_index(cwd: Path, paths: list[str], runner) -> dict:
+    restored = runner(
+        ["git", "reset", "--mixed", "HEAD", "--", *paths], cwd=cwd,
+        capture_output=True, text=True)
+    return {
+        "index_restored": restored.returncode == 0,
+        "index_restore_stderr": restored.stderr,
+    }
+
+
 def run_commit(paths: list[Path], cwd: Path,
                message: str | None = None,
                runner=subprocess.run, *, require_clean_index: bool = True) -> dict:
@@ -114,14 +131,16 @@ def run_commit(paths: list[Path], cwd: Path,
     if staged.returncode != 0:
         return {"ok": False, "returncode": staged.returncode,
                 "stage": "git-add", "paths": exact_paths,
-                "stdout": staged.stdout, "stderr": staged.stderr}
+                "stdout": staged.stdout, "stderr": staged.stderr,
+                **_restore_owned_index(cwd, exact_paths, runner)}
     staged_diff = runner(
         ["git", "diff", "--cached", "--name-status", "--find-renames", "--",
          *pkgdev_paths], cwd=cwd, capture_output=True, text=True)
     if staged_diff.returncode != 0:
         return {"ok": False, "returncode": staged_diff.returncode,
                 "stage": "staged-diff", "stdout": staged_diff.stdout,
-                "stderr": staged_diff.stderr}
+                "stderr": staged_diff.stderr,
+                **_restore_owned_index(cwd, exact_paths, runner)}
     expected_subject = _expected_bump_subject(staged_diff.stdout or "")
     if expected_subject is not None and message is not None:
         supplied_subject = message.splitlines()[0].strip()
@@ -129,17 +148,17 @@ def run_commit(paths: list[Path], cwd: Path,
             return {"ok": False, "stage": "message-validation",
                     "expected_subject": expected_subject,
                     "actual_subject": supplied_subject,
-                    "error": "supplied subject does not match the staged ebuild add/drop set"}
+                    "error": "supplied subject does not match the staged ebuild add/drop set",
+                    **_restore_owned_index(cwd, exact_paths, runner)}
 
-    old_head = None
-    if expected_subject is not None:
-        head = runner(["git", "rev-parse", "HEAD"], cwd=cwd,
-                      capture_output=True, text=True)
-        old_head = (head.stdout or "").strip()
-        if head.returncode != 0 or not old_head:
-            return {"ok": False, "stage": "head",
-                    "error": "cannot resolve HEAD before commit",
-                    "stderr": head.stderr}
+    head = runner(["git", "rev-parse", "HEAD"], cwd=cwd,
+                  capture_output=True, text=True)
+    old_head = (head.stdout or "").strip()
+    if head.returncode != 0 or not old_head:
+        return {"ok": False, "stage": "head",
+                "error": "cannot resolve HEAD before commit",
+                "stderr": head.stderr,
+                **_restore_owned_index(cwd, exact_paths, runner)}
 
     # The overlay contract adds --gpg-sign only for an explicit user.signingkey.
     # Git still honors commit.gpgsign independently when this option is omitted.
@@ -153,7 +172,20 @@ def run_commit(paths: list[Path], cwd: Path,
     result = {"ok": proc.returncode == 0, "returncode": proc.returncode,
               "stdout": proc.stdout, "stderr": proc.stderr,
               "pathspecs": pkgdev_paths}
-    if proc.returncode != 0 or expected_subject is None:
+    if proc.returncode != 0:
+        current = runner(["git", "rev-parse", "HEAD"], cwd=cwd,
+                         capture_output=True, text=True)
+        current_head = (current.stdout or "").strip()
+        if current.returncode == 0 and current_head and current_head != old_head:
+            rollback = runner(["git", "reset", "--mixed", old_head], cwd=cwd,
+                              capture_output=True, text=True)
+            result.update({"commit_created": rollback.returncode != 0,
+                           "rolled_back": rollback.returncode == 0,
+                           "rollback_stderr": rollback.stderr})
+        else:
+            result.update(_restore_owned_index(cwd, exact_paths, runner))
+        return result
+    if expected_subject is None:
         return result
     subject = runner(["git", "log", "-1", "--format=%s", "HEAD"], cwd=cwd,
                      capture_output=True, text=True)
@@ -207,6 +239,29 @@ def run_recommit(paths: list[Path], cwd: Path, message: str | None = None,
     if code != 0 or not parent:
         return {"ok": False, "stage": "parent", "error": "cannot resolve HEAD parent",
                 "stderr": stderr}
+    try:
+        exact_paths, _pkgdev_paths = _owned_paths(paths, cwd)
+    except ValueError as exc:
+        return {"ok": False, "stage": "paths", "error": str(exc)}
+    if not exact_paths:
+        return {"ok": False, "stage": "paths", "error": "no commit paths supplied"}
+    changed = runner(
+        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "-z", "HEAD"],
+        cwd=cwd, capture_output=True, text=True)
+    if changed.returncode != 0:
+        return {"ok": False, "stage": "path-coverage",
+                "error": "cannot inspect the existing commit paths",
+                "stderr": changed.stderr}
+    committed_paths = [item for item in (changed.stdout or "").split("\0") if item]
+    supplied = [Path(item) for item in exact_paths]
+    missing = sorted(
+        item for item in committed_paths
+        if not any(path == Path(item) or path in Path(item).parents
+                   for path in supplied))
+    if missing:
+        return {"ok": False, "stage": "path-coverage",
+                "error": "recommit paths do not cover the existing commit",
+                "missing_paths": missing}
     if message is None:
         code, message, stderr = _output(
             ["git", "log", "-1", "--format=%B", "HEAD"], cwd, runner)
@@ -227,5 +282,17 @@ def run_recommit(paths: list[Path], cwd: Path, message: str | None = None,
         result.update({"stage": "recommit", "rolled_back": rollback.returncode == 0,
                        "rollback_stderr": rollback.stderr})
         return result
+    rebuilt = runner(["git", "rev-parse", "HEAD"], cwd=cwd,
+                     capture_output=True, text=True)
+    clean = runner(["git", "diff", "--cached", "--quiet"], cwd=cwd,
+                   capture_output=True, text=True)
+    if (rebuilt.returncode != 0 or not (rebuilt.stdout or "").strip()
+            or (rebuilt.stdout or "").strip() == parent or clean.returncode != 0):
+        rollback = runner(["git", "reset", "--mixed", old_head], cwd=cwd,
+                          capture_output=True, text=True)
+        return {**result, "ok": False, "stage": "recommit-validation",
+                "rolled_back": rollback.returncode == 0,
+                "rollback_stderr": rollback.stderr,
+                "error": "recommit did not produce one complete replacement commit"}
     result.update({"old_head": old_head, "remote": remote})
     return result

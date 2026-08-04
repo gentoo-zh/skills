@@ -32,6 +32,51 @@ def test_language_boundary_rejects_non_latin_scripts():
     assert validator.contains_non_latin_script("Cyrillic " + chr(0x0434)) is True
 
 
+def test_chinese_commit_and_pr_guidance_is_meaning_first():
+    skill_root = ROOT / ".agents/skills/gzh-version-bump"
+    finish = (skill_root / "references/finish-pipeline.md").read_text()
+    publishing = (skill_root / "references/publishing.md").read_text()
+    normalized_finish = " ".join(finish.split())
+    normalized_publishing = " ".join(publishing.split())
+    example = load_validator().CHINESE_PR_EXAMPLE_RE.search(finish)
+
+    assert example is not None
+    assert "new upstream binary package" in normalized_finish
+    assert "Never translate source wording word by word" in normalized_finish
+    assert "Carry only verified cause and effect" in normalized_finish
+    assert "Reuse only the verified causal" in normalized_publishing
+    assert "instead of translating word by word or" in normalized_publishing
+
+    natural_term = "\u9884\u7f16\u8bd1\u5305"
+    literal_coinage = "\u65b0\u5236\u54c1"
+    assert natural_term in example.group(0)
+    assert literal_coinage not in example.group(0)
+
+    version_cases = json.loads((
+        skill_root / "evals/cases.json").read_text())["cases"]
+    generic_cases = json.loads((
+        ROOT / ".agents/skills/gentoo-overlay-development/evals/cases.json"
+    ).read_text())["cases"]
+    regressions = {
+        case["id"]: case
+        for case in version_cases + generic_cases
+        if case["id"] in {
+            "chinese-pr-meaning-first",
+            "gentoo-zh-new-package-chinese-pr-wording",
+        }
+    }
+
+    assert set(regressions) == {
+        "chinese-pr-meaning-first",
+        "gentoo-zh-new-package-chinese-pr-wording",
+    }
+    for case in regressions.values():
+        expectations = " ".join(case["expected"])
+        assert "exact pkgdev-generated English subject unchanged" in expectations
+        assert "do not translate" in expectations
+        assert "verified causal rationale" in expectations
+
+
 def test_source_authorities_are_limited_to_reviewed_scopes():
     registry = json.loads((
         ROOT / ".agents/skills/gentoo-overlay-development/references/sources.json"
@@ -56,6 +101,14 @@ def test_capability_source_coverage_uses_registered_sources():
     assert all(
         sources and set(sources) <= source_ids
         for sources in registry["capability_sources"].values())
+    source_scopes = {
+        source["id"]: source["scope"] for source in registry["sources"]}
+    assert set(registry["capability_scopes"]) == set(
+        registry["capability_sources"])
+    assert all(
+        set(registry["capability_scopes"][capability]) == {
+            source_scopes[source_id] for source_id in sources}
+        for capability, sources in registry["capability_sources"].items())
 
 
 def test_skills_stay_within_progressive_disclosure_limits():

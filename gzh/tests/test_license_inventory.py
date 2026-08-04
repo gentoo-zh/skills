@@ -86,6 +86,46 @@ def test_inventory_does_not_extract_members(tmp_path):
     assert not (tmp_path / "nested").exists()
 
 
+@pytest.mark.parametrize("outer_kind", ["tar", "zip"])
+@pytest.mark.parametrize("inner_kind", ["tar", "zip"])
+def test_inventory_marks_nested_container_scope_incomplete(
+        tmp_path, outer_kind, inner_kind):
+    nested_stream = io.BytesIO()
+    if inner_kind == "tar":
+        with tarfile.open(fileobj=nested_stream, mode="w") as nested:
+            info = tarfile.TarInfo("LICENSE")
+            info.size = 5
+            nested.addfile(info, io.BytesIO(b"terms"))
+    else:
+        with zipfile.ZipFile(nested_stream, "w") as nested:
+            nested.writestr("LICENSE", b"terms")
+    archive = tmp_path / f"release.{outer_kind}"
+    create = _tar_archive if outer_kind == "tar" else _zip_archive
+    create(archive, [(f"vendor/component.{inner_kind}", nested_stream.getvalue())])
+
+    report = inspect_license_archive(archive)
+
+    assert report["ok"] is False
+    assert report["complete"] is False
+    assert report["nested_scope_unreviewed"] is True
+    assert report["nested_containers"] == [{
+        "format": inner_kind,
+        "path": f"vendor/component.{inner_kind}",
+        "size": len(nested_stream.getvalue()),
+    }]
+
+
+def test_inventory_without_nested_container_has_complete_scope(tmp_path):
+    archive = tmp_path / "release.zip"
+    _zip_archive(archive, [("LICENSE", b"terms"), ("data.bin", b"payload")])
+
+    report = inspect_license_archive(archive)
+
+    assert report["ok"] is True
+    assert report["nested_scope_unreviewed"] is False
+    assert report["nested_containers"] == []
+
+
 @pytest.mark.parametrize("mode", ["w", "w:gz", "w:bz2", "w:xz"])
 def test_inventory_supports_documented_tar_compression_modes(tmp_path, mode):
     archive = tmp_path / "release.tar"
@@ -413,25 +453,54 @@ def test_inventory_normalizes_temporary_workspace_failure(tmp_path, monkeypatch)
         inspect_license_archive(archive)
 
 
-def test_inventory_rejects_archive_changed_during_inspection(
+def test_inventory_uses_snapshot_when_path_is_swapped_and_restored(
         tmp_path, monkeypatch):
     archive = tmp_path / "release.zip"
     _zip_archive(archive, [("LICENSE", b"terms")])
-    original = license_mod._sha256_path
-    calls = 0
+    saved = tmp_path / "saved.zip"
+    replacement = tmp_path / "replacement.zip"
+    _zip_archive(replacement, [("MALICIOUS-LICENSE", b"different terms")])
+    original_preflight = license_mod._zip_preflight
+    original_zipfile = license_mod.zipfile.ZipFile
+    parser_sources = []
 
-    def replace_after_first_digest(path, *, maximum_size):
-        nonlocal calls
-        digest = original(path, maximum_size=maximum_size)
-        calls += 1
-        if calls == 1:
-            _zip_archive(path, [("LICENSE", b"changed terms")])
-        return digest
+    def swap_after_preflight(stream, limits):
+        result = original_preflight(stream, limits)
+        archive.rename(saved)
+        replacement.rename(archive)
+        return result
 
-    monkeypatch.setattr(license_mod, "_sha256_path", replace_after_first_digest)
+    def restore_after_parser_opens(source, *args, **kwargs):
+        parser_sources.append(source)
+        result = original_zipfile(source, *args, **kwargs)
+        if archive.exists() and saved.exists():
+            archive.rename(replacement)
+            saved.rename(archive)
+        return result
+
+    monkeypatch.setattr(license_mod, "_zip_preflight", swap_after_preflight)
+    monkeypatch.setattr(license_mod.zipfile, "ZipFile", restore_after_parser_opens)
 
     with pytest.raises(LicenseInventoryError, match="changed during inspection"):
         inspect_license_archive(archive)
+
+    assert len(parser_sources) == 1
+    assert not isinstance(parser_sources[0], (str, bytes, license_mod.os.PathLike))
+
+
+def test_inventory_does_not_reopen_archive_path(tmp_path, monkeypatch):
+    archive = tmp_path / "release.zip"
+    _zip_archive(archive, [("LICENSE", b"terms")])
+
+    def reject_path_open(*args, **kwargs):
+        raise AssertionError("archive path must not be reopened")
+
+    monkeypatch.setattr(license_mod.Path, "open", reject_path_open)
+
+    report = inspect_license_archive(archive)
+
+    assert report["ok"] is True
+    assert report["license_like_members"][0]["path"] == "LICENSE"
 
 
 def test_license_cli_prints_json_and_has_concise_help(tmp_path):
@@ -447,6 +516,24 @@ def test_license_cli_prints_json_and_has_concise_help(tmp_path):
     assert result.exit_code == 0, result.output
     report = json.loads(result.output)
     assert report["license_like_members"][0]["path"] == "EULA.txt"
+
+
+def test_license_cli_prints_incomplete_report_and_exits_nonzero(tmp_path):
+    nested_stream = io.BytesIO()
+    with tarfile.open(fileobj=nested_stream, mode="w") as nested:
+        info = tarfile.TarInfo("LICENSE")
+        info.size = 5
+        nested.addfile(info, io.BytesIO(b"terms"))
+    archive = tmp_path / "release.tar"
+    _tar_archive(archive, [("vendor/component.tar", nested_stream.getvalue())])
+
+    result = CliRunner().invoke(cli_mod.cli, ["license", str(archive)])
+
+    assert result.exit_code == 1
+    report = json.loads(result.output)
+    assert report["ok"] is False
+    assert report["complete"] is False
+    assert report["nested_scope_unreviewed"] is True
 
 
 def test_license_cli_normalizes_corrupt_deflate_errors(tmp_path):

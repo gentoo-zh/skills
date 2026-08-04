@@ -28,7 +28,7 @@ Coordinate queue discovery and one-package bump workflows. Produce evidence-base
 
 ### 1. Discover work
 
-1. Run `gzh bump-issues --limit 1000`, adding its supported maintainer or package filters when requested. Use `--autobump any|off|on|manual-required` for the requested scope and repeat `--issue <number>` for explicitly included issues. Non-`any` selection binds to a fetched canonical remote, reads `.github/workflows/overlay.toml` at its exact base OID, and stores typed configuration evidence. `manual-required` additionally requires the current repository-owned status marker, expected bot identity, exact issue revision, and complete comments. Require `truncated` to be false before claiming the queue is complete; otherwise report the uncovered count and stop batch-wide conclusions.
+1. Run `gzh bump-issues --limit 1000`, adding its supported maintainer or package filters when requested. Use `--autobump any|off|on|manual-required` for the requested scope. Repeat `--issue <number>` with `--issue-mode include` to union named issues with the filtered queue, or use `--issue-mode exact` to fetch and select only the named issues. A schema-v2 snapshot stores the complete structured selection expression and ordered resulting issue set. Non-`any` selection binds to a fetched canonical remote, reads `.github/workflows/overlay.toml` at its exact base OID, and stores typed configuration evidence. `manual-required` additionally requires the current repository-owned status marker, expected bot identity, exact issue revision, and complete comments. Require `truncated` to be false before claiming the queue is complete; otherwise report the uncovered count and stop batch-wide conclusions.
 2. Run `gzh triage list --kind skip` and `gzh triage list --kind escalate`. Records are exact to issue, package, and target version. Exclude a current item only when its `updated_at` exactly equals the record's `issue_updated_at`. For a legacy record without `issue_updated_at`, use `recorded_at` only as a fallback and reassess when the issue is newer; legacy `skipped_at` is exposed as `recorded_at`. Otherwise reassess the complete issue and supersede obsolete state with `gzh triage resolve` or a new skip/escalation event. Pass the complete issue snapshot's `updated_at` as `--issue-updated-at` and the listed record's `event_id` as `--expected-event-id`; use `none` only when no record exists. The command checks the live GitHub revision before every write and rechecks an active event afterward. A revision or local-state conflict means the evidence changed, so reload the complete issue and triage log instead of overwriting it.
 3. Keep the issue body and all paginated comments with each remaining queue item. Require `comments_truncated` to be false before classifying that item; stop the item and retrieve the missing comments when it is true.
 4. Read prior reports under `$(gzh state-dir)/batches/` and inspect matching topic branches and commits. Reconstruct the selected set from the versioned snapshot instead of reparsing issue prose. Verify every referenced executor evidence digest and report a missing or changed artifact as incomplete. Resume owned work when its base and state are unambiguous; do not create duplicate branches or commits for an open issue.
@@ -46,24 +46,19 @@ the bump, narrow its scope, or require verification, but no keyword is an automa
 decision rule. Delegate package-specific evidence gaps to `gzh-version-bump`; its
 escalation classes do not replace reading the package and issue.
 
-### 3. Process viable packages
+### 3. Create the durable report
 
-For each **Process** item:
-
-1. Process packages sequentially in one checkout. When delegates run concurrently, give each package a separate Git worktree and topic branch; never let concurrent agents switch branches in one worktree.
-2. Start each independent package from the freshly fetched canonical `master`, or resume its unambiguous existing topic branch. Never base the next package on the preceding package branch.
-3. Invoke `gzh-version-bump` and follow its package-specific work and finish pipeline through `gzh commit` and `gzh urls`.
-4. Stop at the locally committed and network-checked branch. Do not push and do not create or edit a PR.
-5. On failure, record the package, branch, failed command or phase, error, and attempts. Do not convert an attempted bump into a persistent skip merely because a command failed.
-6. Continue to another independent queue item only when doing so preserves the retry and branch-isolation rules.
-
-### 4. Report the batch
-
-Render a structured JSON report and pipe it to `gzh batch-report create --format json`.
-The command exclusively reserves a path under `$(gzh state-dir)/batches/` named
+Before processing the first item, render the initial schema version 2 JSON report and
+pipe it to `gzh batch-report create --format json`. Follow
+[batch-report-schema.md](references/batch-report-schema.md). The command exclusively
+reserves a path under `$(gzh state-dir)/batches/` named
 `bump-batch-YYYYMMDDTHHMMSSZ-<8-hex-run-id>.json` and returns JSON containing `path` and
-`sha256`. Keep a concise English Markdown summary in a report field when a human-readable
-batch narrative is useful. Include:
+`sha256`. Bind the complete source queue snapshot and create one item for every
+`resulting_issues` entry. Give every initial item a `pending` outcome whose only
+transition is `null -> pending` and whose evidence identifies the selection snapshot; an
+item must not disappear or be called `blocked` merely because it has not been processed.
+Keep a concise English Markdown summary in a report field when a human-readable batch
+narrative is useful. Include:
 
 - batch scope, source queue path, queue total, fetched count, and truncation state;
 - canonical remote, fetch result, base commit, and synchronization state;
@@ -73,18 +68,39 @@ batch narrative is useful. Include:
 - skips or escalations: issue, package, evidence-based reason, and whether a persistent triage record was written;
 - checks skipped for environmental reasons, warnings, and residual risk.
 
+Only the coordinating agent may write the report; delegates return structured evidence
+to that agent. After every classification, failed attempt, gate result, commit, and
+network result, render the complete updated JSON report and pipe it to
+`gzh batch-report checkpoint <report-path> --expected-sha256 <sha256>`. Carry forward the
+new hash returned by each successful checkpoint. A stale hash stops instead of losing
+another result, and a failed replacement retains the prior complete file. Do not rewrite
+the report directly.
+
+Record each valid item state change with
+`gzh batch-report update <report> --expected-sha256 <sha256> --item-id <id> --state <state> --reason <reason> --evidence <json>`.
+The command preserves unrecognized extension fields and all original evidence. It rejects
+stale report hashes, invalid state jumps, abbreviated commit IDs, and malformed evidence.
+Classify a `pending` item as `blocked`, `local_committed`, or
+`superseded_by_external_merge`; do not skip the classification state when later recording
+publication progress.
+
 Keep reports and triage state outside the overlay worktree. A successful local commit does
 not create a triage record; its report and existing branch provide the resume evidence.
 
-Create the report before processing the first item. Only the coordinating agent may write
-it; delegates return structured evidence to that agent. After every classification,
-failed attempt, gate result, commit, and network result, render the complete updated JSON
-report and pipe it to `gzh batch-report checkpoint <report-path> --expected-sha256 <sha256>`.
-Carry forward the new hash returned by each successful checkpoint. A stale hash stops
-instead of losing another result, and a failed replacement retains the prior complete
-file. Do not rewrite the report directly. On an interrupted run, inspect the report,
-queue snapshot, branch, commit range, and worktree before rerunning gates or resuming; do
-not infer success from the branch name alone.
+On an interrupted run, inspect the report, queue snapshot, branch, commit range, and
+worktree before rerunning gates or resuming; do not infer success from the branch name
+alone.
+
+### 4. Process viable packages
+
+For each **Process** item:
+
+1. Process packages sequentially in one checkout. When delegates run concurrently, give each package a separate Git worktree and topic branch; never let concurrent agents switch branches in one worktree.
+2. Start each independent package from the freshly fetched canonical `master`, or resume its unambiguous existing topic branch. Never base the next package on the preceding package branch.
+3. Invoke `gzh-version-bump` and follow its package-specific work and finish pipeline through `gzh commit` and `gzh urls`.
+4. Stop at the locally committed and network-checked branch. Do not push and do not create or edit a PR.
+5. On failure, record the package, branch, failed command or phase, error, and attempts. Do not convert an attempted bump into a persistent skip merely because a command failed.
+6. Continue to another independent queue item only when doing so preserves the retry and branch-isolation rules.
 
 Send an optional notification with `gzh notify telegram` only when its credentials are already configured and the user requested or established that notification behavior. A batch result is not authorization to publish any branch or PR.
 

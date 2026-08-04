@@ -6,7 +6,12 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import selectors
+import signal
 import stat
+import subprocess
+import tempfile
+import time
 from types import ModuleType
 from typing import Any
 
@@ -17,10 +22,79 @@ ANALYZER_RELATIVE = Path(
 COMPARISON_SCHEMA_VERSION = 1
 COMPARISON_TOOL = "gzh-dependency-comparison"
 MAX_METADATA_BYTES = 1024 * 1024
+MAX_GENERATOR_OUTPUT_BYTES = 64 * 1024
+METADATA_TIMEOUT = 120
 
 
 class DependencyMetadataError(RuntimeError):
     pass
+
+
+class _GeneratorOutputLimitExceeded(OverflowError):
+    pass
+
+
+def _stop_generator_group(process: subprocess.Popen) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
+def _run_bounded_generator(
+        command: list[str], *, env: dict[str, str],
+        timeout: int = METADATA_TIMEOUT,
+        maximum: int = MAX_GENERATOR_OUTPUT_BYTES,
+        popen: Any = subprocess.Popen,
+) -> subprocess.CompletedProcess:
+    process = popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+        start_new_session=True)
+    if process.stdout is None or process.stderr is None:
+        _stop_generator_group(process)
+        raise DependencyMetadataError("cannot capture metadata generator output")
+
+    selector = selectors.DefaultSelector()
+    stdout_fd = process.stdout.fileno()
+    stderr_fd = process.stderr.fileno()
+    streams = {
+        stdout_fd: bytearray(),
+        stderr_fd: bytearray(),
+    }
+    selector.register(process.stdout, selectors.EVENT_READ)
+    selector.register(process.stderr, selectors.EVENT_READ)
+    deadline = time.monotonic() + timeout
+    try:
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(command, timeout)
+            for key, _events in selector.select(min(remaining, 0.25)):
+                observed = sum(len(value) for value in streams.values())
+                chunk = os.read(key.fd, min(65536, maximum - observed + 1))
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                streams[key.fd].extend(chunk)
+                if sum(len(value) for value in streams.values()) > maximum:
+                    raise _GeneratorOutputLimitExceeded
+        returncode = process.wait(timeout=max(0.1, deadline - time.monotonic()))
+    except BaseException:
+        _stop_generator_group(process)
+        raise
+    finally:
+        selector.close()
+        process.stdout.close()
+        process.stderr.close()
+    return subprocess.CompletedProcess(
+        command, returncode,
+        stdout=bytes(streams[stdout_fd]),
+        stderr=bytes(streams[stderr_fd]))
 
 
 def _sha256(path: Path) -> str:
@@ -135,7 +209,7 @@ def _parse_cache(path: Path) -> tuple[dict[str, str], bytes]:
     return values, content
 
 
-def cached_ebuild_metadata(ebuild: Path) -> tuple[dict, dict]:
+def _ebuild_context(ebuild: Path) -> tuple[Path, Path, str, str]:
     requested_ebuild = Path(ebuild).expanduser()
     if requested_ebuild.is_symlink():
         raise DependencyMetadataError(
@@ -149,7 +223,21 @@ def cached_ebuild_metadata(ebuild: Path) -> tuple[dict, dict]:
     package = package_dir.name
     if not ebuild.name.startswith(f"{package}-"):
         raise DependencyMetadataError("ebuild filename does not match its package directory")
-    cache = repository / "metadata" / "md5-cache" / category_dir.name / ebuild.stem
+    return ebuild, repository, category_dir.name, package
+
+
+def _dependency_document(values: dict[str, str], cache: Path) -> dict:
+    if not values.get("EAPI"):
+        raise DependencyMetadataError(f"metadata cache has no EAPI: {cache}")
+    return {
+        "eapi": values["EAPI"],
+        "dependencies": {field: values.get(field, "") for field in DEPENDENCY_FIELDS},
+    }
+
+
+def cached_ebuild_metadata(ebuild: Path) -> tuple[dict, dict]:
+    ebuild, repository, category, _package = _ebuild_context(ebuild)
+    cache = repository / "metadata" / "md5-cache" / category / ebuild.stem
     if not cache.exists() and not cache.is_symlink():
         raise DependencyMetadataError(
             f"verified metadata cache is missing: {cache}; generate reviewed metadata "
@@ -161,12 +249,19 @@ def cached_ebuild_metadata(ebuild: Path) -> tuple[dict, dict]:
     if values.get("_md5_") != observed_md5:
         raise DependencyMetadataError(
             f"metadata cache does not match the ebuild: {cache}")
-    if not values.get("EAPI"):
-        raise DependencyMetadataError(f"metadata cache has no EAPI: {cache}")
-    document = {
-        "eapi": values["EAPI"],
-        "dependencies": {field: values.get(field, "") for field in DEPENDENCY_FIELDS},
-    }
+    inherited = values.get("_eclasses_", "")
+    if inherited:
+        fields = inherited.split("\t")
+        if (len(fields) % 2 or any(not field for field in fields)
+                or any(len(fields[index]) != 32
+                       or any(character not in "0123456789abcdef"
+                              for character in fields[index].lower())
+                       for index in range(1, len(fields), 2))):
+            raise DependencyMetadataError(
+                f"metadata cache has invalid eclass identities: {cache}")
+        raise DependencyMetadataError(
+            f"metadata cache inherits eclasses and requires isolated regeneration: {cache}")
+    document = _dependency_document(values, cache)
     provenance = {
         "bytes": len(cache_content),
         "cache": str(cache),
@@ -178,6 +273,194 @@ def cached_ebuild_metadata(ebuild: Path) -> tuple[dict, dict]:
         "source": str(cache),
     }
     return document, provenance
+
+
+def _repository_name(repository: Path) -> str:
+    path = repository / "profiles" / "repo_name"
+    try:
+        name = _read_regular_file(path, "repository name").decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        raise DependencyMetadataError("repository name is not UTF-8") from exc
+    if not name or not all(character.isalnum() or character in "._+-" for character in name):
+        raise DependencyMetadataError(f"invalid repository name: {name!r}")
+    return name
+
+
+def _repositories_configuration(
+        repository: Path, repository_name: str, portage_api: Any) -> str:
+    try:
+        configured = portage_api.settings.repositories
+        main_repository = configured.mainRepo().name
+        names = list(configured.prepos_order)
+    except Exception as exc:
+        raise DependencyMetadataError(
+            f"cannot inspect the active Portage repository set: {exc}") from exc
+    if not isinstance(main_repository, str) or main_repository not in names:
+        raise DependencyMetadataError("active Portage main repository is invalid")
+
+    sections = ["[DEFAULT]", f"main-repo = {main_repository}", ""]
+    emitted = set()
+    for name in [*names, repository_name]:
+        if name in emitted:
+            continue
+        emitted.add(name)
+        if name == repository_name:
+            location = repository
+        else:
+            try:
+                location = Path(configured[name].location).resolve()
+            except Exception as exc:
+                raise DependencyMetadataError(
+                    f"cannot resolve configured repository {name}: {exc}") from exc
+        if (not name or not all(
+                character.isalnum() or character in "._+-" for character in name)
+                or not location.is_absolute()
+                or "\n" in str(location) or "\r" in str(location)):
+            raise DependencyMetadataError(
+                f"invalid configured repository: {name}")
+        sections.extend([
+            f"[{name}]",
+            f"location = {location}",
+            "auto-sync = no",
+            "",
+        ])
+    return "\n".join(sections)
+
+
+def _isolated_repository_view(repository: Path, destination: Path) -> Path:
+    destination.mkdir(mode=0o700)
+    for entry in repository.iterdir():
+        if entry.name in {".git", "metadata"}:
+            continue
+        (destination / entry.name).symlink_to(
+            entry, target_is_directory=entry.is_dir())
+
+    metadata = destination / "metadata"
+    metadata.mkdir()
+    source_metadata = repository / "metadata"
+    if source_metadata.is_dir():
+        for entry in source_metadata.iterdir():
+            if entry.name in {"cache", "md5-cache"}:
+                continue
+            (metadata / entry.name).symlink_to(
+                entry, target_is_directory=entry.is_dir())
+    return destination
+
+
+def generated_ebuild_metadata(
+        ebuild: Path, *, portage_api: Any | None = None,
+        runner: Any | None = None,
+) -> tuple[dict, dict]:
+    ebuild, repository, category, _package = _ebuild_context(ebuild)
+    ebuild_content = _read_regular_file(ebuild, "ebuild")
+    ebuild_md5 = hashlib.md5(
+        ebuild_content, usedforsecurity=False).hexdigest()
+    repository_name = _repository_name(repository)
+    if portage_api is None:
+        try:
+            import portage as portage_api
+        except ImportError as exc:
+            raise DependencyMetadataError(
+                "Portage is required to generate isolated dependency metadata") from exc
+    with tempfile.TemporaryDirectory(prefix="gzh-deps-") as temporary_name:
+        temporary = Path(temporary_name)
+        repository_view = _isolated_repository_view(
+            repository, temporary / "repository")
+        configuration = _repositories_configuration(
+            repository_view, repository_name, portage_api)
+        cache_root = temporary / "cache"
+        cache_root.mkdir(mode=0o700)
+        command = [
+            "egencache",
+            "--ignore-default-opts",
+            "--external-cache-only",
+            "--cache-dir", str(cache_root),
+            "--repo", repository_name,
+            "--repositories-configuration", configuration,
+            "--jobs", "1",
+            "--update", f"{category}/{ebuild.parent.name}",
+        ]
+        try:
+            environment = {**os.environ, "LC_ALL": "C"}
+            if runner is None or runner is subprocess.run:
+                process = _run_bounded_generator(command, env=environment)
+            else:
+                process = runner(
+                    command,
+                    capture_output=True,
+                    check=False,
+                    timeout=METADATA_TIMEOUT,
+                    env=environment,
+                )
+        except FileNotFoundError as exc:
+            raise DependencyMetadataError("egencache is not installed") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise DependencyMetadataError(
+                f"isolated metadata generation exceeded {METADATA_TIMEOUT} seconds") from exc
+        except _GeneratorOutputLimitExceeded as exc:
+            raise DependencyMetadataError(
+                "isolated metadata generator output exceeded "
+                f"{MAX_GENERATOR_OUTPUT_BYTES} bytes") from exc
+        stdout = process.stdout.encode() if isinstance(process.stdout, str) else process.stdout
+        stderr = process.stderr.encode() if isinstance(process.stderr, str) else process.stderr
+        output_bytes = len(stdout or b"") + len(stderr or b"")
+        if output_bytes > MAX_GENERATOR_OUTPUT_BYTES:
+            raise DependencyMetadataError(
+                "isolated metadata generator output exceeded "
+                f"{MAX_GENERATOR_OUTPUT_BYTES} bytes")
+        if process.returncode != 0:
+            detail = (stderr or b"").decode("utf-8", errors="replace").strip()
+            raise DependencyMetadataError(
+                "isolated metadata generation failed"
+                + (f": {detail}" if detail else ""))
+
+        relative_repository = Path(str(repository_view).lstrip(os.sep))
+        cache = cache_root / relative_repository / category / ebuild.stem
+        values, cache_content = _parse_cache(cache)
+        final_ebuild_content = _read_regular_file(ebuild, "ebuild")
+        if final_ebuild_content != ebuild_content:
+            raise DependencyMetadataError(
+                f"ebuild changed during metadata generation: {ebuild}")
+        if values.get("_md5_") != ebuild_md5:
+            raise DependencyMetadataError(
+                f"generated metadata cache does not match the ebuild: {ebuild}")
+        document = _dependency_document(values, cache)
+        provenance = {
+            "bytes": len(cache_content),
+            "cache": None,
+            "cache_sha256": hashlib.sha256(cache_content).hexdigest(),
+            "ebuild": str(ebuild),
+            "ebuild_bytes": len(ebuild_content),
+            "ebuild_md5": ebuild_md5,
+            "generator": "egencache --external-cache-only",
+            "generator_source": "repository-view-without-pregenerated-cache",
+            "generator_output_bytes": output_bytes,
+            "generator_output_limit": MAX_GENERATOR_OUTPUT_BYTES,
+            "generator_timeout_seconds": METADATA_TIMEOUT,
+            "kind": "verified-md5-cache",
+            "repository": str(repository),
+            "repository_configuration_sha256": hashlib.sha256(
+                configuration.encode("utf-8")).hexdigest(),
+            "repository_name": repository_name,
+            "retained": False,
+            "source": str(ebuild),
+        }
+        return document, provenance
+
+
+def ebuild_metadata(
+        ebuild: Path, *, generator: Any | None = None,
+) -> tuple[dict, dict]:
+    try:
+        return cached_ebuild_metadata(ebuild)
+    except DependencyMetadataError as cache_error:
+        generator = generator or generated_ebuild_metadata
+        try:
+            return generator(ebuild)
+        except DependencyMetadataError as generation_error:
+            raise DependencyMetadataError(
+                f"{cache_error}; isolated generation failed: {generation_error}") \
+                from generation_error
 
 
 def _provider_visibility(report: dict, api: Any) -> dict:
@@ -239,11 +522,22 @@ def analyze_ebuild_dependencies(
     resolve_providers: bool = False,
     analyzer: ModuleType | None = None,
     portage_api: Any | None = None,
+    metadata_loader: Any | None = None,
 ) -> dict:
-    document, provenance = cached_ebuild_metadata(ebuild)
+    metadata_loader = metadata_loader or ebuild_metadata
+    document, provenance = metadata_loader(ebuild)
     analyzer = analyzer or _load_analyzer()
     report = _analyze_dependency_document(
         document, provenance, use=use, analyzer=analyzer)
+    if provenance.get("generator"):
+        report["metadata_generation"] = {
+            "command": provenance["generator"],
+            "isolated": True,
+            "output_bytes": provenance.get("generator_output_bytes"),
+            "output_limit": provenance.get("generator_output_limit"),
+            "repository_writes": False,
+            "timeout_seconds": provenance.get("generator_timeout_seconds"),
+        }
     if resolve_providers:
         if portage_api is None:
             import portage as portage_api
@@ -543,6 +837,7 @@ def compare_ebuild_dependencies(
     *,
     use: list[str] | None = None,
     analyzer: ModuleType | None = None,
+    metadata_loader: Any | None = None,
 ) -> dict[str, Any]:
     """Compare two verified cache snapshots using one Portage analyzer revision."""
     requested = {
@@ -566,9 +861,10 @@ def compare_ebuild_dependencies(
     documents: dict[str, dict[str, Any]] = {}
     provenance: dict[str, dict[str, Any]] = {}
     errors: list[dict[str, Any]] = []
+    metadata_loader = metadata_loader or ebuild_metadata
     for side, ebuild in (("before", before_ebuild), ("after", after_ebuild)):
         try:
-            document, metadata = cached_ebuild_metadata(ebuild)
+            document, metadata = metadata_loader(ebuild)
         except DependencyMetadataError as exc:
             errors.append({
                 "side": side,

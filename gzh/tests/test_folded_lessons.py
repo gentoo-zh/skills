@@ -33,13 +33,17 @@ def test_commit_adds_signoff(tmp_path):
     seen = {}
 
     def fake_run(args, **kw):
-        seen["args"] = args
+        if args[:3] == ["git", "rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(
+                args, 0, stdout="a" * 40 + "\n", stderr="")
+        if args[0] == "pkgdev":
+            seen["pkgdev"] = args
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
     run_commit([tmp_path / "foo-1.0.0.ebuild"], cwd=tmp_path,
                message="cat/foo: add 1", runner=fake_run)
-    assert "--signoff=true" in seen["args"]
-    assert "--gpg-sign" not in seen["args"]  # not forced
+    assert "--signoff=true" in seen["pkgdev"]
+    assert "--gpg-sign" not in seen["pkgdev"]  # not forced
 
 
 def test_scan_qa_notices_filters_deferred():
@@ -53,6 +57,11 @@ def test_scan_qa_notices_filters_deferred():
 
 def test_build_test_surfaces_stderr_qa(tmp_path):
     def fake_run(args, **kw):
+        if args == ["portageq", "envvar", "ARCH"]:
+            return subprocess.CompletedProcess(args, 0, stdout="amd64\n", stderr="")
+        if args == ["eselect", "--brief", "profile", "show"]:
+            return subprocess.CompletedProcess(
+                args, 0, stdout="default/linux/amd64/23.0\n", stderr="")
         if args[-1] == "install":
             return subprocess.CompletedProcess(
                 args, 0, stdout="", stderr="QA Notice: Pre-stripped files found")

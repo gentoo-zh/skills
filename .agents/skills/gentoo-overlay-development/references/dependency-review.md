@@ -34,8 +34,7 @@ sources an ebuild, and records the input byte count and SHA-256. Treat reduced a
 blockers, and slot operators as syntax evidence only; upstream behavior and repository
 resolution still establish whether a dependency is correct.
 
-When `gzh` is installed and each input has a matching reviewed md5-cache entry, use its
-bounded wrappers for repository ebuilds:
+When `gzh` is installed, use its bounded wrappers for repository ebuilds:
 
 ```bash
 gzh deps inspect /absolute/path/to/package-2.ebuild [--use +flag --use -other]
@@ -43,7 +42,17 @@ gzh deps diff /absolute/path/to/package-1.ebuild /absolute/path/to/package-2.ebu
 gzh deps reverse dev-libs/provider
 ```
 
-`inspect` and `diff` reject non-regular or over-1-MiB ebuild and cache inputs. The diff
+`inspect` and `diff` verify a matching repository md5-cache entry only when it records no
+inherited eclasses. The ebuild `_md5_` alone cannot prove that an `_eclasses_` set remains
+current, so inherited, missing, or stale cache records run official
+`egencache --external-cache-only` for the exact package and worktree. The command keeps
+both intermediate and generated cache data in a private temporary directory, verifies the
+generated `_md5_`, and removes the directory after the report captures its hashes. This
+generation sources the ebuild and inherited eclasses in
+Portage's metadata environment; the bundled analyzer still consumes only the extracted
+metadata. Generator output is streamed with a 64-KiB aggregate limit and a 120-second
+timeout; exceeding either limit terminates the owned process group and fails closed. The
+commands reject non-regular or over-1-MiB ebuild and cache inputs. The diff
 always compares potential declarations and adds a reduced delta only for one explicit,
 complete USE state shared by both versions. The reverse query uses pquery's raw ebuild
 repository view, so it reports potential direct consumers rather than active-profile,

@@ -36,8 +36,46 @@ fields:
 - observed size, Manifest digests, and any separately verified upstream digest or
   signature;
 - provenance source and retrieval date;
-- state as `resolved`, `unresolved`, or `skipped`, with a reason;
+- whether bytes were available for inspection, plus the independently observed Portage
+  fetch state and its evidence;
 - report completeness and the exact expected-item count.
+
+The `gzh artifacts` evidence schema additionally requires `inspection_available` and
+`portage_fetch_state` for every Manifest `DIST` entry. Fetch state is one of `verified`,
+`failed`, `not-tested`, or `superseded-by-ci`; every state except `not-tested` that claims
+an observed result requires `portage_fetch_evidence`. Only `verified` or a separately
+reviewed `superseded-by-ci` state satisfies the fetch gate. These fields are caller-supplied
+review records: the command checks their shape and Manifest coverage but does not
+authenticate a CI run, source URL, or human conclusion.
+
+Manifest `DIST` names must be basenames and each entry must carry valid full-length
+`BLAKE2B` and `SHA512` digests. When a distdir is supplied, `gzh artifacts` opens each
+regular file without following symlinks, hashes both digests in one pass, and rejects an
+identity or metadata change during hashing. It reports `manifest-digest-matched` only
+after the stable file's size and both required digests match.
+
+Use the exact command input shape below. `architecture`, `signature_url`, and `size` are
+optional identity evidence. `source_url` or `release_url` is required for a passing
+record. Generic digest strings are rejected because the schema cannot establish their
+algorithm or provenance; use the Manifest digests and local distfile comparison instead.
+`portage_fetch_evidence` is required for `verified`, `failed`, and `superseded-by-ci`.
+
+```json
+{
+  "artifacts": [
+    {
+      "filename": "package-2.0-amd64.tar.xz",
+      "architecture": "amd64",
+      "release_url": "https://upstream.example/releases/2.0",
+      "source_url": "https://upstream.example/package-2.0-amd64.tar.xz",
+      "size": 12345,
+      "inspection_available": true,
+      "portage_fetch_state": "verified",
+      "portage_fetch_evidence": "pkgdev manifest completed with default fetch settings"
+    }
+  ]
+}
+```
 
 A matching size or digest establishes byte identity against that value, not who produced
 the bytes or whether the artifact is complete for the release. Do not report success when
@@ -92,18 +130,30 @@ metadata. It rejects Zstandard tar and ZIP64 metadata because their bounded pars
 preflight is not implemented. It does not extract or execute members. It records the
 archive digest and the path, size, and digest of every bounded license-like member, and
 fails on unsafe paths, ambiguous names, unsupported members, parser metadata limits,
-truncation, decompressor errors, or input changes. Treat an empty or successful inventory
-as filename evidence only; it does not prove that every applicable term was found or
-establish a redistribution decision.
+truncation, decompressor errors, or input changes. It marks the report incomplete when a
+regular member is itself a recognized archive or container because nested content is
+listed but not traversed; inspect each listed member separately. Treat an empty or
+successful inventory as filename evidence only; it does not prove that every applicable
+term was found or establish a redistribution decision.
 
 ## Prebuilt Package Review
 
+- For a non-trivial prebuilt review, use a genuinely comparable current Gentoo package
+  when one exists. Compare its source model, eclass stack, archive layout, install
+  helpers, and source and installed file-mode behavior. Record the comparison when it
+  informs a decision, but treat it as advisory evidence: the absence of a comparable
+  package does not by itself block readiness, and one package never establishes a
+  portable rule.
 - Select only architectures with verified published artifacts and map each to the exact
   `SRC_URI` branch and Manifest entry allowed by live keyword policy.
 - Inspect every installed object without executing untrusted or foreign-architecture
   files. Check ELF class and machine, interpreter, `DT_NEEDED`, SONAME, symlink layout,
   RPATH or RUNPATH, symbol version requirements, executable stack, text relocations,
   writable-and-executable segments, stripping state, and supported CPU requirements.
+- Use `gzh binary` with `pax-utils` available to resolve the host-visible interpreter and
+  runtime dependency tree without executing the target. A missing interpreter, unresolved
+  dependency, bounded-output failure, or nested container that has not been expanded and
+  reviewed blocks a complete result.
 - Confirm runtime libraries, dynamically loaded components, and helper programs through
   binary inspection, upstream source or documentation, and a controlled runtime test.
 - Scope `QA_PREBUILT` and other exceptions to exact reviewed paths and documented
@@ -111,7 +161,21 @@ establish a redistribution decision.
 - Use the documented strip restriction when package-manager stripping must be disabled;
   do not substitute an unrelated QA variable.
 - Verify final file modes, launchers, resources, notices, and licenses in the installed
-  image. Run only trusted binaries on a matching architecture.
+  image. Count executable regular files in both the source payload and installed image,
+  and classify each as ELF, script, or unexpected data. Do not use package size as the
+  threshold for this review. Record the interpreter for scripts and investigate why
+  unexpected data is executable. Exclude symlink mode bits from this count because Linux
+  does not use them for access; audit broken, absolute, and image-escaping targets
+  separately. Apply a hard allowlist only when the live repository or its deterministic
+  inspection tool defines the trigger and failure condition. Run only trusted binaries
+  on a matching architecture.
+
+When an ebuild inherits `unpacker` and a custom `src_unpack` manually extracts a Debian
+`.deb` payload, review it against the documented helper contract. `gzh lint` reports a
+review finding when that Debian-specific path bypasses `unpack_deb`, and separately
+reports archive extraction in `src_install`. These warnings identify an unusual phase
+model; they do not require `unpack_deb` for another archive format or prove that every
+custom format is invalid.
 
 Stop when architecture compatibility, loader or library availability, ABI requirements,
 CPU requirements, license terms, or the final installed layout cannot be verified.

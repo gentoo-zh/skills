@@ -166,6 +166,7 @@ def load_registry(path: Path = REGISTRY_PATH) -> dict:
             raise ValueError(
                 f"invalid scope allowlist for authority: {authority}")
     ids = set()
+    source_scopes = {}
     for source in data["sources"]:
         required = {
             "id", "title", "authority", "scope", "kind", "url", "topics", "use"}
@@ -185,6 +186,23 @@ def load_registry(path: Path = REGISTRY_PATH) -> dict:
         if source["kind"] == "mediawiki" and not source.get("api_url"):
             raise ValueError(f"mediawiki source has no api_url: {source['id']}")
         ids.add(source["id"])
+        source_scopes[source["id"]] = source["scope"]
+    capability_sources = data.get("capability_sources")
+    capability_scopes = data.get("capability_scopes")
+    if (not isinstance(capability_sources, dict) or not capability_sources
+            or not isinstance(capability_scopes, dict)
+            or set(capability_scopes) != set(capability_sources)):
+        raise ValueError("source registry has invalid capability scopes")
+    for capability, source_ids in capability_sources.items():
+        declared_scopes = capability_scopes.get(capability)
+        if (not isinstance(source_ids, list) or not source_ids
+                or any(source_id not in ids for source_id in source_ids)
+                or not isinstance(declared_scopes, list) or not declared_scopes
+                or len(declared_scopes) != len(set(declared_scopes))
+                or set(declared_scopes) != {
+                    source_scopes[source_id] for source_id in source_ids}):
+            raise ValueError(
+                f"source registry has invalid capability scope: {capability}")
     return data
 
 
@@ -199,8 +217,15 @@ def load_lock(path: Path = LOCK_PATH) -> dict:
 
 def select_sources(registry: dict, ids: list[str], topic: str | None,
                    authority: str | None,
-                   scope: str | None = None) -> list[dict]:
+                   scope: str | None = None,
+                   capability: str | None = None) -> list[dict]:
     selected = registry["sources"]
+    if capability:
+        capability_ids = registry["capability_sources"].get(capability)
+        if capability_ids is None:
+            raise ValueError(f"unknown source capability: {capability}")
+        selected = [source for source in selected
+                    if source["id"] in set(capability_ids)]
     if ids:
         wanted = set(ids)
         selected = [source for source in selected if source["id"] in wanted]
@@ -322,7 +347,8 @@ def audit(sources: list[dict], lock: dict, workers: int = 8) -> list[dict]:
 
 def command_list(args, registry):
     sources = select_sources(
-        registry, args.id, args.topic, args.authority, args.scope)
+        registry, args.id, args.topic, args.authority, args.scope,
+        args.capability)
     print(json.dumps(sources, ensure_ascii=False, indent=2))
 
 
@@ -333,7 +359,8 @@ def command_show(args, registry):
 
 def command_audit(args, registry):
     sources = select_sources(
-        registry, args.id, args.topic, args.authority, args.scope)
+        registry, args.id, args.topic, args.authority, args.scope,
+        args.capability)
     results = audit(sources, load_lock(), workers=args.workers)
     print(json.dumps(results, ensure_ascii=False, indent=2))
     if args.fail_on_drift and any(
@@ -419,6 +446,7 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("--id", action="append", default=[])
         command.add_argument("--topic")
         command.add_argument("--authority")
+        command.add_argument("--capability")
         scope = command.add_mutually_exclusive_group()
         scope.add_argument("--scope")
         scope.add_argument("--all-scopes", action="store_true")
@@ -444,9 +472,10 @@ def main() -> None:
         return
     registry = load_registry()
     if (args.command in {"list", "audit"} and not args.id
-            and not args.scope and not args.all_scopes):
+            and not args.scope and not args.all_scopes
+            and not args.capability):
         raise SystemExit(
-            "error: select --scope, --all-scopes, or at least one --id")
+            "error: select --scope, --all-scopes, --capability, or at least one --id")
     if args.command == "list":
         command_list(args, registry)
     elif args.command == "show":

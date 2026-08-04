@@ -41,7 +41,7 @@ gentoo-zh 维护**优先使用 `gzh` 工具集**（确定性、可单测），�
 - `.github/workflows/emerge-on-pr.yml`：每个包在 `amd64-desktop-openrc`、`amd64-desktop-systemd` 两个 profile 上各 emerge 一次；`KEYWORDS` 含 `arm64` 或 `~arm64` 的包，因为 arm64 没有 desktop-openrc 的 stage3，所以另在 `ubuntu-24.04-arm` runner 上补充执行 `arm64-desktop-systemd` 一条腿。每条腿都判 **elog 硬门**：`PORTAGE_ELOG_CLASSES="qa warn error"`、`PORTAGE_ELOG_SYSTEM="save"`，post-emerge 步骤扫 `/var/log/portage/elog/*` **文件**（非 stdout），任一 qa/warn/error elog 即 `exit 1`。预编译包只要上游发布了 arm64 产物就加 `~arm64`，手上没有 arm 机器也加：因为 blob 不在本地编译、各 arch 共用同一套 `src_install`，所以 CI 那条腿真装一次、elog 门照判就够，出了 arch 相关的问题按报告修。源码包没有这个例外：因为写进 `KEYWORDS` 等于声明这个 arch 已经建过，所以新加的每个 arch 都要自己真编过再加；CI 的 arm64 腿只在已经 keyword 了 arm64 的包上执行，是复核而非代替本地构建。手上有 arm 设备的一律自己先验过再加。
 
 `gzh` 尚未覆盖的门，收尾阶段须手动补充执行：
-- **install 后 elog 检查**：`buildtest.py` 只看 returncode，QA notice 走 elog 不进 stdout，本地全绿仍可能踩 CI elog 硬门 → 用 CI 同款配置（`PORTAGE_ELOG_CLASSES="qa warn error"` + 隔离 LOGDIR）本地复检 elog 文件。
+- **真实安装与 elog 检查**：`gzh build` 已使用隔离的 `PORTAGE_LOGDIR` 保存并检查 `qa`、`warn`、`error` elog，但 `ebuild install` 不解析依赖，也不执行真实合并。收尾仍须执行 `gzh merge`，并检查其保存的 elog 文件；本地结果不能替代 overlay CI。
 - **联网 DeadUrl 复查**：收尾执行 `gzh urls`，它执行 `pkgcheck scan --git-remote <canonical> --commits="$(git merge-base <canonical>/master HEAD)..HEAD" --net`。因为裸 `--commits` 比的是 fork 那份落后的 `origin`、会把无关包一起扫进来，所以范围必须用 merge-base 显式限死。这一段 CI 与 `gzh qa` 都不执行，属 PR 勾选项，须手动补充执行。
 
 勿因本地 `gzh` 全绿即认为 CI 会绿。良性 elog（Unresolved soname/CONFIG_CHECK/binchecks）注明放行，真问题改 ebuild。

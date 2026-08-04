@@ -1,5 +1,7 @@
 import hashlib
+import os
 from pathlib import Path
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -10,6 +12,7 @@ from gzh.deps import (
     analyze_ebuild_dependencies,
     cached_ebuild_metadata,
     compare_ebuild_dependencies,
+    generated_ebuild_metadata,
 )
 
 
@@ -80,6 +83,28 @@ def test_cached_metadata_requires_matching_md5(tmp_path):
         cached_ebuild_metadata(ebuild)
 
 
+def test_cached_metadata_with_eclasses_requires_isolated_regeneration(tmp_path):
+    ebuild, cache = _fixture(tmp_path)
+    cache.write_text(
+        cache.read_text(encoding="utf-8")
+        + "_eclasses_=missing\tdeadbeefdeadbeefdeadbeefdeadbeef\n",
+        encoding="utf-8")
+
+    with pytest.raises(DependencyMetadataError, match="isolated regeneration"):
+        cached_ebuild_metadata(ebuild)
+
+
+def test_cached_metadata_rejects_malformed_eclass_identity(tmp_path):
+    ebuild, cache = _fixture(tmp_path)
+    cache.write_text(
+        cache.read_text(encoding="utf-8")
+        + "_eclasses_=missing\tdeadbeef\n",
+        encoding="utf-8")
+
+    with pytest.raises(DependencyMetadataError, match="invalid eclass identities"):
+        cached_ebuild_metadata(ebuild)
+
+
 def test_missing_metadata_cache_fails_closed(tmp_path):
     ebuild = tmp_path / "cat" / "pkg" / "pkg-1.ebuild"
     ebuild.parent.mkdir(parents=True)
@@ -128,6 +153,158 @@ def test_analyze_cached_dependencies_passes_use_and_provenance(tmp_path):
     assert report["document"]["use"] == ["+ssl", "-test"]
     assert report["metadata"]["kind"] == "verified-md5-cache"
     assert report["provider_visibility"]["reason"] == "not requested"
+
+
+def test_analyze_discloses_isolated_metadata_generation(tmp_path):
+    ebuild, _cache = _fixture(tmp_path)
+
+    def metadata_loader(_ebuild):
+        return ({
+            "eapi": "8",
+            "dependencies": {
+                field: "" for field in (
+                    "DEPEND", "RDEPEND", "BDEPEND", "IDEPEND", "PDEPEND")
+            },
+        }, {
+            "kind": "verified-md5-cache",
+            "generator": "egencache --external-cache-only",
+            "generator_output_bytes": 128,
+            "generator_output_limit": 64 * 1024,
+            "generator_timeout_seconds": 120,
+        })
+
+    report = analyze_ebuild_dependencies(
+        ebuild, analyzer=FakeAnalyzer, metadata_loader=metadata_loader)
+
+    assert report["metadata_generation"] == {
+        "command": "egencache --external-cache-only",
+        "isolated": True,
+        "output_bytes": 128,
+        "output_limit": 64 * 1024,
+        "repository_writes": False,
+        "timeout_seconds": 120,
+    }
+
+
+def test_isolated_egencache_replaces_stale_worktree_metadata(tmp_path):
+    ebuild, cache = _fixture(tmp_path)
+    cache.write_text("EAPI=8\n_md5_=stale\n", encoding="utf-8")
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    (profiles / "repo_name").write_text("worktree\n", encoding="utf-8")
+    class Repositories:
+        prepos_order = ["gentoo"]
+
+        @staticmethod
+        def mainRepo():
+            return SimpleNamespace(name="gentoo")
+
+        def __getitem__(self, name):
+            assert name == "gentoo"
+            return SimpleNamespace(location="/var/db/repos/gentoo")
+
+    api = SimpleNamespace(
+        settings=SimpleNamespace(repositories=Repositories()))
+    seen = {}
+
+    def generate(command, **kwargs):
+        seen["command"] = command
+        seen["kwargs"] = kwargs
+        cache_root = Path(command[command.index("--cache-dir") + 1])
+        configuration = command[
+            command.index("--repositories-configuration") + 1]
+        repository_location = Path(
+            configuration.split("[worktree]", 1)[1]
+            .split("location = ", 1)[1].splitlines()[0])
+        generated = (
+            cache_root / Path(str(repository_location).lstrip("/"))
+            / "dev-libs" / "demo-1")
+        generated.parent.mkdir(parents=True)
+        digest = hashlib.md5(
+            ebuild.read_bytes(), usedforsecurity=False).hexdigest()
+        generated.write_text(
+            f"EAPI=8\nRDEPEND=dev-libs/generated:=\n_md5_={digest}\n",
+            encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    document, provenance = generated_ebuild_metadata(
+        ebuild, portage_api=api, runner=generate)
+
+    assert document["dependencies"]["RDEPEND"] == "dev-libs/generated:="
+    assert provenance["generator"] == "egencache --external-cache-only"
+    assert provenance["generator_source"] == (
+        "repository-view-without-pregenerated-cache")
+    assert provenance["retained"] is False
+    assert provenance["cache"] is None
+    assert provenance["generator_output_bytes"] == 0
+    assert provenance["generator_output_limit"] == 64 * 1024
+    assert provenance["generator_timeout_seconds"] == 120
+    assert "--external-cache-only" in seen["command"]
+    assert seen["command"][-1] == "dev-libs/demo"
+    assert seen["kwargs"]["timeout"] == 120
+
+
+def test_isolated_egencache_stops_output_flood_process_group(
+        tmp_path, monkeypatch):
+    ebuild, cache = _fixture(tmp_path)
+    cache.write_text("EAPI=8\n_md5_=stale\n", encoding="utf-8")
+    profiles = tmp_path / "profiles"
+    profiles.mkdir()
+    (profiles / "repo_name").write_text("worktree\n", encoding="utf-8")
+
+    class Repositories:
+        prepos_order = ["gentoo"]
+
+        @staticmethod
+        def mainRepo():
+            return SimpleNamespace(name="gentoo")
+
+        def __getitem__(self, name):
+            assert name == "gentoo"
+            return SimpleNamespace(location="/var/db/repos/gentoo")
+
+    api = SimpleNamespace(
+        settings=SimpleNamespace(repositories=Repositories()))
+    executable_dir = tmp_path / "bin"
+    executable_dir.mkdir()
+    child_pid_path = tmp_path / "child.pid"
+    egencache = executable_dir / "egencache"
+    egencache.write_text("""\
+#!/bin/sh
+(
+    trap '' TERM
+    while :; do
+        printf '%8192s' x
+    done
+) &
+echo "$!" > "${GZH_TEST_CHILD_PID}"
+wait
+""", encoding="utf-8")
+    egencache.chmod(0o755)
+    monkeypatch.setenv(
+        "PATH", f"{executable_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("GZH_TEST_CHILD_PID", str(child_pid_path))
+
+    started = time.monotonic()
+    with pytest.raises(
+            DependencyMetadataError,
+            match="isolated metadata generator output exceeded"):
+        generated_ebuild_metadata(ebuild, portage_api=api)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 5
+    child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+    for _attempt in range(100):
+        try:
+            process_state = (Path("/proc") / str(child_pid) / "stat").read_text(
+                encoding="utf-8").split(") ", 1)[1][0]
+        except FileNotFoundError:
+            break
+        if process_state in {"X", "Z"}:
+            break
+        time.sleep(0.01)
+    else:
+        pytest.fail("metadata generator child remained running after output overflow")
 
 
 def test_provider_visibility_is_scoped_to_configured_repositories(tmp_path):
@@ -278,7 +455,8 @@ def test_compare_dependencies_fails_closed_on_unverified_cache(tmp_path):
     after, after_cache = _version_fixture(tmp_path, "2", rdepend="dev-libs/new")
     after_cache.write_text("EAPI=8\n_md5_=stale\n", encoding="utf-8")
 
-    report = compare_ebuild_dependencies(before, after)
+    report = compare_ebuild_dependencies(
+        before, after, metadata_loader=cached_ebuild_metadata)
 
     assert report["ok"] is False
     assert report["complete"] is False

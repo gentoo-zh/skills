@@ -143,13 +143,13 @@
     },
     "gentoo-tree": {
       "kind": "git",
-      "revision": "90c4643e02d208c79614f945eddfcc0ff8e6fe66",
-      "checked_at": "2026-08-04T07:51:45Z"
+      "revision": "be86282032430a9bafa65e55e37ed3c2f188a531",
+      "checked_at": "2026-08-04T09:28:56Z"
     },
     "guru": {
       "kind": "git",
-      "revision": "d83ad36e967ed599b4f1d0ade2f8673d54fd229c",
-      "checked_at": "2026-08-03T18:39:14Z"
+      "revision": "f131c453884f37b1600b0a2231953a3c153ca82c",
+      "checked_at": "2026-08-04T09:28:56Z"
     },
     "guru-contributors": {
       "kind": "mediawiki",
@@ -469,7 +469,33 @@
       "bytes": 28411,
       "final_url": "https://code.claude.com/docs/en/discover-plugins.md",
       "checked_at": "2026-08-04T04:05:49Z"
+    },
+    "portage-egencache": {
+      "kind": "http",
+      "sha256": "8035ac650b2b0ed49564b856b40f4f2e26446d534ad4cb7fbe1a81334fb1f8d6",
+      "bytes": 9514,
+      "final_url": "https://dev.gentoo.org/~zmedico/portage/doc/man/egencache.1.html",
+      "checked_at": "2026-08-04T08:11:26Z"
+    },
+    "gentoo-unpacker-eclass": {
+      "kind": "http",
+      "sha256": "d9bf05100eb3919946dc6f8da977231fc7e7c4977a093b1b8ea4ab45f1e21ed5",
+      "bytes": 16803,
+      "final_url": "https://raw.githubusercontent.com/gentoo/gentoo/master/eclass/unpacker.eclass",
+      "checked_at": "2026-08-04T08:40:46Z"
+    },
+    "linux-man-pages-symlink": {
+      "kind": "http",
+      "sha256": "6a254ac6756cf62eb5c69b6b1e1d8e168bac1b76c33644a46c6dd42a7688f377",
+      "bytes": 27528,
+      "final_url": "https://man7.org/linux/man-pages/man7/symlink.7.html",
+      "checked_at": "2026-08-04T08:40:46Z"
+    },
+    "pax-utils-source": {
+      "kind": "git",
+      "revision": "a19d74326cf0dfc5eea93a5f0bc23dc3a5a959b5",
+      "checked_at": "2026-08-04T08:59:16Z"
     }
   },
-  "updated_at": "2026-08-04T07:51:45Z"
+  "updated_at": "2026-08-04T09:28:56Z"
 }

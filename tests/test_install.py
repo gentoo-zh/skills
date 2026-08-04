@@ -459,6 +459,25 @@ def test_copy_status_refresh_and_uninstall(tmp_path):
     assert not copied.parent.exists()
 
 
+def test_copy_stage_failure_removes_partial_discovery_directory(
+        tmp_path, monkeypatch):
+    installer = load_installer()
+    source = ROOT / ".agents" / "skills" / SKILL_NAMES[0]
+    base = tmp_path / "skills"
+
+    def fail_copytree(_source, destination, **_kwargs):
+        destination.mkdir()
+        (destination / "partial").write_text("partial\n", encoding="utf-8")
+        raise OSError("injected copy failure")
+
+    monkeypatch.setattr(installer.shutil, "copytree", fail_copytree)
+
+    with pytest.raises(OSError, match="injected copy failure"):
+        installer.stage_skill(source, base, "copy")
+
+    assert not list(base.glob(f".{source.name}.new.*"))
+
+
 def test_unowned_destination_is_never_replaced(tmp_path):
     env = environment(tmp_path)
     destination = tmp_path / "codex" / "skills" / SKILL_NAMES[0]
@@ -472,6 +491,62 @@ def test_unowned_destination_is_never_replaced(tmp_path):
         INSTALLER, ["codex", "--skills-only", "--uninstall"], env,
         expected=1)
     assert sentinel.is_file()
+
+
+def test_copy_skill_symlink_marker_cannot_claim_ownership(tmp_path):
+    env = environment(tmp_path)
+    invoke(INSTALLER, ["codex", "--skills-only", "--copy"], env)
+    destination = tmp_path / "codex" / "skills" / SKILL_NAMES[0]
+    marker = destination / ".gzh-skill-install.json"
+    outside = tmp_path / "outside-skill-marker.json"
+    outside.write_text(marker.read_text(encoding="utf-8"), encoding="utf-8")
+    marker.unlink()
+    marker.symlink_to(outside)
+
+    result = invoke(
+        INSTALLER, ["codex", "--skills-only", "--uninstall"], env,
+        expected=1)
+
+    assert "refusing to remove unowned path" in result.stderr
+    assert (destination / "SKILL.md").is_file()
+    assert marker.is_symlink()
+
+
+@pytest.mark.parametrize("content", [
+    b"[]",
+    b'{"installer":"gentoo-zh/skills","skill":"demo","mode":"copy"}',
+    b'{"schema":1,"installer":"gentoo-zh/skills","skill":"demo",'
+    b'"mode":"copy","extra":true}',
+    b"\xff",
+    b"x" * 4097,
+])
+def test_invalid_skill_marker_never_claims_ownership(tmp_path, content):
+    installer = load_installer()
+    directory = tmp_path / "skill"
+    directory.mkdir()
+    (directory / installer.SKILL_MARKER).write_bytes(content)
+
+    assert installer.read_marker(directory, installer.SKILL_MARKER) is None
+
+
+def test_combined_uninstall_preflights_gzh_before_removing_skills(tmp_path):
+    env = environment(tmp_path)
+    invoke(INSTALLER, ["codex", "--skills-only"], env)
+    skill_root = tmp_path / "codex" / "skills"
+    install_root = tmp_path / "gzh-install"
+    install_root.mkdir()
+    sentinel = install_root / "keep.txt"
+    sentinel.write_text("keep\n", encoding="utf-8")
+
+    result = invoke(INSTALLER, ["codex", "--uninstall"], env, expected=1)
+
+    assert "refusing to remove unowned path" in result.stderr
+    assert sentinel.read_text(encoding="utf-8") == "keep\n"
+    assert all(
+        (skill_root / name).exists() or (skill_root / name).is_symlink()
+        for name in SKILL_NAMES)
+    state = json.loads(installation_state(tmp_path).read_text(encoding="utf-8"))
+    assert state["targets"][0]["skills"] == list(SKILL_NAMES)
 
 
 def test_gzh_install_status_and_uninstall(tmp_path):
@@ -516,3 +591,27 @@ def test_gzh_install_refuses_dangling_unowned_root_symlink(tmp_path):
     assert install_root.is_symlink()
     assert install_root.readlink() == tmp_path / "missing-user-target"
     assert not (tmp_path / "bin" / "gzh").exists()
+
+    status = invoke(INSTALLER, ["--gzh-only", "--status"], env, expected=1)
+    assert "unowned" in status.stdout
+
+
+def test_gzh_symlink_marker_cannot_claim_ownership(tmp_path):
+    env = environment(tmp_path)
+    install_root = tmp_path / "gzh-install"
+    install_root.mkdir()
+    sentinel = install_root / "keep.txt"
+    sentinel.write_text("keep\n", encoding="utf-8")
+    outside = tmp_path / "outside-gzh-marker.json"
+    outside.write_text(json.dumps({
+        "schema": 1,
+        "installer": "gentoo-zh/skills",
+        "component": "gzh",
+    }), encoding="utf-8")
+    (install_root / ".gzh-install.json").symlink_to(outside)
+
+    result = invoke(INSTALLER, ["--gzh-only", "--uninstall"], env, expected=1)
+
+    assert "refusing to remove unowned path" in result.stderr
+    assert sentinel.read_text(encoding="utf-8") == "keep\n"
+    assert outside.is_file()

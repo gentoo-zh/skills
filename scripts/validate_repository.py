@@ -199,9 +199,16 @@ def validate_sources(errors: list[str]) -> None:
     if len(ids) != len(set(ids)):
         errors.append("source ids must be unique")
     capability_sources = registry.get("capability_sources")
+    capability_scopes = registry.get("capability_scopes")
     if not isinstance(capability_sources, dict) or not capability_sources:
         errors.append("source capability coverage is missing")
     else:
+        if (not isinstance(capability_scopes, dict)
+                or set(capability_scopes) != set(capability_sources)):
+            errors.append("source capability scope coverage is invalid")
+            capability_scopes = {}
+        source_scopes = {
+            source.get("id"): source.get("scope") for source in sources}
         for capability, source_ids in capability_sources.items():
             if (not NAME_RE.fullmatch(capability)
                     or not isinstance(source_ids, list) or not source_ids
@@ -209,6 +216,14 @@ def validate_sources(errors: list[str]) -> None:
                     or any(source_id not in ids for source_id in source_ids)):
                 errors.append(
                     f"invalid source capability coverage: {capability}")
+                continue
+            declared_scopes = capability_scopes.get(capability)
+            observed_scopes = {source_scopes[source_id] for source_id in source_ids}
+            if (not isinstance(declared_scopes, list) or not declared_scopes
+                    or len(declared_scopes) != len(set(declared_scopes))
+                    or set(declared_scopes) != observed_scopes):
+                errors.append(
+                    f"invalid source capability scopes: {capability}")
     for source in sources:
         required = {
             "id", "title", "authority", "scope", "kind", "url", "topics", "use"}

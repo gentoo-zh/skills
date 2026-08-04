@@ -48,12 +48,42 @@
     "dependency-review": [
       "pms-latest",
       "devmanual-dependencies",
-      "portage-dependency-api"
+      "portage-dependency-api",
+      "portage-egencache"
     ],
     "artifact-and-license-review": [
+      "pms-latest",
       "devmanual-manifest",
       "devmanual-licenses",
-      "pkgdev"
+      "devmanual-eclasses",
+      "gentoo-unpacker-eclass",
+      "gentoo-qa-policy",
+      "portage-ebuild-format",
+      "portage-source",
+      "pax-utils-source",
+      "pkgcheck-source",
+      "pkgdev",
+      "linux-man-pages-symlink"
+    ],
+    "prebuilt-image-review": [
+      "gentoo-qa-policy",
+      "portage-ebuild-format",
+      "portage-source",
+      "pax-utils-source",
+      "linux-man-pages-symlink"
+    ],
+    "unpacker-phase-review": [
+      "devmanual-eclasses",
+      "gentoo-unpacker-eclass"
+    ],
+    "gentoo-zh-glibc-profile-review": [
+      "pms-latest",
+      "pkgcheck-source",
+      "overlay-policy"
+    ],
+    "gentoo-zh-comparable-precedent-review": [
+      "gentoo-tree",
+      "overlay-policy"
     ],
     "archive-inventory-tool": [
       "devmanual-licenses",
@@ -99,6 +129,58 @@
       "claude-plugin-marketplaces",
       "claude-discover-plugins",
       "opencode-plugins"
+    ]
+  },
+  "capability_scopes": {
+    "authority-resolution": [
+      "portable-core"
+    ],
+    "repository-discovery": [
+      "portable-core"
+    ],
+    "dependency-review": [
+      "portable-core"
+    ],
+    "artifact-and-license-review": [
+      "portable-core",
+      "portable-tooling"
+    ],
+    "prebuilt-image-review": [
+      "portable-core",
+      "portable-tooling"
+    ],
+    "unpacker-phase-review": [
+      "portable-core"
+    ],
+    "gentoo-zh-glibc-profile-review": [
+      "adapter:gentoo-zh",
+      "portable-core"
+    ],
+    "gentoo-zh-comparable-precedent-review": [
+      "adapter:gentoo-zh",
+      "comparative-evidence"
+    ],
+    "archive-inventory-tool": [
+      "portable-core",
+      "portable-tooling"
+    ],
+    "build-test-install": [
+      "portable-core"
+    ],
+    "package-qa": [
+      "portable-core"
+    ],
+    "package-lifecycle": [
+      "portable-core"
+    ],
+    "gentoo-zh-adapter": [
+      "adapter:gentoo-zh"
+    ],
+    "repository-release": [
+      "skills-maintenance"
+    ],
+    "client-plugin-packaging": [
+      "skills-maintenance"
     ]
   },
   "sources": [
@@ -326,6 +408,22 @@
         "phase"
       ],
       "use": "Current supported EAPIs, variables, helpers, and exported phases.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "gentoo-unpacker-eclass",
+      "title": "Gentoo unpacker.eclass implementation",
+      "authority": "gentoo-standard",
+      "kind": "http",
+      "url": "https://raw.githubusercontent.com/gentoo/gentoo/master/eclass/unpacker.eclass",
+      "topics": [
+        "eclass",
+        "phase",
+        "archive",
+        "deb",
+        "unpacker"
+      ],
+      "use": "Current official unpacker helper dispatch and exported src_unpack behavior.",
       "scope": "portable-core"
     },
     {
@@ -663,6 +761,38 @@
       "scope": "portable-core"
     },
     {
+      "id": "portage-egencache",
+      "title": "Portage egencache manual",
+      "authority": "gentoo-tool",
+      "kind": "http",
+      "url": "https://dev.gentoo.org/~zmedico/portage/doc/man/egencache.1.html",
+      "topics": [
+        "portage",
+        "dependency",
+        "metadata-cache",
+        "egencache"
+      ],
+      "use": "Official external metadata cache generation behavior and options.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "pax-utils-source",
+      "title": "Gentoo pax-utils source repository",
+      "authority": "gentoo-tool",
+      "kind": "git",
+      "url": "https://github.com/gentoo/pax-utils.git",
+      "ref": "refs/heads/master",
+      "topics": [
+        "gentoo",
+        "elf",
+        "lddtree",
+        "dependency",
+        "binary"
+      ],
+      "use": "Official lddtree dependency resolution and output behavior for ELF review.",
+      "scope": "portable-core"
+    },
+    {
       "id": "devmanual-source",
       "title": "Gentoo Development Guide source repository",
       "authority": "gentoo-standard",
@@ -930,6 +1060,22 @@
         "resource-limit"
       ],
       "use": "Official parser behavior and resource limits for bounded ZIP inventory.",
+      "scope": "portable-tooling"
+    },
+    {
+      "id": "linux-man-pages-symlink",
+      "title": "Linux symlink(7) manual page",
+      "authority": "upstream-primary",
+      "kind": "http",
+      "url": "https://man7.org/linux/man-pages/man7/symlink.7.html",
+      "topics": [
+        "linux",
+        "filesystem",
+        "symlink",
+        "permission",
+        "image-qa"
+      ],
+      "use": "Primary Linux symlink permission and target-resolution semantics for installed-image review.",
       "scope": "portable-tooling"
     },
     {

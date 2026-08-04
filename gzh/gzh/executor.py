@@ -6,10 +6,13 @@ import hashlib
 import json
 import os
 import re
+import selectors
+import signal
 import shutil
 import stat
 import subprocess
 import tempfile
+import time
 import tomllib
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -28,13 +31,17 @@ from gzh.executor_evidence import (
     command_record,
     create_evidence,
 )
+from gzh.qa_evidence import OutputLimitExceeded
 from gzh.repo import github_slug
+from gzh.verify_install import _owned_repositories_config, parse_emerge_plan
 
 
 CONFIG_VERSION = 1
 MAX_PATCH_BYTES = 16 * 1024 * 1024
 MAX_COMMAND_OUTPUT_BYTES = 2 * 1024 * 1024
 MAX_COLLECTION_ERROR_PREVIEW_BYTES = 4096
+MAX_PLAN_ACTIONS = 256
+MAX_REPOSITORY_CONFIG_BYTES = 32 * 1024
 CANONICAL_REPOSITORY = "gentoo-zh/overlay"
 PORTAGE_ENVIRONMENT = {
     "PORTAGE_ELOG_CLASSES": "qa warn error",
@@ -174,6 +181,7 @@ class InstallRequest:
     evidence_dir: Path
     use_state: tuple[str, ...] = ()
     transfer: OwnedTransfer | None = None
+    repository: Path | None = None
 
 
 class RemoteTransport(Protocol):
@@ -309,12 +317,68 @@ def validate_exact_atom(value: str) -> str:
     return value
 
 
-def merge_argv(atom: str, *, onlydeps: bool) -> list[str]:
+def merge_argv(atom: str, *, pretend: bool) -> list[str]:
     atom = validate_exact_atom(atom)
-    argv = ["emerge", "--usepkg=n"]
-    if onlydeps:
-        return [*argv, "--onlydeps", atom]
-    return [*argv, "--oneshot", "--selective=n", atom]
+    argv = ["emerge", "--ignore-default-opts"]
+    if pretend:
+        argv.append("--pretend")
+    return [
+        *argv, "--verbose", "--tree", "--color=n", "--autounmask=n",
+        "--usepkg=y", f"--usepkg-exclude={atom}", "--oneshot",
+        "--selective=n", atom,
+    ]
+
+
+def _executor_plan(
+    output: str, atom: str, *, allow_dependency_install: bool,
+) -> dict[str, Any]:
+    plan = parse_emerge_plan(output, atom)
+    actions = plan["actions"]
+    if len(actions) > MAX_PLAN_ACTIONS:
+        plan["errors"].append(
+            f"emerge plan exceeds {MAX_PLAN_ACTIONS} recorded actions")
+        plan["complete"] = False
+        plan["truncated"] = True
+        plan["action_count"] = len(actions)
+        plan["actions"] = actions[:MAX_PLAN_ACTIONS]
+        plan["classified"] = {
+            name: [
+                action for action in plan["actions"]
+                if action["category"] == name
+            ]
+            for name in (
+                "target", "new_dependency", "rebuild", "upgrade",
+                "downgrade", "other",
+            )
+        }
+    else:
+        plan["truncated"] = False
+        plan["action_count"] = len(actions)
+
+    unauthorized = []
+    for action in plan["actions"]:
+        action["authorized"] = (
+            action["category"] == "target"
+            or (action["category"] == "new_dependency"
+                and allow_dependency_install)
+        )
+        if not action["authorized"]:
+            unauthorized.append(action)
+    plan["unauthorized"] = unauthorized
+    plan["authorized"] = plan["complete"] and not unauthorized
+    plan["authorization"] = {
+        "new_dependency_install": allow_dependency_install,
+        "rebuild": False,
+        "upgrade": False,
+        "downgrade": False,
+        "other": False,
+    }
+    encoded = output.encode()
+    plan["pretend_output"] = {
+        "bytes": len(encoded),
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+    }
+    return plan
 
 
 def quote_posix(value: object) -> str:
@@ -362,16 +426,132 @@ def _bounded_output(proc: subprocess.CompletedProcess) -> subprocess.CompletedPr
         return subprocess.CompletedProcess(
             proc.args, proc.returncode, stdout=stdout, stderr=stderr,
         )
-    remaining = MAX_COMMAND_OUTPUT_BYTES
-    stdout_bytes = stdout.encode()[:remaining]
-    remaining -= len(stdout_bytes)
-    stderr_bytes = stderr.encode()[:remaining]
+    stdout, stderr = _bounded_failure_output(
+        stdout, stderr, "command output limit exceeded")
     return subprocess.CompletedProcess(
-        proc.args, 125,
-        stdout=stdout_bytes.decode(errors="replace"),
-        stderr=(stderr_bytes.decode(errors="replace")
-                + "\ngzh: command output limit exceeded\n"),
+        proc.args, 125, stdout=stdout, stderr=stderr)
+
+
+def _bounded_failure_output(stdout: str, stderr: str, marker: str) -> tuple[str, str]:
+    marker_bytes = f"\ngzh: {marker}\n".encode()
+    available = max(0, MAX_COMMAND_OUTPUT_BYTES - len(marker_bytes))
+    stdout_bytes = stdout.encode()[:available]
+    available -= len(stdout_bytes)
+    stderr_bytes = stderr.encode()[:available] + marker_bytes
+    return (
+        stdout_bytes.decode(errors="replace"),
+        stderr_bytes.decode(errors="replace"),
     )
+
+
+def _stop_executor_process_group(proc: subprocess.Popen) -> None:
+    group = proc.pid
+    try:
+        os.killpg(group, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(group, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    if proc.poll() is None:
+        proc.wait()
+
+
+def _stream_bounded_process(
+    command: Sequence[str], *, timeout: int,
+    cwd: Path | None = None, environment: Mapping[str, str] | None = None,
+) -> subprocess.CompletedProcess:
+    args = [str(value) for value in command]
+    proc = subprocess.Popen(
+        args, cwd=str(cwd) if cwd is not None else None,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env=dict(environment) if environment is not None else None,
+        start_new_session=True)
+    if proc.stdout is None or proc.stderr is None:
+        _stop_executor_process_group(proc)
+        raise ExecutorError("cannot capture executor command output")
+    stdout_fd = proc.stdout.fileno()
+    stderr_fd = proc.stderr.fileno()
+    streams = {stdout_fd: bytearray(), stderr_fd: bytearray()}
+    selector = selectors.DefaultSelector()
+    selector.register(proc.stdout, selectors.EVENT_READ)
+    selector.register(proc.stderr, selectors.EVENT_READ)
+    deadline = time.monotonic() + timeout
+    try:
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(
+                    args, timeout, output=bytes(streams[stdout_fd]),
+                    stderr=bytes(streams[stderr_fd]))
+            for key, _events in selector.select(min(remaining, 0.25)):
+                current = sum(len(value) for value in streams.values())
+                chunk = os.read(
+                    key.fd, min(65536, MAX_COMMAND_OUTPUT_BYTES - current + 1))
+                if not chunk:
+                    selector.unregister(key.fileobj)
+                    continue
+                streams[key.fd].extend(chunk)
+                if sum(len(value) for value in streams.values()) > \
+                        MAX_COMMAND_OUTPUT_BYTES:
+                    raise OutputLimitExceeded(
+                        MAX_COMMAND_OUTPUT_BYTES, bytes(streams[stdout_fd]),
+                        bytes(streams[stderr_fd]))
+        returncode = proc.wait(timeout=max(0.1, deadline - time.monotonic()))
+    except Exception:
+        _stop_executor_process_group(proc)
+        raise
+    finally:
+        selector.close()
+        proc.stdout.close()
+        proc.stderr.close()
+    return subprocess.CompletedProcess(
+        args, returncode,
+        stdout=bytes(streams[stdout_fd]).decode(errors="replace"),
+        stderr=bytes(streams[stderr_fd]).decode(errors="replace"))
+
+
+def _run_bounded_command(
+    command: Sequence[str], *, runner: Callable, timeout: int,
+    cwd: Path | None = None, environment: Mapping[str, str] | None = None,
+) -> subprocess.CompletedProcess:
+    args = [str(value) for value in command]
+    if runner is not subprocess.run:
+        kwargs: dict[str, Any] = {
+            "capture_output": True, "text": True, "timeout": timeout,
+        }
+        if cwd is not None:
+            kwargs["cwd"] = str(cwd)
+        if environment is not None:
+            kwargs["env"] = dict(environment)
+        return _bounded_output(runner(args, **kwargs))
+
+    try:
+        return _stream_bounded_process(
+            args, timeout=timeout, cwd=cwd, environment=environment)
+    except subprocess.TimeoutExpired as exc:
+        stdout, stderr = _bounded_failure_output(
+            _output(exc, "output"), _output(exc, "stderr"),
+            f"command timed out after {timeout} seconds")
+        return subprocess.CompletedProcess(
+            args, 124, stdout=stdout, stderr=stderr)
+    except OutputLimitExceeded as exc:
+        stdout, stderr = _bounded_failure_output(
+            exc.stdout.decode(errors="replace"),
+            exc.stderr.decode(errors="replace"),
+            "command output limit exceeded")
+        return subprocess.CompletedProcess(
+            args, 125, stdout=stdout, stderr=stderr)
+    except Exception as exc:
+        stdout, stderr = _bounded_failure_output(
+            "", "", str(exc) or "command execution evidence is incomplete")
+        return subprocess.CompletedProcess(
+            args, 126, stdout=stdout, stderr=stderr)
 
 
 class SSHTransport:
@@ -424,11 +604,9 @@ class SSHTransport:
             "ssh", *self._connection_options("ssh"),
             "--", f"{self.spec.user}@{self.spec.host}", remote,
         ]
-        proc = self.runner(
-            command, capture_output=True, text=True, timeout=self.timeout,
-            env=self._local_environment(),
-        )
-        return _bounded_output(proc)
+        return _run_bounded_command(
+            command, runner=self.runner, timeout=self.timeout,
+            environment=self._local_environment())
 
     def upload_file(self, source: Path, destination: PurePosixPath) -> None:
         if not source.is_file() or source.is_symlink():
@@ -439,10 +617,9 @@ class SSHTransport:
             "scp", *self._connection_options("scp"), "--", str(source),
             f"{self.spec.user}@{self.spec.host}:{destination}",
         ]
-        proc = self.runner(
-            command, capture_output=True, text=True, timeout=self.timeout,
-            env=self._local_environment(),
-        )
+        proc = _run_bounded_command(
+            command, runner=self.runner, timeout=self.timeout,
+            environment=self._local_environment())
         if proc.returncode != 0:
             raise ExecutorError(f"owned patch transfer failed: {_output(proc, 'stderr').strip()}")
 
@@ -450,9 +627,14 @@ class SSHTransport:
 def _git_run(
     runner: Callable, argv: Sequence[str], *, cwd: Path, text: bool = True,
 ) -> subprocess.CompletedProcess:
-    return runner(
-        list(argv), cwd=str(cwd), capture_output=True, text=text, timeout=60,
-    )
+    if not text and runner is not subprocess.run:
+        return runner(
+            list(argv), cwd=str(cwd), capture_output=True, text=False,
+            timeout=60)
+    if not text:
+        raise ValueError("production binary Git output requires a bounded file")
+    return _run_bounded_command(
+        argv, runner=runner, timeout=60, cwd=cwd)
 
 
 def _owned_path(value: str) -> str:
@@ -502,14 +684,36 @@ def create_commit_patch(
         raise ExecutorValidationError(
             "owned transfer paths must exactly match every path changed by the commit"
         )
-    patch_proc = _git_run(
-        runner,
-        ["git", "diff", "--binary", "--full-index", parent, resolved, "--", *requested],
-        cwd=root,
-        text=False,
-    )
-    raw_patch = patch_proc.stdout or b""
-    content = raw_patch.encode() if isinstance(raw_patch, str) else bytes(raw_patch)
+    if runner is subprocess.run:
+        with tempfile.NamedTemporaryFile(
+                mode="w+b", prefix="gzh-owned-patch-") as temporary:
+            patch_proc = _git_run(
+                runner,
+                [
+                    "git", "diff", "--binary", "--full-index",
+                    f"--output={temporary.name}", parent, resolved, "--",
+                    *requested,
+                ],
+                cwd=root,
+            )
+            size = os.fstat(temporary.fileno()).st_size
+            if size > MAX_PATCH_BYTES:
+                raise ExecutorValidationError(
+                    f"owned patch exceeds the {MAX_PATCH_BYTES}-byte transfer limit")
+            temporary.seek(0)
+            content = temporary.read(MAX_PATCH_BYTES + 1)
+    else:
+        patch_proc = _git_run(
+            runner,
+            [
+                "git", "diff", "--binary", "--full-index", parent,
+                resolved, "--", *requested,
+            ],
+            cwd=root,
+            text=False,
+        )
+        raw_patch = patch_proc.stdout or b""
+        content = raw_patch.encode() if isinstance(raw_patch, str) else bytes(raw_patch)
     if patch_proc.returncode != 0 or not content:
         raise ExecutorValidationError("cannot create an owned patch for the commit")
     if len(content) > MAX_PATCH_BYTES:
@@ -553,6 +757,63 @@ def _checked_result(
     return proc
 
 
+def _canonical_fetch_urls(output: str) -> list[str]:
+    urls = []
+    for line in output.splitlines():
+        fields = line.split()
+        if (len(fields) >= 3 and fields[-1] == "(fetch)"
+                and github_slug(fields[1]) == CANONICAL_REPOSITORY):
+            urls.append(fields[1])
+    return sorted(set(urls))
+
+
+def validate_local_repository(
+    repository: Path, commit: str, *, runner: Callable = subprocess.run,
+) -> dict[str, Any]:
+    root = _checked_result(
+        _git_run(runner, ["git", "rev-parse", "--show-toplevel"], cwd=repository),
+        "local Git root lookup")
+    git_root = Path(_output(root, "stdout").strip()).resolve()
+    if git_root != repository:
+        raise ExecutorValidationError(
+            "selected local overlay is not its Git worktree root")
+    remotes = _checked_result(
+        _git_run(runner, ["git", "remote", "-v"], cwd=repository),
+        "local Git identity lookup")
+    canonical_urls = _canonical_fetch_urls(_output(remotes, "stdout"))
+    if not canonical_urls:
+        raise ExecutorValidationError(
+            f"local overlay has no fetch remote for {CANONICAL_REPOSITORY}")
+    status = _checked_result(
+        _git_run(
+            runner,
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=repository),
+        "local Git status lookup")
+    if _output(status, "stdout"):
+        raise ExecutorValidationError(
+            "local overlay worktree must be clean before execution")
+    head_proc = _checked_result(
+        _git_run(runner, ["git", "rev-parse", "HEAD"], cwd=repository),
+        "local Git HEAD lookup")
+    head = _output(head_proc, "stdout").strip()
+    if not _COMMIT_RE.fullmatch(head):
+        raise ExecutorValidationError(
+            "local Git HEAD is not a full commit identifier")
+    if head != commit:
+        raise ExecutorValidationError(
+            "local Git HEAD does not match the evidence commit")
+    return {
+        "path": str(repository),
+        "git_root": str(git_root),
+        "canonical_urls": canonical_urls,
+        "clean": True,
+        "head": head,
+        "commit_matches": True,
+        "complete": True,
+    }
+
+
 def validate_remote_repository(
     spec: ExecutorSpec, transport: RemoteTransport,
 ) -> dict[str, Any]:
@@ -581,12 +842,7 @@ def validate_remote_repository(
         transport.run(["git", "remote", "-v"], cwd=spec.remote_overlay_path),
         "remote Git identity lookup",
     )
-    canonical_urls: list[str] = []
-    for line in _output(remotes_proc, "stdout").splitlines():
-        fields = line.split()
-        if len(fields) >= 3 and fields[-1] == "(fetch)":
-            if github_slug(fields[1]) == CANONICAL_REPOSITORY:
-                canonical_urls.append(fields[1])
+    canonical_urls = _canonical_fetch_urls(_output(remotes_proc, "stdout"))
     if not canonical_urls:
         raise ExecutorValidationError(
             f"remote overlay has no fetch remote for {CANONICAL_REPOSITORY}"
@@ -612,7 +868,7 @@ def validate_remote_repository(
     return {
         "path": str(spec.remote_overlay_path),
         "git_root": str(git_root),
-        "canonical_urls": sorted(set(canonical_urls)),
+        "canonical_urls": canonical_urls,
         "clean": True,
         "head": head,
     }
@@ -640,11 +896,8 @@ class Executor:
     ) -> subprocess.CompletedProcess:
         env = os.environ.copy()
         env.update(environment or {})
-        proc = self.runner(
-            list(argv), capture_output=True, text=True, env=env,
-            timeout=self.timeout,
-        )
-        return _bounded_output(proc)
+        return _run_bounded_command(
+            argv, runner=self.runner, timeout=self.timeout, environment=env)
 
     def _make_run_dir(self) -> Path:
         return Path(tempfile.mkdtemp(prefix="gzh-executor-")).resolve()
@@ -892,11 +1145,11 @@ def _execution_environment(logdir: Path | PurePosixPath) -> dict[str, str]:
 
 
 def _final_log(
-    dependencies: subprocess.CompletedProcess | None,
+    pretend: subprocess.CompletedProcess | None,
     merge: subprocess.CompletedProcess | None,
 ) -> tuple[str, bool]:
     sections: list[str] = []
-    for label, proc in (("onlydeps", dependencies), ("merge", merge)):
+    for label, proc in (("pretend", pretend), ("merge", merge)):
         if proc is None:
             continue
         sections.append(
@@ -935,33 +1188,77 @@ def _environment_value(
     return value
 
 
+def _local_repository(value: Path | None) -> Path:
+    if value is None:
+        raise ExecutorValidationError(
+            "local execution requires the selected overlay worktree")
+    requested = Path(value).expanduser()
+    if not requested.is_absolute():
+        raise ExecutorValidationError("local overlay worktree must be absolute")
+    repository = requested.resolve()
+    if repository != requested or not repository.is_dir():
+        raise ExecutorValidationError(
+            "local overlay worktree must be an existing normalized path")
+    repo_name = repository / "profiles" / "repo_name"
+    try:
+        name = repo_name.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ExecutorValidationError(
+            f"cannot verify local overlay worktree: {exc}") from exc
+    if name != "gentoo-zh":
+        raise ExecutorValidationError(
+            "local overlay worktree has an unexpected profiles/repo_name")
+    return repository
+
+
+def _stream_digest(value: str) -> dict[str, Any]:
+    content = value.encode()
+    return {
+        "bytes": len(content),
+        "sha256": hashlib.sha256(content).hexdigest(),
+    }
+
+
 def _execute_install(executor: Executor, request: InstallRequest) -> dict[str, Any]:
     atom = validate_exact_atom(request.atom)
     if not _COMMIT_RE.fullmatch(request.commit):
         raise ExecutorValidationError("evidence commit must be a full commit identifier")
-    if not executor.spec.allow_dependency_install:
-        raise ExecutorAuthorizationError(
-            f"executor {executor.spec.name} is not authorized to install dependencies"
-        )
     requested_evidence = Path(request.evidence_dir).expanduser()
     if requested_evidence.exists() or requested_evidence.is_symlink():
         raise ExecutorValidationError(
             f"evidence directory already exists: {requested_evidence}")
     evidence_directory = requested_evidence.resolve()
+    local_repository = None
+    local_validation = None
+    if executor.type == "local":
+        local_repository = _local_repository(request.repository)
+        local_validation = validate_local_repository(
+            local_repository, request.commit, runner=executor.runner)
+    elif request.repository is not None:
+        raise ExecutorValidationError(
+            "SSH execution uses only the configured remote overlay worktree")
     started_at = _utc_now()
     commands: list[dict[str, Any]] = []
     run_dir: Path | PurePosixPath | None = None
+    pretend: subprocess.CompletedProcess | None = None
     merge: subprocess.CompletedProcess | None = None
-    dependency_proc: subprocess.CompletedProcess | None = None
     elogs: dict[str, bytes] = {}
     before: list[str] = []
-    after_dependencies: list[str] = []
+    after: list[str] = []
     installed: list[str] = []
     arch = "unknown"
     profile = "unknown"
     failed_step: str | None = None
     collection_errors: list[dict[str, Any]] = []
     cleanup: dict[str, Any] = {"ok": True, "errors": [], "removed_paths": []}
+    plan: dict[str, Any] = {
+        "state": "not-run", "complete": False, "authorized": False,
+        "actions": [], "unauthorized": [],
+    }
+    repository_binding: dict[str, Any] = {
+        "repository": "gentoo-zh", "worktree": None, "complete": False,
+        "errors": [],
+    }
     try:
         run_dir = executor._make_run_dir()
         logdir = run_dir / "logs"
@@ -974,63 +1271,179 @@ def _execute_install(executor: Executor, request: InstallRequest) -> dict[str, A
             _checked_result(executor.transport.run(mkdir), "remote elog directory creation")
 
         environment = _execution_environment(logdir)
+        if executor.type == "local":
+            assert isinstance(run_dir, Path)
+            assert local_repository is not None
+            repository_binding.update({
+                "mode": "temporary-portage-repositories",
+                "worktree": str(local_repository),
+                "git": local_validation,
+            })
+            repositories_command = [
+                "portageq", "envvar", "PORTAGE_REPOSITORIES"]
+            commands.append(command_record(repositories_command))
+            repositories_proc = executor._run(repositories_command)
+            repository_binding["baseline"] = {
+                "returncode": repositories_proc.returncode,
+                "stdout": _stream_digest(_output(repositories_proc, "stdout")),
+                "stderr": _stream_digest(_output(repositories_proc, "stderr")),
+            }
+            if repositories_proc.returncode != 0:
+                failed_step = "preflight"
+                repository_binding["errors"].append(
+                    "cannot read the active Portage repository configuration")
+            elif len(_output(repositories_proc, "stdout").encode()) > \
+                    MAX_REPOSITORY_CONFIG_BYTES:
+                failed_step = "preflight"
+                repository_binding["errors"].append(
+                    "active Portage repository configuration exceeds the evidence limit")
+            else:
+                try:
+                    config, generated = _owned_repositories_config(
+                        _output(repositories_proc, "stdout"), local_repository,
+                        run_dir / "repos.conf")
+                except (OSError, ValueError) as exc:
+                    failed_step = "preflight"
+                    repository_binding["errors"].append(str(exc))
+                else:
+                    repository_binding.update(generated)
+                    if len(config.encode()) > MAX_REPOSITORY_CONFIG_BYTES:
+                        failed_step = "preflight"
+                        repository_binding["complete"] = False
+                        repository_binding["errors"].append(
+                            "bound Portage repository configuration exceeds the "
+                            "evidence limit")
+                    else:
+                        environment["PORTAGE_REPOSITORIES"] = config
+                        verify_command = [
+                            "portageq", "get_repo_path", "/", "gentoo-zh"]
+                        commands.append(command_record(
+                            verify_command, environment=environment))
+                        verify_proc = executor._run(
+                            verify_command, environment=environment)
+                        observed = _output(verify_proc, "stdout").strip()
+                        matches = (
+                            verify_proc.returncode == 0
+                            and "\n" not in observed and "\r" not in observed
+                            and Path(observed).is_absolute()
+                            and Path(observed).resolve() == local_repository
+                        )
+                        repository_binding["verification"] = {
+                            "returncode": verify_proc.returncode,
+                            "path": observed or None,
+                            "matches_worktree": matches,
+                            "stdout": _stream_digest(_output(verify_proc, "stdout")),
+                            "stderr": _stream_digest(_output(verify_proc, "stderr")),
+                        }
+                        repository_binding["complete"] = matches
+                        if not matches:
+                            failed_step = "preflight"
+                            repository_binding["errors"].append(
+                                "Portage did not select the requested overlay worktree")
+        else:
+            validation = getattr(executor, "_remote_validation", None)
+            assert executor.spec.remote_overlay_path is not None
+            matches = (
+                isinstance(validation, dict)
+                and validation.get("path") == str(executor.spec.remote_overlay_path)
+                and validation.get("git_root") == str(executor.spec.remote_overlay_path)
+                and validation.get("clean") is True
+            )
+            repository_binding.update({
+                "mode": "configured-remote-worktree",
+                "worktree": str(executor.spec.remote_overlay_path),
+                "verification": validation,
+                "complete": matches,
+            })
+            if not matches:
+                failed_step = "preflight"
+                repository_binding["errors"].append(
+                    "remote repository validation evidence is incomplete")
+
         arch_command = ["portageq", "envvar", "ARCH"]
         profile_command = ["eselect", "--brief", "profile", "show"]
         inventory_command = ["qlist", "-IC"]
-        for command in (arch_command, profile_command, inventory_command):
-            commands.append(command_record(command))
-        arch_proc = executor._run(arch_command)
-        profile_proc = executor._run(profile_command)
-        before_proc = executor._run(inventory_command)
-        arch_value = _environment_value(arch_proc, _ARCH_RE)
-        profile_value = _environment_value(profile_proc, _PROFILE_RE)
-        if arch_value is not None:
-            arch = arch_value
-        if profile_value is not None:
-            profile = profile_value
-        before = _lines(before_proc) if before_proc.returncode == 0 else []
+        if failed_step is None:
+            for command in (arch_command, profile_command, inventory_command):
+                commands.append(command_record(command, environment=environment))
+            arch_proc = executor._run(arch_command, environment=environment)
+            profile_proc = executor._run(profile_command, environment=environment)
+            before_proc = executor._run(inventory_command, environment=environment)
+            arch_value = _environment_value(arch_proc, _ARCH_RE)
+            profile_value = _environment_value(profile_proc, _PROFILE_RE)
+            if arch_value is not None:
+                arch = arch_value
+            if profile_value is not None:
+                profile = profile_value
+            before = _lines(before_proc) if before_proc.returncode == 0 else []
 
-        if (arch == "unknown" or profile == "unknown"
-                or before_proc.returncode != 0):
-            failed_step = "preflight"
-        else:
-            dependencies = merge_argv(atom, onlydeps=True)
-            commands.append(command_record(dependencies, environment=environment))
-            dependency_proc = executor._run(dependencies, environment=environment)
-            if dependency_proc.returncode != 0:
-                failed_step = "onlydeps"
+            if (arch == "unknown" or profile == "unknown"
+                    or before_proc.returncode != 0):
+                failed_step = "preflight"
+
+        if failed_step is None:
+            pretend_command = merge_argv(atom, pretend=True)
+            commands.append(command_record(
+                pretend_command, environment=environment))
+            pretend = executor._run(pretend_command, environment=environment)
+            if pretend.returncode != 0:
+                failed_step = "pretend"
+                output = _output(pretend, "stdout")
+                plan = {
+                    "state": "pretend-failed", "complete": False,
+                    "authorized": False, "actions": [], "unauthorized": [],
+                    "pretend_output": _stream_digest(output),
+                }
+            elif _final_log(pretend, None)[1]:
+                failed_step = "evidence"
+                output = _output(pretend, "stdout")
+                plan = {
+                    "state": "pretend-evidence-too-large", "complete": False,
+                    "authorized": False, "actions": [], "unauthorized": [],
+                    "pretend_output": _stream_digest(output),
+                }
             else:
-                after_proc = executor._run(inventory_command)
-                after_dependencies = _lines(after_proc) if after_proc.returncode == 0 else []
-                if after_proc.returncode != 0:
-                    failed_step = "evidence"
-                else:
-                    try:
-                        elogs = executor._collect_elogs(elog_dir)
-                    except ExecutorError as exc:
-                        collection_errors.append(_collection_error(exc))
-                        failed_step = "evidence"
-                    if failed_step is None and elogs:
-                        failed_step = "elog"
-                if failed_step is None:
-                    merge_command = merge_argv(atom, onlydeps=False)
-                    commands.append(command_record(merge_command, environment=environment))
-                    merge = executor._run(merge_command, environment=environment)
-                    try:
-                        elogs = executor._collect_elogs(elog_dir)
-                    except ExecutorError as exc:
-                        collection_errors.append(_collection_error(exc))
-                        failed_step = "evidence"
-                    if failed_step is None and merge.returncode != 0:
-                        failed_step = "merge"
-                    elif failed_step is None and elogs:
-                        failed_step = "elog"
-                    installed_command = ["qlist", "-e", atom]
-                    commands.append(command_record(installed_command))
-                    installed_proc = executor._run(installed_command)
-                    installed = _lines(installed_proc) if installed_proc.returncode == 0 else []
-                    if installed_proc.returncode != 0 and failed_step is None:
-                        failed_step = "evidence"
+                plan = _executor_plan(
+                    _output(pretend, "stdout"), atom,
+                    allow_dependency_install=executor.spec.allow_dependency_install)
+                plan["state"] = (
+                    "authorized" if plan["authorized"] else "rejected")
+                if not plan["complete"]:
+                    failed_step = "plan"
+                elif not plan["authorized"]:
+                    failed_step = "plan-authorization"
+
+        if failed_step is None:
+            merge_command = merge_argv(atom, pretend=False)
+            commands.append(command_record(
+                merge_command, environment=environment))
+            merge = executor._run(merge_command, environment=environment)
+            try:
+                elogs = executor._collect_elogs(elog_dir)
+            except ExecutorError as exc:
+                collection_errors.append(_collection_error(exc))
+                failed_step = "evidence"
+            if failed_step is None and elogs:
+                failed_step = "elog"
+            elif failed_step is None and merge.returncode != 0:
+                failed_step = "merge"
+
+            commands.append(command_record(
+                inventory_command, environment=environment))
+            after_proc = executor._run(
+                inventory_command, environment=environment)
+            after = _lines(after_proc) if after_proc.returncode == 0 else []
+            if after_proc.returncode != 0 and failed_step is None:
+                failed_step = "evidence"
+
+            installed_command = ["qlist", "-e", atom]
+            commands.append(command_record(
+                installed_command, environment=environment))
+            installed_proc = executor._run(
+                installed_command, environment=environment)
+            installed = _lines(installed_proc) if installed_proc.returncode == 0 else []
+            if installed_proc.returncode != 0 and failed_step is None:
+                failed_step = "evidence"
     except Exception:
         if isinstance(executor, SSHExecutor):
             cleanup = executor._cleanup()
@@ -1050,12 +1463,16 @@ def _execute_install(executor: Executor, request: InstallRequest) -> dict[str, A
             }
     if not cleanup.get("ok", False):
         failed_step = "cleanup"
-    final_log, truncated = _final_log(dependency_proc, merge)
+    final_log, truncated = _final_log(pretend, merge)
     if truncated:
         failed_step = "evidence"
-    retained = sorted(set(after_dependencies) - set(before))
+    target_cpv = str(Atom(atom, allow_repo=True).cpv)
+    retained = sorted((set(after) - set(before)) - {target_cpv})
     ended_at = _utc_now()
-    provenance: dict[str, Any] = {}
+    provenance: dict[str, Any] = {
+        "repository_binding": repository_binding,
+        "plan": plan,
+    }
     if request.transfer is not None:
         provenance.update({
             "remote_repository": getattr(executor, "_remote_validation", None),

@@ -134,10 +134,35 @@
       "prompt": "Process every open bump reminder without autobump enabled, and include issue 11700 explicitly.",
       "should_trigger": true,
       "expected": [
-        "run gzh bump-issues with the off selector and exact issue inclusion",
+        "run gzh bump-issues with the off selector and include issue mode",
         "bind the selector to the fetched canonical config revision",
+        "store the complete selection expression and resulting issue set",
         "retain complete issue and comment revision evidence",
         "resume from the versioned selected set instead of reparsing prose"
+      ]
+    },
+    {
+      "id": "exact-named-issue-scope",
+      "prompt": "Process only bump reminder issues 11700 and 11701, regardless of the rest of the open queue.",
+      "should_trigger": true,
+      "expected": [
+        "run gzh bump-issues with exact issue mode and both issue numbers",
+        "exclude unnamed queue issues",
+        "store the ordered resulting issue set in the schema-v2 snapshot",
+        "create one pending item per resulting issue before package processing",
+        "begin every item history with a null to pending transition",
+        "require complete label revision and comment evidence for both issues"
+      ]
+    },
+    {
+      "id": "typed-batch-outcome-update",
+      "prompt": "The recorded local commit from a schema-v2 batch report is now present on its exact fork branch. Update that one item without replacing its QA evidence.",
+      "should_trigger": true,
+      "expected": [
+        "use gzh batch-report update with the current sha256",
+        "transition local_committed to pushed with structured evidence",
+        "preserve original and unknown report fields",
+        "reject a stale digest or skipped state transition"
       ]
     },
     {

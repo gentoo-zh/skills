@@ -723,10 +723,11 @@ def _runtime_fields(
 
     if all(fields[name]["state"] == CapabilityState.KNOWN.value
            for name in ("current_branch", "default_branch", "ahead", "behind")):
+        on_default_branch = (
+            fields["current_branch"]["value"] == fields["default_branch"]["value"])
         synchronized = (
-            fields["current_branch"]["value"] == fields["default_branch"]["value"]
-            and fields["ahead"]["value"] == 0
-            and fields["behind"]["value"] == 0
+            fields["behind"]["value"] == 0
+            and (not on_default_branch or fields["ahead"]["value"] == 0)
         )
         fields["base_synchronized"] = _record(
             CapabilityState.KNOWN, value=synchronized,
