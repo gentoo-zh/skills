@@ -491,6 +491,75 @@ def elog_inventory(log_root: Path) -> list[dict]:
         os.close(directory_fd)
 
 
+def write_elog_evidence(
+        directory: Path, records: list[dict], *, report_root: Path,
+        text_field: str, size_field: str,
+) -> list[dict]:
+    if not records:
+        return []
+    report_root = report_root.resolve()
+    directory = directory.resolve()
+    if not directory.is_relative_to(report_root):
+        raise IntegrationError("elog evidence directory is outside the report root")
+    try:
+        directory.mkdir(parents=True, exist_ok=False)
+    except OSError as exc:
+        return [{
+            **record,
+            "evidence_path": None,
+            "evidence_sha256": None,
+            "evidence_state": "not-written",
+            "evidence_error": f"cannot create elog evidence directory: {exc}",
+        } for record in records]
+    written = []
+    for index, record in enumerate(records):
+        digest = record.get("sha256")
+        content = record.get(text_field)
+        expected_size = record.get(size_field)
+        if not isinstance(content, str):
+            written.append({
+                **record,
+                "evidence_path": None,
+                "evidence_sha256": None,
+                "evidence_state": "not-written",
+                "evidence_error": "elog evidence text is unavailable",
+            })
+            continue
+        encoded = content.encode("utf-8")
+        evidence_digest = sha256_bytes(encoded)
+        source_verified = (
+            isinstance(digest, str) and SHA256_RE.fullmatch(digest) is not None
+            and isinstance(expected_size, int)
+            and len(encoded) == expected_size and evidence_digest == digest
+            and record.get("truncated") is not True)
+        evidence_path = directory / f"{index:03d}-{evidence_digest[:16]}.log"
+        try:
+            evidence_path.write_bytes(encoded)
+        except OSError as exc:
+            written.append({
+                **record,
+                "evidence_path": None,
+                "evidence_sha256": None,
+                "evidence_state": "not-written",
+                "evidence_error": f"cannot write elog evidence: {exc}",
+            })
+            continue
+        written.append({
+            **record,
+            "evidence_path": evidence_path.relative_to(report_root).as_posix(),
+            "evidence_sha256": evidence_digest,
+            "evidence_state": "verified" if source_verified else "bounded-copy",
+            "evidence_error": (
+                None if source_verified
+                else "source size or SHA-256 does not match the bounded UTF-8 text"),
+        })
+    return written
+
+
+def elog_evidence_complete(records: list[dict]) -> bool:
+    return all(record.get("evidence_state") == "verified" for record in records)
+
+
 def source_merge_command(case: dict) -> list[str]:
     return [
         "emerge", "--oneshot", "--selective=n", "--nodeps",
@@ -577,7 +646,9 @@ def run_case(
 ) -> dict:
     case_output = output / "cases" / case["id"]
     command_output = case_output / "commands"
-    log_root = case_output / "portage-logs"
+    runtime = Path(base_environment["PORTAGE_TMPDIR"]).parent
+    log_root = runtime / "case-logs" / case["id"] / "primary"
+    verifier_log_root = runtime / "case-logs" / case["id"] / "verifier"
     command_output.mkdir(parents=True)
     log_root.mkdir(parents=True)
     environment = base_environment.copy()
@@ -619,24 +690,38 @@ def run_case(
         "vdb_contents_sha256": (
             sha256_file(vdb_contents) if vdb_contents.is_file() else None),
     }
-    elog = elog_inventory(log_root)
+    elog = write_elog_evidence(
+        case_output / "elog-evidence" / "primary",
+        elog_inventory(log_root), report_root=output,
+        text_field="content", size_field="bytes")
     verifier = run_verify_install(
         execution_ebuild,
-        logdir=case_output / "verifier-portage-logs",
+        logdir=verifier_log_root,
         timeout=COMMAND_TIMEOUT,
         max_output_bytes=MAX_OUTPUT_BYTES,
         environment=environment,
         runner=None,
     )
+    verifier["elog_files"] = write_elog_evidence(
+        case_output / "elog-evidence" / "verifier",
+        verifier["elog_files"], report_root=output,
+        text_field="text", size_field="size")
     verifier_decision = evaluate_verifier(case, verifier)
+    verifier_decision["evidence_ok"] = elog_evidence_complete(
+        verifier["elog_files"])
+    verifier_decision["matched"] = (
+        verifier_decision["matched"] and verifier_decision["evidence_ok"])
     cleanup = write_command_evidence(
         command_output, "99-cleanup",
         run_bounded(
             ["ebuild", str(execution_ebuild), "clean"],
             environment=environment))
     decision = evaluate_case(case, commands, artifact, elog, cleanup)
+    decision["evidence_ok"] = elog_evidence_complete(elog)
     decision["verifier_matched"] = verifier_decision["matched"]
-    decision["matched"] = decision["matched"] and verifier_decision["matched"]
+    decision["matched"] = (
+        decision["matched"] and decision["evidence_ok"]
+        and verifier_decision["matched"])
     return {
         "id": case["id"],
         "atom": case["atom"],

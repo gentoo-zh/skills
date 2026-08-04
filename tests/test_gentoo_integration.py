@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -428,6 +429,177 @@ def test_elog_inventory_rejects_growth_during_bounded_read(tmp_path, monkeypatch
 
     with pytest.raises(integration.IntegrationError, match="exceeds"):
         integration.elog_inventory(tmp_path)
+
+
+def test_elog_evidence_uses_portable_lossless_filenames(tmp_path):
+    content = b"QA: intentional boundary\n"
+    digest = integration.sha256_bytes(content)
+    records = [{
+        "path": "/logs/test-fixture:example-1.0:20260804.log",
+        "bytes": len(content),
+        "sha256": digest,
+        "content": content.decode("utf-8"),
+    }]
+
+    report_root = tmp_path / "artifact"
+    written = integration.write_elog_evidence(
+        report_root / "cases" / "example" / "elog-evidence", records,
+        report_root=report_root, text_field="content", size_field="bytes")
+
+    evidence_path = Path(written[0]["evidence_path"])
+    assert evidence_path.name == f"000-{digest[:16]}.log"
+    assert not any(character in evidence_path.name for character in '\"<>:|*?\r\n')
+    assert not evidence_path.is_absolute()
+    assert (report_root / evidence_path).read_bytes() == content
+    assert written[0]["path"] == records[0]["path"]
+    assert written[0]["evidence_sha256"] == digest
+    assert written[0]["evidence_state"] == "verified"
+    assert written[0]["evidence_error"] is None
+    assert integration.elog_evidence_complete(written) is True
+
+    relocated = tmp_path / "relocated"
+    shutil.copytree(report_root, relocated)
+    assert (relocated / evidence_path).read_bytes() == content
+
+    corrupted = [{**records[0], "content": "QA: changed boundary\n"}]
+    bounded = integration.write_elog_evidence(
+        report_root / "corrupt", corrupted, report_root=report_root,
+        text_field="content", size_field="bytes")
+    assert bounded[0]["evidence_state"] == "bounded-copy"
+    assert bounded[0]["evidence_error"] is not None
+    assert integration.elog_evidence_complete(bounded) is False
+    assert (report_root / bounded[0]["evidence_path"]).read_text(
+        encoding="utf-8") == corrupted[0]["content"]
+
+    truncated = [{
+        "path": records[0]["path"],
+        "size": 100,
+        "sha256": None,
+        "text": "bounded text",
+        "truncated": True,
+    }]
+    preserved = integration.write_elog_evidence(
+        report_root / "truncated", truncated, report_root=report_root,
+        text_field="text", size_field="size")
+    assert preserved[0]["evidence_state"] == "bounded-copy"
+    assert preserved[0]["truncated"] is True
+    assert integration.elog_evidence_complete(preserved) is False
+    assert (report_root / preserved[0]["evidence_path"]).read_text(
+        encoding="utf-8") == "bounded text"
+
+    unavailable = integration.write_elog_evidence(
+        report_root / "unavailable", [{"text": None}], report_root=report_root,
+        text_field="text", size_field="size")
+    assert unavailable[0]["evidence_state"] == "not-written"
+    assert unavailable[0]["evidence_path"] is None
+
+    with pytest.raises(integration.IntegrationError, match="outside the report root"):
+        integration.write_elog_evidence(
+            tmp_path / "outside", records, report_root=report_root,
+            text_field="content", size_field="bytes")
+
+
+def test_elog_evidence_preserves_write_failure(tmp_path, monkeypatch):
+    content = b"QA: intentional boundary\n"
+    digest = integration.sha256_bytes(content)
+    records = [{
+        "path": "/logs/example.log",
+        "bytes": len(content),
+        "sha256": digest,
+        "content": content.decode("utf-8"),
+    }]
+    report_root = tmp_path / "artifact"
+    evidence_directory = report_root / "elog-evidence"
+    real_write_bytes = Path.write_bytes
+
+    def fail_evidence_write(path, data):
+        if path.parent == evidence_directory:
+            raise OSError("fixture write failure")
+        return real_write_bytes(path, data)
+
+    monkeypatch.setattr(Path, "write_bytes", fail_evidence_write)
+
+    written = integration.write_elog_evidence(
+        evidence_directory, records, report_root=report_root,
+        text_field="content", size_field="bytes")
+
+    assert written[0]["evidence_state"] == "not-written"
+    assert written[0]["evidence_path"] is None
+    assert written[0]["evidence_sha256"] is None
+    assert "fixture write failure" in written[0]["evidence_error"]
+    assert integration.elog_evidence_complete(written) is False
+
+
+@pytest.mark.parametrize(
+    ("degrade_primary", "degrade_verifier"),
+    [(True, False), (False, True)],
+)
+def test_run_case_propagates_degraded_elog_evidence(
+        tmp_path, monkeypatch, degrade_primary, degrade_verifier):
+    case = integration.validate_manifest(
+        integration.load_json_object(
+            integration.FIXTURES / "manifest.json"))[0]
+    content = "QA: bounded evidence\n"
+    degraded_record = {
+        "path": "/logs/example.log",
+        "bytes": len(content.encode("utf-8")),
+        "sha256": "0" * 64,
+        "content": content,
+    }
+    degraded_verifier_record = {
+        "path": "/logs/verifier.log",
+        "size": len(content.encode("utf-8")),
+        "sha256": "0" * 64,
+        "text": content,
+        "truncated": False,
+    }
+    base_environment = {
+        "PORTAGE_TMPDIR": str(tmp_path / "runtime" / "portage-tmp"),
+        "FEATURES": "",
+    }
+    output = tmp_path / "artifact"
+    output.mkdir()
+
+    monkeypatch.setattr(
+        integration, "write_portage_config", lambda *_args: "")
+    monkeypatch.setattr(
+        integration, "run_bounded", lambda *_args, **_kwargs: command())
+    monkeypatch.setattr(
+        integration, "write_command_evidence",
+        lambda *_args, **_kwargs: command())
+    monkeypatch.setattr(
+        integration, "elog_inventory",
+        lambda *_args: [degraded_record] if degrade_primary else [])
+    monkeypatch.setattr(integration, "run_verify_install", lambda *_args, **_kwargs: {
+        "complete": True,
+        "ok": True,
+        "failed_step": None,
+        "elog_files": (
+            [degraded_verifier_record] if degrade_verifier else []),
+    })
+    monkeypatch.setattr(integration, "evaluate_case", lambda *_args: {
+        "phase_commands_ok": True,
+        "artifact_ok": True,
+        "actual_gate": "accept",
+        "expected_gate": "accept",
+        "boundary_verified": False,
+        "cleanup_ok": True,
+        "matched": True,
+    })
+
+    report = integration.run_case(
+        case, base_environment, output,
+        integration.FIXTURES / "overlay")
+
+    assert report["decision"]["evidence_ok"] is not degrade_primary
+    assert report["verifier_decision"]["evidence_ok"] is not degrade_verifier
+    assert report["decision"]["matched"] is False
+    assert report["verifier_decision"]["matched"] is not degrade_verifier
+    if degrade_primary:
+        assert report["elog"][0]["evidence_state"] == "bounded-copy"
+    if degrade_verifier:
+        assert report["verifier"]["elog_files"][0][
+            "evidence_state"] == "bounded-copy"
 
 
 def test_workflow_is_scoped_isolated_pinned_and_preserves_evidence():
