@@ -35,13 +35,20 @@ jobs:
         with:
           fetch-depth: 1
           ref: ${{ github.sha }}
+      - name: Bootstrap the official Gentoo repository and Git
+        env:
+          GZH_GENTOO_IMAGE: gentoo/stage3:amd64-openrc@sha256:2c37233c9a552b019192530e6f48dde39ca5e46b9e4ce482f3e9517e45c6e639
+        run: >-
+          python3 scripts/gentoo_integration.py
+          --bootstrap
+          --output gentoo-integration-output/bootstrap
       - name: Run isolated Gentoo fixtures
         env:
           GZH_GENTOO_IMAGE: gentoo/stage3:amd64-openrc@sha256:2c37233c9a552b019192530e6f48dde39ca5e46b9e4ce482f3e9517e45c6e639
         run: >-
           python3 scripts/gentoo_integration.py
           --execute
-          --output gentoo-integration-output
+          --output gentoo-integration-output/fixtures
       - name: Preserve integration evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

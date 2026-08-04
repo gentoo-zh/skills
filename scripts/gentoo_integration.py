@@ -28,9 +28,11 @@ GZH_SOURCE = ROOT / "gzh"
 REPOSITORY_NAME = "gentoo-zh"
 MAX_OUTPUT_BYTES = 2 * 1024 * 1024
 COMMAND_TIMEOUT = 300
+MAX_METADATA_BYTES = 256 * 1024
 MAX_ELOG_FILES = 64
 MAX_ELOG_TOTAL_BYTES = 256 * 1024
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
+REVISION_RE = re.compile(r"[0-9a-f]{40}")
 ATOM_RE = re.compile(
     r"(?P<category>[a-z0-9][a-z0-9+_.-]*)/"
     r"(?P<pf>[a-z0-9][a-z0-9+_-]*-[0-9][a-zA-Z0-9+_.-]*)")
@@ -55,6 +57,46 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def read_regular_file(path: Path, maximum: int = MAX_METADATA_BYTES) -> bytes:
+    flags = os.O_RDONLY | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags)
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > maximum:
+            raise IntegrationError(f"metadata file is invalid or oversized: {path}")
+        chunks = []
+        total = 0
+        while True:
+            chunk = os.read(descriptor, min(65536, maximum - total + 1))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > maximum:
+                raise IntegrationError(f"metadata file exceeds {maximum} bytes: {path}")
+        content = b"".join(chunks)
+        after = os.fstat(descriptor)
+        if (len(content) != before.st_size
+                or (before.st_dev, before.st_ino, before.st_mode, before.st_size,
+                    before.st_mtime_ns, before.st_ctime_ns)
+                != (after.st_dev, after.st_ino, after.st_mode, after.st_size,
+                    after.st_mtime_ns, after.st_ctime_ns)):
+            raise IntegrationError(f"metadata file identity changed: {path}")
+        return content
+    finally:
+        os.close(descriptor)
+
+
+def file_evidence(path: Path, content: bytes) -> dict:
+    return {
+        "path": str(path),
+        "bytes": len(content),
+        "sha256": sha256_bytes(content),
+    }
 
 
 def tree_sha256(root: Path) -> str:
@@ -457,6 +499,17 @@ def source_merge_command(case: dict) -> list[str]:
     ]
 
 
+def prepare_portage_runtime(path: Path) -> None:
+    before = path.lstat()
+    if not stat.S_ISDIR(before.st_mode):
+        raise IntegrationError(f"Portage runtime is not a directory: {path}")
+    path.chmod(0o711)
+    after = path.lstat()
+    if ((before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
+            or stat.S_IMODE(after.st_mode) != 0o711):
+        raise IntegrationError(f"cannot make Portage runtime traversable: {path}")
+
+
 def evaluate_verifier(case: dict, verifier: dict) -> dict:
     elog_text = "\n".join(
         record.get("text", "") for record in verifier.get("elog_files", []))
@@ -633,6 +686,209 @@ def tool_versions() -> dict:
     }
 
 
+def collect_repository_evidence(repository_root: Path) -> dict:
+    name_path = repository_root / "profiles" / "repo_name"
+    manifest_path = repository_root / "Manifest"
+    timestamp_path = repository_root / "metadata" / "timestamp.commit"
+    name = read_regular_file(name_path, 64)
+    manifest = read_regular_file(manifest_path)
+    timestamp = read_regular_file(timestamp_path, 256)
+    try:
+        repository_name = name.decode("utf-8").strip()
+        manifest_text = manifest.decode("utf-8")
+        timestamp_text = timestamp.decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        raise IntegrationError("Gentoo repository evidence is not UTF-8") from exc
+    if repository_name != "gentoo":
+        raise IntegrationError("Gentoo repository snapshot has the wrong name")
+    if (not manifest_text.startswith("-----BEGIN PGP SIGNED MESSAGE-----\n")
+            or "\n-----BEGIN PGP SIGNATURE-----\n" not in manifest_text
+            or "\n-----END PGP SIGNATURE-----\n" not in manifest_text):
+        raise IntegrationError("Gentoo repository Manifest is not signed")
+    manifest_timestamps = re.findall(
+        r"^TIMESTAMP ([^\r\n]+)$", manifest_text, flags=re.MULTILINE)
+    if len(manifest_timestamps) != 1:
+        raise IntegrationError("Gentoo repository Manifest timestamp is invalid")
+    timestamp_match = re.fullmatch(
+        r"([0-9a-f]{40}) [0-9]+ ([^\s]+)", timestamp_text)
+    if timestamp_match is None:
+        raise IntegrationError("Gentoo repository revision evidence is invalid")
+    return {
+        "root": str(repository_root),
+        "name": {**file_evidence(name_path, name), "value": repository_name},
+        "manifest": {
+            **file_evidence(manifest_path, manifest),
+            "signed_timestamp": manifest_timestamps[0],
+        },
+        "timestamp_commit": {
+            **file_evidence(timestamp_path, timestamp),
+            "revision": timestamp_match.group(1),
+            "timestamp": timestamp_match.group(2),
+        },
+    }
+
+
+def collect_git_evidence(vdb_root: Path, repository_revision: str) -> dict:
+    category = vdb_root / "dev-vcs"
+    try:
+        candidates = sorted(
+            path for path in category.iterdir() if path.name.startswith("git-"))
+    except FileNotFoundError as exc:
+        raise IntegrationError("installed Git VDB category is missing") from exc
+    if len(candidates) != 1:
+        raise IntegrationError(
+            f"expected one installed Git VDB entry, found {len(candidates)}")
+    entry = candidates[0]
+    entry_info = entry.lstat()
+    if not stat.S_ISDIR(entry_info.st_mode):
+        raise IntegrationError("installed Git VDB entry is not a directory")
+
+    fields = {}
+    for name, maximum in (
+            ("PF", 256), ("USE", 16 * 1024), ("REPO_REVISIONS", 16 * 1024),
+            ("repository", 256)):
+        path = entry / name
+        content = read_regular_file(path, maximum)
+        try:
+            value = content.decode("utf-8").strip()
+        except UnicodeDecodeError as exc:
+            raise IntegrationError(f"installed Git {name} is not UTF-8") from exc
+        fields[name] = {**file_evidence(path, content), "value": value}
+
+    package = fields["PF"]["value"]
+    if package != entry.name or not re.fullmatch(r"git-[0-9][A-Za-z0-9+_.-]*", package):
+        raise IntegrationError("installed Git PF does not match its VDB entry")
+    if fields["repository"]["value"] != "gentoo":
+        raise IntegrationError("installed Git did not come from the Gentoo repository")
+    try:
+        revisions = json.loads(fields["REPO_REVISIONS"]["value"])
+    except json.JSONDecodeError as exc:
+        raise IntegrationError("installed Git REPO_REVISIONS is invalid") from exc
+    if (not isinstance(revisions, dict)
+            or revisions.get("gentoo") != repository_revision
+            or not REVISION_RE.fullmatch(str(revisions.get("gentoo", "")))):
+        raise IntegrationError(
+            "installed Git revision does not match the synced repository")
+    use_flags = fields["USE"]["value"].split()
+    if "safe-directory" not in use_flags:
+        raise IntegrationError("installed Git is missing the requested USE flag")
+    ebuild_path = entry / f"{package}.ebuild"
+    ebuild = read_regular_file(ebuild_path)
+    return {
+        "vdb_path": str(entry),
+        "atom": f"dev-vcs/{package}",
+        "pf": fields["PF"],
+        "use": {
+            **fields["USE"],
+            "flags": use_flags,
+        },
+        "repository": fields["repository"],
+        "repo_revisions": {
+            **fields["REPO_REVISIONS"],
+            "repositories": revisions,
+        },
+        "ebuild": file_evidence(ebuild_path, ebuild),
+    }
+
+
+def require_clean_bootstrap_root(
+        repository_root: Path, vdb_root: Path, environment: dict[str, str]) -> dict:
+    try:
+        repository_root.lstat()
+    except FileNotFoundError:
+        repository_present = False
+    else:
+        repository_present = True
+    category = vdb_root / "dev-vcs"
+    try:
+        git_entries = sorted(
+            path.name for path in category.iterdir() if path.name.startswith("git-"))
+    except FileNotFoundError:
+        git_entries = []
+    git_path = shutil.which("git", path=environment.get("PATH"))
+    evidence = {
+        "repository_present": repository_present,
+        "git_vdb_entries": git_entries,
+        "git_on_path": git_path,
+    }
+    if repository_present or git_entries or git_path is not None:
+        raise IntegrationError("Gentoo bootstrap root is not clean")
+    return evidence
+
+
+def bootstrap(output: Path) -> dict:
+    if os.geteuid() != 0:
+        raise IntegrationError("Gentoo bootstrap requires root in isolation")
+    try:
+        output.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        raise IntegrationError(f"output path already exists: {output}")
+    output.mkdir(parents=True, exist_ok=False)
+    observed_image = os.environ.get("GZH_GENTOO_IMAGE")
+    repository_root = Path("/var/db/repos/gentoo")
+    vdb_root = Path("/var/db/pkg")
+    report = {
+        "schema": 1,
+        "ok": False,
+        "complete": False,
+        "image_lock": None,
+        "observed_image_reference": observed_image,
+        "environment": {"USE": "-* safe-directory"},
+        "preconditions": None,
+        "repository": None,
+        "git": None,
+        "commands": [],
+        "errors": [],
+    }
+    try:
+        command_output = output / "commands"
+        command_output.mkdir()
+        lock = validate_image_lock(load_json_object(IMAGE_LOCK))
+        report["image_lock"] = lock
+        if observed_image != lock["reference"]:
+            raise IntegrationError(
+                "GZH_GENTOO_IMAGE does not match the reviewed image lock")
+        base_environment = os.environ.copy()
+        report["preconditions"] = require_clean_bootstrap_root(
+            repository_root, vdb_root, base_environment)
+        for name, command, overrides in (
+                ("01-emerge-webrsync", ["emerge-webrsync"], {}),
+                ("02-emerge-git", [
+                    "emerge", "--oneshot", "--usepkg=n", "dev-vcs/git",
+                ], {"USE": "-* safe-directory"}),
+                ("03-git-version", ["git", "--version"], {})):
+            environment = base_environment.copy()
+            environment.update(overrides)
+            evidence = write_command_evidence(
+                command_output, name,
+                run_bounded(command, environment=environment))
+            report["commands"].append({"name": name, **evidence})
+            if (not evidence["complete"] or evidence["returncode"] != 0
+                    or evidence["timed_out"] or evidence["truncated"]):
+                raise IntegrationError(f"bootstrap command failed: {name}")
+            if name == "01-emerge-webrsync":
+                report["repository"] = collect_repository_evidence(repository_root)
+            elif name == "02-emerge-git":
+                report["git"] = collect_git_evidence(
+                    vdb_root,
+                    report["repository"]["timestamp_commit"]["revision"])
+        report["complete"] = (
+            len(report["commands"]) == 3
+            and report["preconditions"] is not None
+            and report["repository"] is not None
+            and report["git"] is not None
+            and all(command["complete"] for command in report["commands"]))
+        report["ok"] = report["complete"]
+    except Exception as exc:
+        report["errors"].append({
+            "type": type(exc).__name__, "message": str(exc)})
+    (output / "bootstrap.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return report
+
+
 def execute(output: Path) -> dict:
     if os.geteuid() != 0:
         raise IntegrationError("real Gentoo fixture execution requires root in isolation")
@@ -673,6 +929,7 @@ def execute(output: Path) -> dict:
         with tempfile.TemporaryDirectory(
                 prefix="gzh-gentoo-integration-", dir="/var/tmp") as temporary:
             runtime = Path(temporary)
+            prepare_portage_runtime(runtime)
             overlay = runtime / "overlay"
             shutil.copytree(FIXTURES / "overlay", overlay)
             repository = run_bounded(["git", "init", "-q"], cwd=overlay)
@@ -713,20 +970,23 @@ def parse_args() -> argparse.Namespace:
         "--validate-only", action="store_true",
         help="validate the lock and fixture contract without executing Portage")
     mode.add_argument(
+        "--bootstrap", action="store_true",
+        help="bootstrap official Gentoo inputs with bounded failure evidence")
+    mode.add_argument(
         "--execute", action="store_true",
         help="execute the fixtures in an isolated root Gentoo environment")
     parser.add_argument(
         "--output", type=Path,
-        help="new or empty evidence directory required by --execute")
+        help="evidence directory required by --bootstrap or --execute")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     try:
-        lock = validate_image_lock(load_json_object(IMAGE_LOCK))
-        cases = validate_manifest(load_json_object(FIXTURES / "manifest.json"))
         if args.validate_only:
+            lock = validate_image_lock(load_json_object(IMAGE_LOCK))
+            cases = validate_manifest(load_json_object(FIXTURES / "manifest.json"))
             print(json.dumps({
                 "schema": 1,
                 "ok": True,
@@ -735,22 +995,16 @@ def main() -> int:
                 "case_ids": [case["id"] for case in cases],
             }, indent=2, sort_keys=True))
             return 0
+        if args.bootstrap:
+            if args.output is None:
+                raise IntegrationError("--bootstrap requires --output")
+            report = bootstrap(args.output.resolve())
+            return 0 if report["ok"] else 1
         if args.output is None:
             raise IntegrationError("--execute requires --output")
         report = execute(args.output.resolve())
         return 0 if report["ok"] else 1
     except (IntegrationError, OSError, ValueError) as exc:
-        if args.output is not None:
-            args.output.mkdir(parents=True, exist_ok=True)
-            (args.output / "report.json").write_text(
-                json.dumps({
-                    "schema": 1,
-                    "ok": False,
-                    "complete": False,
-                    "errors": [{
-                        "type": type(exc).__name__, "message": str(exc)}],
-                }, indent=2, sort_keys=True) + "\n",
-                encoding="utf-8")
         print(f"gentoo integration failed: {exc}", file=sys.stderr)
         return 1
 

@@ -371,7 +371,13 @@ python3 -m venv --system-site-packages .venv
 
 验证器还把每个 skill 的 `name`、`description` 和解析后的 `SKILL.md` 路径序列化为确定性的初始列表估算值，并以官方文档给出的 8,000 字符上限作为硬上界。该值用于保守检测，不声称复制客户端内部的序列化格式。客户端仍可因实际 context budget 提前缩短 description。
 
-`.github/workflows/gentoo-integration.yml` 在相关验证文件 push 或人工 dispatch 时，使用固定 digest 的官方 Gentoo amd64 stage3 执行两个 EAPI 8 source-merge fixture。正常 fixture 必须产生 VDB、预期 artifact 且没有保存的 elog；边界 fixture 必须在 emerge 成功后因 `qa` elog 被拒绝。workflow 还在隔离 Git 副本中直接执行正式 `run_verify_install`，并要求两个 fixture 得出相同的接受或拒绝结果。该验证不代表 overlay、profile 或 architecture matrix；真实 package 仍须按目标 repository 的实时政策执行 `pkgcheck`、构建、安装和 CI。
+`.github/workflows/gentoo-integration.yml` 在相关验证文件 push 或人工 dispatch 时，使用固定 digest 的官方 Gentoo amd64 stage3。有界 runner 要求初始环境没有 Gentoo ebuild repository 和 Git。runner 随后使用 `emerge-webrsync` 获取并验证当前的官方 repository snapshot，再以最小 USE 状态从 source 安装 stage3 未包含的 Git。
+
+Git bootstrap 明确禁用 binary package，避免 rolling binary host 的 build variant 改变测试基础。`bootstrap.json` 记录签名 `Manifest` 的 SHA-256 与时间戳、`timestamp.commit` revision、Git PF、USE、`REPO_REVISIONS` 和 ebuild SHA-256。这些字段标识本次使用的滚动 snapshot，不把它表述为由 stage3 digest 固定的输入。
+
+命令失败时，workflow 仍上传报告、命令输出及其 SHA-256。如果输出路径已存在，runner 会拒绝写入，避免覆盖既有证据。
+
+workflow 执行两个 EAPI 8 source-merge fixture。正常 fixture 必须产生 VDB、预期 artifact 且没有保存的 elog；边界 fixture 必须在 emerge 成功后因 `qa` elog 被拒绝。workflow 还在隔离 Git 副本中直接执行正式 `run_verify_install`，并要求两个 fixture 得出相同的接受或拒绝结果。该验证不代表 overlay、profile 或 architecture matrix；真实 package 仍须按目标 repository 的实时政策执行 `pkgcheck`、构建、安装和 CI。
 
 静态 eval 当前覆盖 73 个 activation、exclusion 和行为案例。外部 runner 通过显式 JSON protocol 接入，不会把预期答案写入待测 prompt。安装测试只写入临时目录。
 
