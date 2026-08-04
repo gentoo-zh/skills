@@ -143,8 +143,8 @@
     },
     "gentoo-tree": {
       "kind": "git",
-      "revision": "47db476bbc1c8d3de80ede397393c2798242417a",
-      "checked_at": "2026-08-04T07:21:42Z"
+      "revision": "90c4643e02d208c79614f945eddfcc0ff8e6fe66",
+      "checked_at": "2026-08-04T07:51:45Z"
     },
     "guru": {
       "kind": "git",
@@ -395,24 +395,24 @@
     },
     "github-release-management": {
       "kind": "http",
-      "sha256": "f960453d1fe6da92f2559c33b5e86bb45ebe62a5d8f61d0d754806baefddc19a",
-      "bytes": 239991,
-      "final_url": "https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository",
-      "checked_at": "2026-08-04T02:30:49Z"
+      "sha256": "d1f80a50e669a97f99ce206708be82c2b0ad1118897a5cab263981a1a4f9dce3",
+      "bytes": 6019,
+      "final_url": "https://raw.githubusercontent.com/github/docs/main/content/repositories/releasing-projects-on-github/managing-releases-in-a-repository.md",
+      "checked_at": "2026-08-04T07:44:54Z"
     },
     "github-source-archives": {
       "kind": "http",
-      "sha256": "25f45144c057b1b80775da9cc12cbaa306d9b5d8797d4ae77c8c9281faa13d89",
-      "bytes": 237953,
-      "final_url": "https://docs.github.com/en/repositories/working-with-files/using-files/downloading-source-code-archives",
-      "checked_at": "2026-08-04T02:30:49Z"
+      "sha256": "412d25a2497806c220cd288affbf1e792ab5c8830c9df529ae8db7d094cf1b17",
+      "bytes": 5414,
+      "final_url": "https://raw.githubusercontent.com/github/docs/main/content/repositories/working-with-files/using-files/downloading-source-code-archives.md",
+      "checked_at": "2026-08-04T07:44:54Z"
     },
     "github-repository-licensing": {
       "kind": "http",
-      "sha256": "fd1cedfea98d57e401737afe25d49473663386f24d80c4eade88cd096a041e22",
-      "bytes": 235783,
-      "final_url": "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository",
-      "checked_at": "2026-08-04T02:30:49Z"
+      "sha256": "f1a0fbf132c2e45a24e00d0907cd1ca5d2f9f795836f637a5016c111599a28c5",
+      "bytes": 7684,
+      "final_url": "https://raw.githubusercontent.com/github/docs/main/content/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository.md",
+      "checked_at": "2026-08-04T07:44:54Z"
     },
     "codex-plugin-packaging": {
       "kind": "http",
@@ -471,5 +471,5 @@
       "checked_at": "2026-08-04T04:05:49Z"
     }
   },
-  "updated_at": "2026-08-04T07:21:42Z"
+  "updated_at": "2026-08-04T07:51:45Z"
 }

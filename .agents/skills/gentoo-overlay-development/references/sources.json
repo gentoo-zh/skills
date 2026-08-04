@@ -934,10 +934,10 @@
     },
     {
       "id": "github-release-management",
-      "title": "GitHub release management documentation",
+      "title": "GitHub Docs release management source",
       "authority": "skill-architecture",
       "kind": "http",
-      "url": "https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository",
+      "url": "https://raw.githubusercontent.com/github/docs/main/content/repositories/releasing-projects-on-github/managing-releases-in-a-repository.md",
       "topics": [
         "github",
         "release",
@@ -949,10 +949,10 @@
     },
     {
       "id": "github-source-archives",
-      "title": "GitHub source archive documentation",
+      "title": "GitHub Docs source archive source",
       "authority": "skill-architecture",
       "kind": "http",
-      "url": "https://docs.github.com/en/repositories/working-with-files/using-files/downloading-source-code-archives",
+      "url": "https://raw.githubusercontent.com/github/docs/main/content/repositories/working-with-files/using-files/downloading-source-code-archives.md",
       "topics": [
         "github",
         "release",
@@ -964,10 +964,10 @@
     },
     {
       "id": "github-repository-licensing",
-      "title": "GitHub repository licensing documentation",
+      "title": "GitHub Docs repository licensing source",
       "authority": "skill-architecture",
       "kind": "http",
-      "url": "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository",
+      "url": "https://raw.githubusercontent.com/github/docs/main/content/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository.md",
       "topics": [
         "github",
         "license",
