@@ -136,10 +136,13 @@ gzh urls
 | --- | --- | --- |
 | 依赖或 USE | `gzh deps <ebuild> --use +flag` | 从匹配的 Portage cache 解析依赖，不执行 ebuild |
 | distfile 或架构产物 | `gzh artifacts <Manifest> --evidence <json>` | 核对每个 `DIST` 条目、来源记录和可选本地 digest |
+| release archive 的 license 材料 | `gzh license <archive>` | 不解压 archive，记录 license-like 文件的路径、大小和 SHA-256 |
 | 预编译 ELF | `gzh binary <path>` | 使用 `file` 和 `readelf` 静态检查，不执行目标文件 |
 | 安装结果 | `gzh image <image-root>` | 检查 symlink、mode、desktop、systemd 和 ELF metadata |
 | 支持的测试矩阵 | `gzh test =category/package-version::gentoo-zh -x` | 通过 `pkgdev tatt` 保存有界测试证据 |
 | 本地或 SSH 安装 | `gzh exec =category/package-version::gentoo-zh --executor <name> -x` | 运行同一 exact-atom 和隔离 elog 合同，并保存可校验记录 |
+
+`gzh license` 支持未压缩、gzip、bzip2 或 xz 压缩的 tar，以及不含 ZIP64 metadata 的 ZIP archive。命令会在创建 archive parser 前限制 ZIP central directory 和 tar extended header，再限制成员数量、声明大小和 license-like 文件读取量。Zstandard tar 和 ZIP64 metadata 尚无等价的有界预检，因此命令会明确拒绝。报告只提供文件名 inventory 与 hash，不判断适用条款、license 兼容性、镜像权限或二进制再发布权限。相关结论仍须依据当前 release 的原始条款和 Gentoo 官方 license 文档人工复核。
 
 `gzh exec` 从 `${GZH_EXECUTOR_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/gzh/executors.toml}` 读取严格配置。SSH executor 还需要为当前 commit 的每个改动文件重复传入 `--path`。host、port、identity file、远端开发副本路径和依赖安装授权只保存在用户配置中，不写入 skill：
 
@@ -209,6 +212,18 @@ gzh batch cleanup <report.json> --dry-run
 
 更新脚本按远程 URL 查找唯一的 canonical remote，fetch 其 `master`，再执行 fast-forward-only merge。当前分支不是 `master`、本地提交未同步、工作树有修改、HEAD detached、remote 缺失或不唯一，以及无法 fast-forward 时都会停止。脚本不会 reset、覆盖本地改动、自动改写规则或刷新来源 lock。
 
+## 发布
+
+版本号必须在 `gzh/pyproject.toml`、`gzh.__version__` 和 `gzh --version` 中保持一致，tag 使用 `v<version>`。发布前执行：
+
+```bash
+python3 scripts/release_check.py --mode source-only --tag v0.1.0
+```
+
+本仓库当前没有根目录 license 文件，也没有 `project.license` metadata。发布过程不会推断或添加法律条款；在仓库所有者明确选择 license 前，只发布 tag 对应的源码快照，不上传 wheel、sdist、可执行文件或其他自定义产物。GitHub 自动生成的源码 archive 以 tag 指向的 commit 内容为准，但外层压缩字节不属于稳定身份。`--mode package` 当前始终失败；根目录 license 和 package metadata 只能作为前提，后续还须实现并复核确定性的 rights-decision contract。
+
+release tag 不会固定已有安装的版本。`install.sh` 安装当前 checkout，`update.sh` 仍从 canonical `master` 执行 fast-forward 后刷新受管理安装。完整发布门、验证顺序和后续 license 决策见 [`RELEASING.md`](RELEASING.md)。
+
 ## 证据和持续维护
 
 规则按以下顺序取证：
@@ -221,7 +236,7 @@ gzh batch cleanup <report.json> --dry-run
 
 相似目录结构不能证明两个 overlay 使用相同的 remote、branch、keyword、CI、review 或发布规则。只约束 Gentoo ebuild repository 的 GLEP 也不会自动成为通用 overlay 规则。`gentoo-tree-lessons` 只提供候选 commit 和测试样本，任何硬规则都需要当前官方资料或目标仓库政策支持。
 
-机器可读来源位于 [`sources.json`](.agents/skills/gentoo-overlay-development/references/sources.json)，当前登记 58 个官方或明确标注的次级来源。人工复核后的 revision 或 SHA-256 位于 [`source-lock.json`](.agents/skills/gentoo-overlay-development/references/source-lock.json)。查询时必须指定 `--scope`、`--all-scopes` 或 `--id`：
+机器可读来源位于 [`sources.json`](.agents/skills/gentoo-overlay-development/references/sources.json)，当前登记 63 个官方或明确标注的次级来源。人工复核后的 revision 或 SHA-256 位于 [`source-lock.json`](.agents/skills/gentoo-overlay-development/references/source-lock.json)。查询时必须指定 `--scope`、`--all-scopes` 或 `--id`：
 
 ```bash
 python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py \
@@ -230,9 +245,9 @@ python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py \
 
 每条 HTTP 或 MediaWiki 请求都在独立子进程内执行，父进程设置 60 秒总时限。HTTP 正文上限为 16 MiB，MediaWiki 正文上限为 2 MiB，Git 输出上限为 256 KiB，并发 worker 数限制为 1 至 16。
 
-定期 workflow 从经过认证的 artifact 恢复 SQLite 状态，优先恢复同一 skills revision 下未完成的计划，再运行 allowlist 队列。任务保存完整输入、SHA-256、adapter、canonical repository、游标、重试次数和结构化报告；QA 历史采集在计划最后运行，因此前置门失败不会推进游标。证据写入与队列成功使用同一事务。
+定期 workflow 从经过认证的 artifact 恢复 SQLite 状态，优先恢复同一 skills revision 下未完成的计划，再运行 allowlist 队列。任务保存完整输入、SHA-256、adapter、canonical repository、游标、重试次数和结构化报告。固定队列包含来源审计、repository validator、release contract、测试和 diff 检查。QA 历史采集在计划最后运行，因此前置门失败不会推进游标。证据写入与队列成功使用同一事务。
 
-历史 commit 只进入候选状态。候选需要单独复核官方证据、建立显式证据关联并完成 promotion checklist 后，才能成为规则。定期 workflow 不会自动修改 skill、刷新来源 lock、commit、push、发布或修改外部仓库。手动 `workflow_dispatch` 只能对最新且经过认证的状态执行明确的 candidate transition 或 evidence link；定时、初始化和恢复路径不能隐式晋升规则。
+历史 commit 只进入候选状态。候选需要单独复核官方证据、建立显式证据关联并完成 promotion checklist 后，才能成为规则。定期 workflow 不会自动修改 skill、刷新来源 lock、commit、push、发布或修改外部仓库。手动 `workflow_dispatch` 只能对最新且经过认证的状态执行明确的 candidate transition、原子化 batch transition 或 evidence link。batch manifest 必须列出每个 candidate 的准确 key、预期状态、目标状态和单独理由，且不能用于 promotion；定时、初始化和恢复路径不能隐式晋升规则。
 
 状态压缩只删除已全部成功的旧计划，并删除旧的例行运行正文、压缩旧候选发现报告；pending、running 和 blocked 计划全部保留。定期 workflow 最多保留 16 个计划，未完成计划达到 17 个时会在删除前停止。压缩仍保留原始 SHA-256、规范化来源、候选、状态转换、复核关系和每个仓库的最新游标。待复核候选超过 512、总候选超过 4096 或压缩后的数据库超过 96 MiB 时，周期停止并更新维护 issue，不会静默丢弃证据。
 
@@ -243,7 +258,9 @@ python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py \
 - [OpenCode skills](https://opencode.ai/docs/skills)；
 - [Agent Skills specification](https://agentskills.io/specification)。
 
-仓库采用渐进加载：客户端先读取四个 skill 的 `name` 和 `description`，只在触发后加载对应 `SKILL.md`，再按任务读取一层 references 或直接执行 scripts。验证器限制 `SKILL.md` 不超过 500 行，并要求每个 reference 从所属 `SKILL.md` 直接可发现。客户端专用的 OpenAI UI metadata 位于 `agents/openai.yaml`；共同的 `SKILL.md` 只保留 `name` 和 `description`，避免加入其他客户端无法稳定解释的 frontmatter。
+仓库采用渐进加载：客户端的初始列表包含四个 skill 的 `name`、`description` 和 `SKILL.md` 路径。客户端只在触发后加载对应 `SKILL.md`，再按任务读取一层 references 或直接执行 scripts。验证器限制 `SKILL.md` 不超过 500 行，并要求每个 reference 从所属 `SKILL.md` 直接可发现。客户端专用的 OpenAI UI metadata 位于 `agents/openai.yaml`；共同的 `SKILL.md` 只保留 `name` 和 `description`，避免加入其他客户端无法稳定解释的 frontmatter。
+
+常规 bump 和 batch 默认只加载本地提交所需流程；两者的发布步骤位于条件 reference，只有明确请求发布时才加载。插件封装不会减少 description 或 `SKILL.md` 的加载成本，因此列为版本控制的后续事项，不属于持久化维护队列。该事项必须先复核各客户端的当前官方资料，再证明安装、更新、同名冲突、卸载和回滚；当前共享 skill 目录仍是兼容基线。
 
 ## 验证
 
@@ -253,13 +270,18 @@ python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py \
 python3 -m venv --system-site-packages .venv
 .venv/bin/python -m pip install -e './gzh[test]'
 .venv/bin/python scripts/validate_repository.py
+.venv/bin/python scripts/release_check.py --mode source-only
 .venv/bin/python -m pytest -q gzh/tests tests
 .venv/bin/python scripts/eval_runner.py static
 .venv/bin/python .agents/skills/gentoo-overlay-development/scripts/source_manager.py \
   audit --all-scopes --fail-on-drift
 ```
 
-验证器检查 skill frontmatter、metadata、activation eval、英文正文、来源 schema 和 lock、局部链接、reference 可发现性及可执行脚本。静态 eval 当前覆盖 67 个 activation、exclusion 和行为案例；外部 runner 通过显式 JSON protocol 接入，不会把预期答案写入待测 prompt。安装测试只写入临时目录。
+验证器检查 skill frontmatter、metadata、activation eval、禁止的非 Latin script，以及来源 schema 和 lock。它也检查局部链接、reference 可发现性和可执行脚本。英文政策仍须人工复核，因为验证器不能把 Latin 字符文本自动判定为英语。
+
+验证器还把每个 skill 的 `name`、`description` 和解析后的 `SKILL.md` 路径序列化为确定性的初始列表估算值，并以官方文档给出的 8,000 字符上限作为硬上界。该值用于保守检测，不声称复制客户端内部的序列化格式。客户端仍可因实际 context budget 提前缩短 description。
+
+静态 eval 当前覆盖 73 个 activation、exclusion 和行为案例。外部 runner 通过显式 JSON protocol 接入，不会把预期答案写入待测 prompt。安装测试只写入临时目录。
 
 ## 目录
 
@@ -267,6 +289,7 @@ python3 -m venv --system-site-packages .venv
 - [`gzh`](gzh)：Python CLI 与单元测试；
 - [`scripts`](scripts)：安装、更新和仓库验证；
 - [`docs/devmanual.md`](docs/devmanual.md)：本项目使用的 Gentoo 官方文档索引；
+- [`RELEASING.md`](RELEASING.md)：发布身份、验证门、产物边界和后续事项；
 - [`AGENTS.md`](AGENTS.md)：本仓库维护约定。
 
 `docs/superpowers` 保存早期设计和实施记录，只用于历史背景。运行时合同由目标仓库政策、当前 skill、确定性测试和目标仓库 CI 共同确定。

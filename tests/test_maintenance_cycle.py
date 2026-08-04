@@ -259,11 +259,65 @@ def test_skipped_gates_do_not_claim_a_complete_cycle(
     assert report["ok"] is True
     assert report["complete"] is False
     assert set(report["requested_gates"]) | set(report["skipped_gates"]) == {
-        "source-audit", "lesson-refresh", "repository-validator", "tests",
+        "source-audit", "lesson-refresh", "repository-validator",
+        "release-check", "static-evals", "tests", "compile-check",
         "diff-check"}
     assert report["skipped_gates"] == skipped
+    steps = {step["name"]: step for step in report["steps"]}
+    assert steps["static-evals"]["command"] == [
+        sys.executable, str(maintenance.EVAL_RUNNER), "static"]
+    assert steps["compile-check"]["command"] == [
+        sys.executable, "-m", "compileall", "-q", "gzh/gzh", "scripts",
+        ".agents/skills"]
     assert "Result: scoped pass" in maintenance.render_markdown(report)
     assert "Skipped gates:" in maintenance.render_markdown(report)
+
+
+@pytest.mark.parametrize(("failed_gate", "expected_calls"), [
+    ("static-evals", [
+        "repository-validator", "release-check", "static-evals"]),
+    ("compile-check", [
+        "repository-validator", "release-check", "static-evals",
+        "compile-check"]),
+])
+def test_required_static_gate_failure_stops_cycle(
+        monkeypatch, failed_gate, expected_calls):
+    monkeypatch.setattr(maintenance, "repository_state", lambda fetch: {
+        "head": "a" * 40,
+        "branch": "master",
+        "dirty": False,
+        "canonical_remote": "origin",
+        "canonical_url": "git@github.com:gentoo-zh/skills.git",
+        "ahead": 0,
+        "behind": 0,
+        "fetch": None,
+    })
+    calls = []
+
+    def run(name, command, timeout=900):
+        calls.append(name)
+        return {
+            "name": name,
+            "command": command,
+            "ok": name != failed_gate,
+            "returncode": 1 if name == failed_gate else 0,
+            "duration_seconds": 0.0,
+            "stdout": "",
+            "stderr": "failed" if name == failed_gate else "",
+            "timed_out": False,
+            "truncated": False,
+        }
+
+    monkeypatch.setattr(maintenance, "run_command", run)
+    args = SimpleNamespace(
+        fetch=False, require_synced_master=False, skip_network=True,
+        skip_tests=True)
+
+    report = maintenance.collect(args)
+
+    assert report["ok"] is False
+    assert calls == expected_calls
+    assert report["steps"][-1]["name"] == failed_gate
 
 
 def test_markdown_report_lists_failed_gate():

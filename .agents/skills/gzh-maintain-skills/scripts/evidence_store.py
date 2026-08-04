@@ -23,6 +23,13 @@ MAX_TOTAL_CANDIDATES = 4096
 MAX_STATE_BYTES = 96 * 1024 * 1024
 MAX_REVIEW_SUMMARY_CANDIDATES = 64
 MAX_REVIEW_SUMMARY_CHARACTERS = 240
+MAX_BATCH_TRANSITIONS = 64
+MAX_BATCH_MANIFEST_BYTES = 64 * 1024
+MAX_BATCH_REASON_CHARACTERS = 2048
+BATCH_TRANSITION_SCHEMA = 1
+BATCH_DECISION_FIELDS = {
+    "candidate_key", "from_state", "to_state", "reason",
+}
 BIDI_CONTROL_CHARACTERS = {
     "\u061c", "\u200e", "\u200f", "\u202a", "\u202b", "\u202c", "\u202d",
     "\u202e", "\u2066", "\u2067", "\u2068", "\u2069",
@@ -224,6 +231,93 @@ def validate_checklist(checklist: dict | None) -> str:
         raise ValueError(
             "promotion checklist is incomplete: " + ", ".join(missing))
     return canonical_json(checklist)
+
+
+def validate_batch_transition_manifest(manifest: Any) -> list[dict[str, str]]:
+    if not isinstance(manifest, dict):
+        raise ValueError("batch transition manifest must be a JSON object")
+    if set(manifest) != {"schema", "decisions"}:
+        raise ValueError(
+            "batch transition manifest fields must be schema and decisions")
+    schema = manifest["schema"]
+    if (not isinstance(schema, int) or isinstance(schema, bool)
+            or schema != BATCH_TRANSITION_SCHEMA):
+        raise ValueError("unsupported batch transition manifest schema")
+    decisions = manifest["decisions"]
+    if not isinstance(decisions, list):
+        raise ValueError("batch transition decisions must be an array")
+    if not 1 <= len(decisions) <= MAX_BATCH_TRANSITIONS:
+        raise ValueError(
+            "batch transition manifest must contain between 1 and "
+            f"{MAX_BATCH_TRANSITIONS} decisions")
+
+    normalized = []
+    seen = set()
+    for index, decision in enumerate(decisions):
+        if not isinstance(decision, dict):
+            raise ValueError(f"batch transition decision {index} must be an object")
+        if set(decision) != BATCH_DECISION_FIELDS:
+            raise ValueError(
+                f"batch transition decision {index} must contain only "
+                "candidate_key, from_state, to_state, and reason")
+        if not all(isinstance(decision[field], str)
+                   for field in BATCH_DECISION_FIELDS):
+            raise ValueError(
+                f"batch transition decision {index} fields must be strings")
+        candidate_key = decision["candidate_key"]
+        expected_state = decision["from_state"]
+        new_state = decision["to_state"]
+        reason = decision["reason"].strip()
+        if not candidate_key or candidate_key != candidate_key.strip():
+            raise ValueError(
+                f"batch transition decision {index} has an invalid candidate key")
+        if candidate_key in seen:
+            raise ValueError(f"duplicate batch candidate key: {candidate_key}")
+        seen.add(candidate_key)
+        if expected_state not in TRANSITIONS or new_state not in TRANSITIONS:
+            raise ValueError(
+                f"batch transition decision {index} has an unknown state")
+        if new_state not in TRANSITIONS[expected_state]:
+            raise ValueError(
+                f"invalid transition: {expected_state} -> {new_state}")
+        if new_state == "promoted":
+            raise ValueError(
+                "batch transitions cannot promote candidates without explicit "
+                "primary evidence and a promotion checklist")
+        if not reason:
+            raise ValueError(
+                f"batch transition decision {index} requires a reason")
+        if len(reason) > MAX_BATCH_REASON_CHARACTERS:
+            raise ValueError(
+                f"batch transition decision {index} reason exceeds "
+                f"{MAX_BATCH_REASON_CHARACTERS} characters")
+        normalized.append({
+            "candidate_key": candidate_key,
+            "from_state": expected_state,
+            "to_state": new_state,
+            "reason": reason,
+        })
+    return normalized
+
+
+def reject_duplicate_json_keys(
+        pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object key: {key!r}")
+        result[key] = value
+    return result
+
+
+def load_batch_transition_manifest(path: Path) -> dict:
+    with path.open("rb") as handle:
+        raw = handle.read(MAX_BATCH_MANIFEST_BYTES + 1)
+    if len(raw) > MAX_BATCH_MANIFEST_BYTES:
+        raise ValueError(
+            f"batch transition manifest exceeds {MAX_BATCH_MANIFEST_BYTES} bytes")
+    return json.loads(
+        raw.decode("utf-8"), object_pairs_hook=reject_duplicate_json_keys)
 
 
 def stored_report_matches(row: sqlite3.Row, report_hash: str,
@@ -948,6 +1042,49 @@ class EvidenceStore:
             "SELECT * FROM candidates WHERE candidate_key = ?",
             (candidate_key,)).fetchone())
 
+    def batch_transition(self, manifest: Any) -> dict:
+        decisions = validate_batch_transition_manifest(manifest)
+        self.connection.execute("BEGIN IMMEDIATE")
+        with self.connection:
+            rows = []
+            for decision in decisions:
+                row = self.connection.execute(
+                    "SELECT * FROM candidates WHERE candidate_key = ?",
+                    (decision["candidate_key"],)).fetchone()
+                if row is None:
+                    raise ValueError(
+                        f"unknown candidate: {decision['candidate_key']}")
+                if row["state"] != decision["from_state"]:
+                    raise ValueError(
+                        "candidate state changed: expected "
+                        f"{decision['from_state']}, found {row['state']} for "
+                        f"{decision['candidate_key']}")
+                rows.append((row, decision))
+
+            changed_at = utc_now()
+            for row, decision in rows:
+                cursor = self.connection.execute("""
+                    UPDATE candidates
+                    SET state = ?, reason = ?, promotion_fingerprint = NULL,
+                        checklist_json = NULL, updated_at = ?
+                    WHERE candidate_key = ? AND state = ?
+                """, (decision["to_state"], decision["reason"], changed_at,
+                      row["candidate_key"], decision["from_state"]))
+                if cursor.rowcount != 1:
+                    raise RuntimeError("candidate batch compare-and-swap failed")
+                self.connection.execute("""
+                    INSERT INTO candidate_transitions(
+                        candidate_key, old_state, new_state, reason,
+                        evidence_fingerprint, checklist_json, changed_at)
+                    VALUES (?, ?, ?, ?, NULL, NULL, ?)
+                """, (row["candidate_key"], decision["from_state"],
+                      decision["to_state"], decision["reason"], changed_at))
+        return {
+            "schema": BATCH_TRANSITION_SCHEMA,
+            "applied": len(decisions),
+            "decisions": decisions,
+        }
+
 
 def render_review_markdown(report: dict) -> str:
     counts = report["counts"]
@@ -1009,6 +1146,10 @@ def parser() -> argparse.ArgumentParser:
     transition.add_argument("--reason", required=True)
     transition.add_argument("--evidence-fingerprint")
     transition.add_argument("--checklist", type=Path)
+    batch = subparsers.add_parser(
+        "batch-transition",
+        help="atomically apply an explicit JSON manifest of candidate transitions")
+    batch.add_argument("manifest", type=Path)
     link = subparsers.add_parser(
         "link-evidence", help="link stored evidence reviewed for one candidate")
     link.add_argument("candidate_key")
@@ -1048,6 +1189,9 @@ def main() -> int:
                     args.candidate_key, args.from_state, args.to_state,
                     args.reason, evidence_fingerprint=args.evidence_fingerprint,
                     checklist=checklist)
+            elif args.command == "batch-transition":
+                output = store.batch_transition(
+                    load_batch_transition_manifest(args.manifest))
             elif args.command == "link-evidence":
                 output = store.link_reviewed_evidence(
                     args.candidate_key, args.evidence_fingerprint, args.reason)

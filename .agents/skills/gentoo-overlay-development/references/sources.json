@@ -55,6 +55,11 @@
       "devmanual-licenses",
       "pkgdev"
     ],
+    "archive-inventory-tool": [
+      "devmanual-licenses",
+      "python-tarfile",
+      "python-zipfile"
+    ],
     "build-test-install": [
       "portage-ebuild-command",
       "portage-ebuild-format",
@@ -79,6 +84,11 @@
       "overlay-pr-template",
       "overlay-version-tracking-config",
       "overlay-version-tracking-workflow"
+    ],
+    "repository-release": [
+      "github-release-management",
+      "github-repository-licensing",
+      "github-source-archives"
     ]
   },
   "sources": [
@@ -880,6 +890,80 @@
         "collision"
       ],
       "use": "Official OpenCode discovery behavior and name uniqueness requirement.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "python-tarfile",
+      "title": "Python tarfile documentation",
+      "authority": "upstream-primary",
+      "kind": "http",
+      "url": "https://docs.python.org/3/library/tarfile.html",
+      "topics": [
+        "python",
+        "archive",
+        "tar",
+        "resource-limit"
+      ],
+      "use": "Official parser behavior and security boundaries for bounded tar inventory.",
+      "scope": "portable-tooling"
+    },
+    {
+      "id": "python-zipfile",
+      "title": "Python zipfile documentation",
+      "authority": "upstream-primary",
+      "kind": "http",
+      "url": "https://docs.python.org/3/library/zipfile.html",
+      "topics": [
+        "python",
+        "archive",
+        "zip",
+        "resource-limit"
+      ],
+      "use": "Official parser behavior and resource limits for bounded ZIP inventory.",
+      "scope": "portable-tooling"
+    },
+    {
+      "id": "github-release-management",
+      "title": "GitHub release management documentation",
+      "authority": "skill-architecture",
+      "kind": "http",
+      "url": "https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository",
+      "topics": [
+        "github",
+        "release",
+        "tag",
+        "asset"
+      ],
+      "use": "Official release creation and asset publication contract.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "github-source-archives",
+      "title": "GitHub source archive documentation",
+      "authority": "skill-architecture",
+      "kind": "http",
+      "url": "https://docs.github.com/en/repositories/working-with-files/using-files/downloading-source-code-archives",
+      "topics": [
+        "github",
+        "release",
+        "archive",
+        "reproducibility"
+      ],
+      "use": "Official contents and stability limits of generated source archives.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "github-repository-licensing",
+      "title": "GitHub repository licensing documentation",
+      "authority": "skill-architecture",
+      "kind": "http",
+      "url": "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository",
+      "topics": [
+        "github",
+        "license",
+        "distribution"
+      ],
+      "use": "Official meaning and limitations of an undeclared repository license.",
       "scope": "skills-maintenance"
     },
     {

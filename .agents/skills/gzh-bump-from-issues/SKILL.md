@@ -11,7 +11,9 @@ Coordinate queue discovery and one-package bump workflows. Produce evidence-base
 
 1. Run `gzh repo` and read the complete live overlay `AGENTS.md`. Its repository, CI, commit, and PR rules override this skill and all references.
    If `gzh` is unavailable, install it from a checked-out `gentoo-zh/skills` root with `./install.sh --gzh-only`. Then run inside the overlay or set `GZH_OVERLAY_DIR` to its absolute path.
-2. Read [official-sources.md](../gzh-version-bump/references/official-sources.md). Use current repository policy, official Gentoo sources and tools, and upstream primary evidence before GURU practice or derived cases.
+2. Use the evidence order required by `gzh-version-bump`: current repository policy,
+   official Gentoo sources and tools, and upstream primary evidence before GURU practice
+   or derived cases.
 3. Load each issue's complete body and comments before deciding whether to process, skip, or escalate it. Do not decide from the title, a keyword, version distance, package type, or maintainer field alone.
 4. Apply the complete `gzh-version-bump` workflow to every viable package. Batch processing never weakens its evidence, validation, commit, retry, or PR confirmation requirements.
 
@@ -39,7 +41,10 @@ Classify each item as:
 - **Skip:** Current issue evidence or repository policy establishes that this queue item should not be attempted. Record the concrete reason with `gzh triage skip --issue-updated-at <updated_at> --expected-event-id <event_id-or-none>`.
 - **Escalate:** A maintainer decision, generated metadata, unpublished artifact, unclear license, repository conflict, or other required evidence is missing. Report what is needed. Use `gzh triage skip --kind escalate --issue-updated-at <updated_at> --expected-event-id <event_id-or-none>` only for an intentional revisitable deferral, not a transient failure.
 
-Treat comments as evidence to interpret in context. A warning or disagreement may block the bump, narrow its scope, or require verification, but no keyword is an automatic decision rule. Use [escalate-classes.md](../gzh-version-bump/references/escalate-classes.md) for common evidence gaps, not as a substitute for reading the package and issue.
+Treat comments as evidence to interpret in context. A warning or disagreement may block
+the bump, narrow its scope, or require verification, but no keyword is an automatic
+decision rule. Delegate package-specific evidence gaps to `gzh-version-bump`; its
+escalation classes do not replace reading the package and issue.
 
 ### 3. Process viable packages
 
@@ -83,18 +88,12 @@ not infer success from the branch name alone.
 
 Send an optional notification with `gzh notify telegram` only when its credentials are already configured and the user requested or established that notification behavior. A batch result is not authorization to publish any branch or PR.
 
-## PR boundary
+## Publication boundary
 
-This skill stops at local commits. If the user later asks to publish successful packages,
-handle them under the live overlay policy and `gzh-version-bump` finish pipeline. Build a
-separate immutable `gzh pr-plan` for every branch. One response may approve several
-separately enumerated exact plan IDs, but prior batch or wildcard authorization does not.
-Recompute each plan before `gh pr create` or `gh pr edit`, observe checks with `gzh ci`,
-then run `gzh batch-report reconcile <report> --expected-sha256 <sha256>` to append read-only
-push, PR, CI, merge, and issue states. Run `gzh batch cleanup <report> --dry-run` only after
-reconciliation. It lists candidates and never deletes a branch or worktree. Invoke
-`chinese-skill` when repository policy requires a Chinese PR body; do not duplicate its
-writing rules or examples here.
+This skill stops at local commits. Do not push branches or create or edit pull requests.
+Read [publication-reconciliation.md](references/publication-reconciliation.md) only when
+the user later asks to publish successful packages or reconcile a batch report after
+publication.
 
 ## Exclusions
 

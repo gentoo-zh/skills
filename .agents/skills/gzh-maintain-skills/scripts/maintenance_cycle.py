@@ -29,6 +29,8 @@ LESSON_LOOKUP = (
     ROOT / ".agents" / "skills" / "gzh-version-bump" / "scripts"
     / "lesson_lookup.py")
 VALIDATOR = ROOT / "scripts" / "validate_repository.py"
+RELEASE_CHECK = ROOT / "scripts" / "release_check.py"
+EVAL_RUNNER = ROOT / "scripts" / "eval_runner.py"
 CANONICAL_SLUG = "gentoo-zh/skills"
 MAX_COMMAND_OUTPUT_BYTES = 4 * 1024 * 1024
 MAX_GIT_OUTPUT_BYTES = 256 * 1024
@@ -366,10 +368,13 @@ def collect(args: argparse.Namespace) -> dict:
     else:
         requested_gates.extend(["source-audit", "lesson-refresh"])
     requested_gates.append("repository-validator")
+    requested_gates.append("release-check")
+    requested_gates.append("static-evals")
     if args.skip_tests:
         skipped_gates.append("tests")
     else:
         requested_gates.append("tests")
+    requested_gates.append("compile-check")
     requested_gates.append("diff-check")
     report = {
         "schema": 1,
@@ -452,6 +457,19 @@ def collect(args: argparse.Namespace) -> dict:
     if not validator["ok"]:
         report["ok"] = False
         return report
+    release = run_command(
+        "release-check", [sys.executable, str(RELEASE_CHECK),
+                          "--mode", "source-only"])
+    append_step(report, release)
+    if not release["ok"]:
+        report["ok"] = False
+        return report
+    static_evals = run_command(
+        "static-evals", [sys.executable, str(EVAL_RUNNER), "static"])
+    append_step(report, static_evals)
+    if not static_evals["ok"]:
+        report["ok"] = False
+        return report
     if not args.skip_tests:
         tests = run_command(
             "tests", [sys.executable, "-m", "pytest", "-q", "gzh/tests", "tests"])
@@ -459,6 +477,14 @@ def collect(args: argparse.Namespace) -> dict:
         if not tests["ok"]:
             report["ok"] = False
             return report
+    compile_check = run_command(
+        "compile-check",
+        [sys.executable, "-m", "compileall", "-q", "gzh/gzh", "scripts",
+         ".agents/skills"])
+    append_step(report, compile_check)
+    if not compile_check["ok"]:
+        report["ok"] = False
+        return report
     diff = run_command("diff-check", ["git", "diff", "--check"])
     append_step(report, diff)
     source = next(

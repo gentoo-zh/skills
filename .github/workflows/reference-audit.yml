@@ -15,6 +15,7 @@ on:
         options:
           - none
           - transition
+          - batch-transition
           - link-evidence
       candidate_key:
         description: Exact candidate key for the reviewed action
@@ -38,6 +39,10 @@ on:
         type: string
       checklist_json:
         description: Optional promotion checklist encoded as one JSON object
+        required: false
+        type: string
+      candidate_batch_json:
+        description: Explicit schema-1 JSON manifest for an atomic batch transition
         required: false
         type: string
   schedule:
@@ -224,13 +229,14 @@ jobs:
           CANDIDATE_REASON: ${{ inputs.candidate_reason || '' }}
           EVIDENCE_FINGERPRINT: ${{ inputs.evidence_fingerprint || '' }}
           CHECKLIST_JSON: ${{ inputs.checklist_json || '' }}
+          CANDIDATE_BATCH_JSON: ${{ inputs.candidate_batch_json || '' }}
         shell: bash
         run: |
           set +e
           (
             set -euo pipefail
             if [[ "$CANDIDATE_ACTION" == "none" ]]; then
-              if [[ -n "$CANDIDATE_KEY$CANDIDATE_FROM_STATE$CANDIDATE_TO_STATE$CANDIDATE_REASON$EVIDENCE_FINGERPRINT$CHECKLIST_JSON" ]]; then
+              if [[ -n "$CANDIDATE_KEY$CANDIDATE_FROM_STATE$CANDIDATE_TO_STATE$CANDIDATE_REASON$EVIDENCE_FINGERPRINT$CHECKLIST_JSON$CANDIDATE_BATCH_JSON" ]]; then
                 echo "candidate decision fields require an explicit candidate action" >&2
                 exit 1
               fi
@@ -239,6 +245,10 @@ jobs:
             fi
             if [[ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]]; then
               echo "candidate decisions require an authenticated workflow_dispatch event" >&2
+              exit 1
+            fi
+            if [[ "$GITHUB_REF" != "refs/heads/master" ]]; then
+              echo "candidate decisions require workflow_dispatch on refs/heads/master" >&2
               exit 1
             fi
             if [[ "$(cat maintenance-output/state.status 2>/dev/null || printf 1)" != "0" ]]; then
@@ -251,18 +261,18 @@ jobs:
             fi
             jq -e '.verified == true' maintenance-output/authenticated-state.json >/dev/null
             jq -e --arg repository "$GITHUB_REPOSITORY" '.verified == true and .repository == $repository' maintenance-output/authenticated-provenance.json >/dev/null
-            if [[ -z "$CANDIDATE_KEY" || -z "$CANDIDATE_REASON" ]]; then
-              echo "candidate key and reviewed reason are required" >&2
-              exit 1
-            fi
             command=(
               python .agents/skills/gzh-maintain-skills/scripts/evidence_store.py
               --db maintenance-output/maintenance-state.db
             )
             case "$CANDIDATE_ACTION" in
               transition)
-                if [[ -z "$CANDIDATE_FROM_STATE" || -z "$CANDIDATE_TO_STATE" ]]; then
-                  echo "candidate transitions require expected and requested states" >&2
+                if [[ -z "$CANDIDATE_KEY" || -z "$CANDIDATE_REASON" || -z "$CANDIDATE_FROM_STATE" || -z "$CANDIDATE_TO_STATE" ]]; then
+                  echo "candidate transitions require a key, reason, expected state, and requested state" >&2
+                  exit 1
+                fi
+                if [[ -n "$CANDIDATE_BATCH_JSON" ]]; then
+                  echo "a single transition cannot include a batch manifest" >&2
                   exit 1
                 fi
                 command+=(
@@ -280,13 +290,27 @@ jobs:
                   command+=(--checklist maintenance-output/candidate-checklist.json)
                 fi
                 ;;
-              link-evidence)
-                if [[ -z "$EVIDENCE_FINGERPRINT" ]]; then
-                  echo "evidence linking requires a stored evidence fingerprint" >&2
+              batch-transition)
+                if [[ -z "$CANDIDATE_BATCH_JSON" ]]; then
+                  echo "batch transitions require an explicit JSON manifest" >&2
                   exit 1
                 fi
-                if [[ -n "$CANDIDATE_FROM_STATE$CANDIDATE_TO_STATE$CHECKLIST_JSON" ]]; then
-                  echo "transition states and checklists are not valid for evidence linking" >&2
+                if [[ -n "$CANDIDATE_KEY$CANDIDATE_FROM_STATE$CANDIDATE_TO_STATE$CANDIDATE_REASON$EVIDENCE_FINGERPRINT$CHECKLIST_JSON" ]]; then
+                  echo "batch transitions cannot include single-candidate fields" >&2
+                  exit 1
+                fi
+                printf '%s\n' "$CANDIDATE_BATCH_JSON" > maintenance-output/candidate-batch.json
+                command+=(
+                  batch-transition maintenance-output/candidate-batch.json
+                )
+                ;;
+              link-evidence)
+                if [[ -z "$CANDIDATE_KEY" || -z "$CANDIDATE_REASON" || -z "$EVIDENCE_FINGERPRINT" ]]; then
+                  echo "evidence linking requires a key, reason, and stored evidence fingerprint" >&2
+                  exit 1
+                fi
+                if [[ -n "$CANDIDATE_FROM_STATE$CANDIDATE_TO_STATE$CHECKLIST_JSON$CANDIDATE_BATCH_JSON" ]]; then
+                  echo "transition states, checklists, and batch manifests are not valid for evidence linking" >&2
                   exit 1
                 fi
                 command+=(
@@ -604,6 +628,7 @@ jobs:
             maintenance-output/candidate-decision-result.json
             maintenance-output/candidate-decision.log
             maintenance-output/candidate-checklist.json
+            maintenance-output/candidate-batch.json
             maintenance-output/candidate-review.json
             maintenance-output/candidate-review.md
             maintenance-output/candidate-review.log
@@ -620,7 +645,7 @@ jobs:
             maintenance-output/*.status
           if-no-files-found: error
       - name: Synchronize the review issue
-        if: always()
+        if: always() && github.ref == 'refs/heads/master'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash

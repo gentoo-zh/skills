@@ -1,6 +1,6 @@
 ---
 name: gzh-maintain-skills
-description: Audit, repair, and evolve this Gentoo overlay development skills repository from current evidence. Use for scheduled or user-requested skill maintenance, official source drift, failed repository or installer CI, cross-client compatibility changes, overlay policy changes, repository-adapter development, regression intake, source-lock review, eval expansion, and one bounded unattended improvement iteration. Do not use to perform a package bump or modify an external repository directly.
+description: Audit, repair, and evolve this Gentoo overlay development skills repository from current evidence. Use for scheduled or user-requested skill maintenance, official source drift, failed repository or installer CI, cross-client compatibility changes, overlay policy changes, repository-adapter development, regression intake, source-lock review, eval expansion, repository release readiness, version tags, GitHub releases, and one bounded unattended improvement iteration. Do not use to perform a package bump, publish an unrelated package, or modify an external repository directly.
 ---
 
 # Maintain Gentoo Overlay Development Skills
@@ -36,8 +36,9 @@ python3 .agents/skills/gzh-maintain-skills/scripts/maintenance_cycle.py \
 
 The collector fetches only the canonical `gentoo-zh/skills` remote, records synchronization
 state, audits every registered source against its reviewed lock, refreshes the secondary
-lesson checkout, validates every skill, runs the test suite, and checks the diff. It never
-rewrites instructions, source locks, Git history, or user configuration.
+lesson checkout, validates every skill and the source-only release contract, runs static
+evals, the test suite, and the compile check, then checks the diff. It never rewrites
+instructions, source locks, Git history, or user configuration.
 
 Audit the source inventory directly when classifying drift:
 
@@ -147,6 +148,10 @@ Never create or edit an overlay pull request under this skill.
 After a push, verify the remote SHA and watch every GitHub Actions job to completion. Read
 failing logs before changing code. Apply at most three attempts to one failed gate, and stop
 after the identical failure repeats twice.
+
+For a repository release, follow the root `RELEASING.md` only after the user explicitly
+authorizes publication. Run `scripts/release_check.py` for the exact mode and tag. Never
+infer a license or attach custom package artifacts while the release check rejects them.
 
 Report the branch, canonical remote and fetch result, base and synchronization state,
 changed files, reviewed evidence, commands and outcomes, skipped checks, remaining risks,

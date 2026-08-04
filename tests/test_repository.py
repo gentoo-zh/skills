@@ -59,13 +59,118 @@ def test_capability_source_coverage_uses_registered_sources():
 
 
 def test_skills_stay_within_progressive_disclosure_limits():
+    validator = load_validator()
+    records = []
     for skill in (ROOT / ".agents" / "skills").iterdir():
         if not skill.is_dir():
             continue
         text = (skill / "SKILL.md").read_text(encoding="utf-8")
+        fields = validator.frontmatter(skill / "SKILL.md", [])
+        records.append(validator.initial_skill_record(skill, fields))
         assert len(text.splitlines()) <= 500
         for reference in (skill / "references").glob("*.md"):
             assert f"references/{reference.name}" in text
             reference_text = reference.read_text(encoding="utf-8")
             if len(reference_text.splitlines()) > 100:
                 assert "\n## Contents\n" in reference_text
+    assert len(validator.serialize_initial_skill_list(records)) <= (
+        validator.MAX_INITIAL_SKILL_LIST_CHARACTERS)
+
+
+def test_nested_references_are_rejected_even_when_directly_linked(tmp_path):
+    validator = load_validator()
+    validator.ROOT = tmp_path
+    skill = tmp_path / "skills/example"
+    nested = skill / "references/topic/details.md"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("# Details\n", encoding="utf-8")
+
+    errors = []
+    validator.validate_references(
+        skill, "[details](references/topic/details.md)\n", errors)
+
+    assert errors == [
+        "reference must be one level deep: "
+        "skills/example/references/topic/details.md"
+    ]
+
+
+def test_initial_skill_list_serialization_is_exact_and_sorted(tmp_path):
+    validator = load_validator()
+    alpha = tmp_path / "skills/alpha"
+    zeta = tmp_path / "skills/zeta"
+    records = [
+        validator.initial_skill_record(
+            zeta, {"name": "zeta", "description": "Last skill"}),
+        validator.initial_skill_record(
+            alpha, {"name": "alpha", "description": "First skill"}),
+    ]
+
+    serialized = validator.serialize_initial_skill_list(records)
+
+    expected = (
+        '[{"name":"alpha","description":"First skill","path":"'
+        f'{(alpha / "SKILL.md").resolve()}'
+        '"},{"name":"zeta","description":"Last skill","path":"'
+        f'{(zeta / "SKILL.md").resolve()}"}}]'
+    )
+    assert serialized == expected
+    assert len(serialized) == len(expected)
+
+
+def test_initial_skill_list_ceiling_is_exact():
+    validator = load_validator()
+    record = {"name": "skill", "description": "", "path": "/skill/SKILL.md"}
+    base = len(validator.serialize_initial_skill_list([record]))
+    record["description"] = "x" * (
+        validator.MAX_INITIAL_SKILL_LIST_CHARACTERS - base)
+
+    errors = []
+    assert validator.validate_initial_skill_list([record], errors) == 8000
+    assert errors == []
+
+    record["description"] += "x"
+    assert validator.validate_initial_skill_list([record], errors) == 8001
+    assert errors == [
+        "serialized initial skill-list estimate exceeds the ceiling: 8001 > 8000"
+    ]
+
+
+def test_local_markdown_links_stay_within_the_owning_skill(tmp_path):
+    validator = load_validator()
+    validator.ROOT = tmp_path
+    validator.SKILLS_ROOT = tmp_path / "skills"
+    first = validator.SKILLS_ROOT / "first"
+    second = validator.SKILLS_ROOT / "second"
+    (first / "references").mkdir(parents=True)
+    second.mkdir(parents=True)
+    (first / "SKILL.md").write_text(
+        "[details](references/details.md)\n", encoding="utf-8")
+    (first / "references/details.md").write_text(
+        "[other](../../second/SKILL.md)\n", encoding="utf-8")
+    (second / "SKILL.md").write_text("# Other\n", encoding="utf-8")
+
+    errors = []
+    validator.validate_links(errors)
+
+    assert errors == [
+        "local link escapes skill root in "
+        "skills/first/references/details.md: ../../second/SKILL.md"
+    ]
+
+
+def test_local_markdown_links_report_missing_targets(tmp_path):
+    validator = load_validator()
+    validator.ROOT = tmp_path
+    validator.SKILLS_ROOT = tmp_path / "skills"
+    skill = validator.SKILLS_ROOT / "example"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "[missing](references/missing.md)\n", encoding="utf-8")
+
+    errors = []
+    validator.validate_links(errors)
+
+    assert errors == [
+        "broken local link in skills/example/SKILL.md: references/missing.md"
+    ]

@@ -115,6 +115,8 @@ SUBJECT_PATTERNS = {
         r"\b(?:nvchecker|nvcmp|version tracking|upstream version)\b",
         re.IGNORECASE),
 }
+ROUTINE_BUMP_SUBJECT_RE = re.compile(
+    r"^[^/:\s]+/[^/:\s]+: add \S+(?:, drop \S+)?$")
 
 
 class GitError(RuntimeError):
@@ -639,7 +641,7 @@ def path_matches(topic: str, path: str) -> bool:
     if topic == "new-package":
         return False
     if topic == "artifact":
-        return name == "manifest" or lowered.endswith((
+        return lowered.endswith((
             ".tar", ".tar.gz", ".tar.xz", ".tar.zst", ".zip"))
     if topic == "prebuilt":
         return name.endswith("-bin.ebuild") or "prebuilt" in parts
@@ -650,11 +652,19 @@ def path_matches(topic: str, path: str) -> bool:
 
 
 def route_topics(subject: str, files: list[str]) -> list[str]:
-    return [
-        topic for topic in TOPIC_ORDER
-        if SUBJECT_PATTERNS[topic].search(subject)
-        or any(path_matches(topic, path) for path in files)
-    ]
+    routine_bump = bool(ROUTINE_BUMP_SUBJECT_RE.fullmatch(subject))
+    topics = []
+    for topic in TOPIC_ORDER:
+        subject_match = bool(SUBJECT_PATTERNS[topic].search(subject))
+        file_match = any(path_matches(topic, path) for path in files)
+        if routine_bump:
+            if topic == "removal":
+                subject_match = False
+            elif topic == "manifest":
+                file_match = False
+        if subject_match or file_match:
+            topics.append(topic)
+    return topics
 
 
 def primary_source_ids(topics: list[str]) -> list[str]:

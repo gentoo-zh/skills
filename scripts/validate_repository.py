@@ -24,6 +24,7 @@ LOCAL_LINK_RE = re.compile(r"\[[^]]+\]\(([^)]+)\)")
 CHINESE_PR_EXAMPLE_RE = re.compile(
     r"Chinese PR body example:\s*\n```(?:text|markdown)\n.*?```", re.DOTALL)
 MAX_SKILL_LINES = 500
+MAX_INITIAL_SKILL_LIST_CHARACTERS = 8000
 MAX_REFERENCE_LINES_WITHOUT_CONTENTS = 100
 CONTENTS_HEADING_RE = re.compile(r"^## Contents\s*$", re.MULTILINE)
 
@@ -72,11 +73,61 @@ def frontmatter(path: Path, errors: list[str]) -> dict[str, str]:
     return fields
 
 
-def validate_skill(skill: Path, errors: list[str]) -> None:
+def validate_references(skill: Path, skill_text: str,
+                        errors: list[str]) -> None:
+    references = skill / "references"
+    if not references.is_dir():
+        return
+    for reference in sorted(references.rglob("*.md")):
+        relative = reference.relative_to(references)
+        if len(relative.parts) != 1:
+            errors.append(
+                "reference must be one level deep: "
+                f"{reference.relative_to(ROOT)}")
+            continue
+        target = f"references/{reference.name}"
+        if target not in skill_text:
+            errors.append(
+                "reference is not directly discoverable from SKILL.md: "
+                f"{reference.relative_to(ROOT)}")
+        reference_text = reference.read_text(encoding="utf-8")
+        if (len(reference_text.splitlines()) > MAX_REFERENCE_LINES_WITHOUT_CONTENTS
+                and not CONTENTS_HEADING_RE.search(reference_text)):
+            errors.append(
+                "long reference has no Contents section: "
+                f"{reference.relative_to(ROOT)}")
+
+
+def initial_skill_record(skill: Path,
+                         fields: dict[str, str]) -> dict[str, str]:
+    return {
+        "name": fields.get("name", ""),
+        "description": fields.get("description", ""),
+        "path": str((skill / "SKILL.md").resolve()),
+    }
+
+
+def serialize_initial_skill_list(records: list[dict[str, str]]) -> str:
+    ordered = sorted(records, key=lambda record: (record["name"], record["path"]))
+    return json.dumps(
+        ordered, ensure_ascii=False, separators=(",", ":"))
+
+
+def validate_initial_skill_list(records: list[dict[str, str]],
+                                errors: list[str]) -> int:
+    characters = len(serialize_initial_skill_list(records))
+    if characters > MAX_INITIAL_SKILL_LIST_CHARACTERS:
+        errors.append(
+            "serialized initial skill-list estimate exceeds the ceiling: "
+            f"{characters} > {MAX_INITIAL_SKILL_LIST_CHARACTERS}")
+    return characters
+
+
+def validate_skill(skill: Path, errors: list[str]) -> dict[str, str]:
     skill_md = skill / "SKILL.md"
     if not skill_md.is_file():
         errors.append(f"missing SKILL.md: {skill.relative_to(ROOT)}")
-        return
+        return {}
     fields = frontmatter(skill_md, errors)
     skill_text = skill_md.read_text(encoding="utf-8")
     if len(skill_text.splitlines()) > MAX_SKILL_LINES:
@@ -108,20 +159,8 @@ def validate_skill(skill: Path, errors: list[str]) -> None:
     errors.extend(validate_case_data(
         data, str(eval_path.relative_to(ROOT)), expected_skill=name))
 
-    references = skill / "references"
-    if references.is_dir():
-        for reference in references.glob("*.md"):
-            target = f"references/{reference.name}"
-            if target not in skill_text:
-                errors.append(
-                    "reference is not directly discoverable from SKILL.md: "
-                    f"{reference.relative_to(ROOT)}")
-            reference_text = reference.read_text(encoding="utf-8")
-            if (len(reference_text.splitlines()) > MAX_REFERENCE_LINES_WITHOUT_CONTENTS
-                    and not CONTENTS_HEADING_RE.search(reference_text)):
-                errors.append(
-                    "long reference has no Contents section: "
-                    f"{reference.relative_to(ROOT)}")
+    validate_references(skill, skill_text, errors)
+    return fields
 
 
 def validate_sources(errors: list[str]) -> None:
@@ -196,15 +235,24 @@ def validate_sources(errors: list[str]) -> None:
 
 
 def validate_links(errors: list[str]) -> None:
-    for path in SKILLS_ROOT.rglob("*.md"):
-        text = path.read_text(encoding="utf-8")
-        for raw_target in LOCAL_LINK_RE.findall(text):
-            target = raw_target.strip("<>").split("#", 1)[0]
-            if not target or "://" in target or target.startswith("mailto:"):
-                continue
-            if not (path.parent / target).resolve().exists():
-                errors.append(
-                    f"broken local link in {path.relative_to(ROOT)}: {raw_target}")
+    for skill in SKILLS_ROOT.iterdir():
+        if not skill.is_dir():
+            continue
+        skill_root = skill.resolve()
+        for path in skill.rglob("*.md"):
+            text = path.read_text(encoding="utf-8")
+            for raw_target in LOCAL_LINK_RE.findall(text):
+                target = raw_target.strip("<>").split("#", 1)[0]
+                if not target or "://" in target or target.startswith("mailto:"):
+                    continue
+                resolved = (path.parent / target).resolve()
+                if not resolved.is_relative_to(skill_root):
+                    errors.append(
+                        "local link escapes skill root in "
+                        f"{path.relative_to(ROOT)}: {raw_target}")
+                elif not resolved.exists():
+                    errors.append(
+                        f"broken local link in {path.relative_to(ROOT)}: {raw_target}")
 
 
 def contains_non_latin_script(text: str) -> bool:
@@ -261,8 +309,12 @@ def main() -> int:
     skills = sorted(path for path in SKILLS_ROOT.iterdir() if path.is_dir())
     if not skills:
         errors.append("no skills found")
+    initial_records = []
     for skill in skills:
-        validate_skill(skill, errors)
+        fields = validate_skill(skill, errors)
+        if fields:
+            initial_records.append(initial_skill_record(skill, fields))
+    initial_list_characters = validate_initial_skill_list(initial_records, errors)
     validate_sources(errors)
     validate_links(errors)
     validate_english_skill_content(errors)
@@ -276,7 +328,9 @@ def main() -> int:
         return 1
     print(
         f"validated {len(skills)} skills, "
-        f"{len(load_json(SKILLS_ROOT / 'gentoo-overlay-development/references/sources.json', [])['sources'])} sources")
+        f"{len(load_json(SKILLS_ROOT / 'gentoo-overlay-development/references/sources.json', [])['sources'])} sources, "
+        f"{initial_list_characters}/{MAX_INITIAL_SKILL_LIST_CHARACTERS} "
+        "serialized initial skill-list estimate characters")
     return 0
 
 

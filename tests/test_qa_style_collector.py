@@ -86,7 +86,7 @@ def test_topic_routing_is_ordered():
         ["cat/pkg/Manifest", "cat/pkg/files/fix-license.patch"])
 
     assert topics == [
-        "qa", "manifest", "license", "patch", "test", "install", "artifact"]
+        "qa", "manifest", "license", "patch", "test", "install"]
 
 
 def test_local_collection_validates_identity_and_normalizes_candidates(tmp_path):
@@ -127,7 +127,7 @@ def test_local_collection_validates_identity_and_normalizes_candidates(tmp_path)
     current = [candidate for candidate in report["candidates"]
                if candidate["source_revision"] == report["scope"]["resolved_ref"]]
     assert [candidate["topic"] for candidate in current] == [
-        "metadata", "manifest", "artifact"]
+        "metadata", "manifest"]
     assert all(candidate["scope"] == "example/overlay" for candidate in current)
     assert all(candidate["adapter_id"] == "fixture" for candidate in current)
     assert all(candidate["authority"] == "candidate-history"
@@ -148,7 +148,7 @@ def test_local_collection_validates_identity_and_normalizes_candidates(tmp_path)
         if source.get("role") == "candidate"]
     assert len(candidate_sources) == 1
     assert candidate_sources[0]["topics"] == [
-        "metadata", "manifest", "artifact"]
+        "metadata", "manifest"]
     for candidate in current:
         assert any(
             source["id"] == candidate["source_id"]
@@ -667,3 +667,78 @@ def test_extended_history_topics_route_to_primary_sources(subject, path, topic):
 
     assert topic in routed
     assert collector.TOPIC_SOURCE_IDS[topic]
+
+
+@pytest.mark.parametrize("subject", [
+    "net-misc/motrix-next-bin: add 3.9.7",
+    "cat/pkg-bin: add 2.0, drop 1.0",
+])
+def test_routine_bump_suppresses_mechanical_candidate_topics(subject):
+    topics = collector.route_topics(
+        subject,
+        ["cat/pkg-bin/Manifest", "cat/pkg-bin/pkg-bin-1.0.ebuild",
+         "cat/pkg-bin/pkg-bin-2.0.ebuild"],
+    )
+
+    assert "manifest" not in topics
+    assert "artifact" not in topics
+    assert "removal" not in topics
+
+
+@pytest.mark.parametrize("subject", [
+    "cat/pkg: add 2.0",
+    "cat/pkg: add 2.0, drop 1.0",
+])
+def test_routine_bump_keeps_substantive_artifact_and_mask_paths(subject):
+    assert collector.route_topics(
+        subject, ["cat/pkg/Manifest", "cat/pkg/files/vendor.tar.gz"]) == [
+            "artifact"]
+    assert collector.route_topics(
+        subject, ["cat/pkg/Manifest", "profiles/package.mask"]) == [
+            "dependencies", "profile", "removal"]
+
+
+@pytest.mark.parametrize("subject", [
+    "cat/pkg: add 2.0, drop 1.0 after compatibility review",
+    "cat/sub/pkg: add 2.0, drop 1.0",
+    "cat:variant/pkg: add 2.0, drop 1.0",
+])
+def test_only_exact_routine_bump_subject_is_suppressed(subject):
+    topics = collector.route_topics(subject, ["cat/pkg/Manifest"])
+
+    assert "manifest" in topics
+
+
+def test_routine_bump_keeps_repository_metadata_topics():
+    topics = collector.route_topics(
+        "cat/pkg: add 2.0",
+        ["cat/pkg/Manifest", "profiles/license_groups"],
+    )
+
+    assert "license" in topics
+    assert "profile" in topics
+    assert "manifest" not in topics
+
+
+@pytest.mark.parametrize(("path", "topic"), [
+    ("cat/pkg/metadata.xml", "metadata"),
+    ("cat/pkg/files/fix.patch", "patch"),
+    ("cat/pkg/tests/test_cli.py", "test"),
+])
+def test_routine_bump_keeps_other_behavior_topics(path, topic):
+    topics = collector.route_topics(
+        "cat/pkg: add 2.0, drop 1.0",
+        ["cat/pkg/Manifest", path],
+    )
+
+    assert topic in topics
+    assert "manifest" not in topics
+
+
+def test_nonroutine_package_removal_still_routes():
+    topics = collector.route_topics(
+        "cat/pkg: remove obsolete package",
+        ["cat/pkg/pkg-1.0.ebuild", "profiles/package.mask"],
+    )
+
+    assert "removal" in topics

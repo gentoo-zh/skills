@@ -115,6 +115,16 @@
       ]
     },
     {
+      "id": "repository-release-readiness",
+      "prompt": "Prepare and publish version v0.1.0 of the gentoo-zh skills repository after all maintenance work is complete.",
+      "should_trigger": true,
+      "expected": [
+        "follow the root release contract for the exact tag",
+        "require synchronized master, final CI, authenticated reference audit, and installation status",
+        "publish only the source snapshot while custom package artifacts remain disabled"
+      ]
+    },
+    {
       "id": "package-bump-exclusion",
       "prompt": "Bump app-misc/example to version 2.0 in gentoo-zh.",
       "should_trigger": false,
@@ -142,6 +152,14 @@
       "should_trigger": false,
       "expected": [
         "do not apply gentoo-zh repository policy"
+      ]
+    },
+    {
+      "id": "unrelated-package-release-exclusion",
+      "prompt": "Publish a new upstream release for an unrelated Python package and upload its wheel.",
+      "should_trigger": false,
+      "expected": [
+        "do not apply this repository's release contract"
       ]
     }
   ]

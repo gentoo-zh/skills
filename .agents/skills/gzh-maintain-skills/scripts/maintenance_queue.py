@@ -36,6 +36,7 @@ DEPENDENCY_ANALYZER = (
     ROOT / ".agents" / "skills" / "gentoo-overlay-development" / "scripts"
     / "dependency_analyzer.py")
 VALIDATOR = ROOT / "scripts" / "validate_repository.py"
+RELEASE_CHECK = ROOT / "scripts" / "release_check.py"
 SCHEMA_VERSION = 1
 TASK_TIMEOUT_SECONDS = 1800
 LEASE_GRACE_SECONDS = 300
@@ -47,6 +48,7 @@ ALLOWED_TASKS = {
     "qa-style-collect",
     "dependency-analyze",
     "repository-validator",
+    "release-check",
     "tests",
     "diff-check",
 }
@@ -222,6 +224,10 @@ def task_command(kind: str, payload: dict, result_path: Path) -> list[str]:
     if kind == "repository-validator":
         exact_parameters(payload, set())
         return [sys.executable, str(VALIDATOR)]
+    if kind == "release-check":
+        exact_parameters(payload, set())
+        return [sys.executable, str(RELEASE_CHECK),
+                "--mode", "source-only"]
     if kind == "tests":
         parameters = exact_parameters(payload, {"targets"})
         targets = parameters.get("targets", ["gzh/tests", "tests"])
@@ -954,7 +960,7 @@ def enqueue_default(queue: MaintenanceQueue, plan_id: str, context: Any,
         raise ValueError("overlay collection parameters require an overlay URL")
     if not isinstance(limit, int) or not 1 <= limit <= 1000:
         raise ValueError("overlay collection limit must be between 1 and 1000")
-    kinds = ["repository-validator", "tests", "diff-check"]
+    kinds = ["repository-validator", "release-check", "tests", "diff-check"]
     if overlay_url:
         kinds = ["source-audit", "lesson-refresh", *kinds, "qa-style-collect"]
     for position, kind in enumerate(kinds):

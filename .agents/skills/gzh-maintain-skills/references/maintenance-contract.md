@@ -10,6 +10,7 @@ unattended cycle must stop.
 - [Promotion Gate](#promotion-gate)
 - [Unattended Boundaries](#unattended-boundaries)
 - [Compatibility Gate](#compatibility-gate)
+- [Release Gate](#release-gate)
 
 ## Authority Order
 
@@ -63,6 +64,11 @@ Candidate-history observations cannot serve as primary evidence. Store official 
 in a passed run, move the candidate to `reviewed`, and create an explicit reviewed-evidence
 link before promotion. Discovery in the same report is not a review.
 
+A batch decision must enumerate every exact candidate key, expected state, requested state,
+and individual reason. Validate the complete bounded manifest against one state snapshot and
+apply it atomically with one transition record per candidate. Never batch promotions because
+each promotion requires its own linked primary evidence and complete checklist.
+
 Statistics and incident counts remain dated evidence. They do not become permanent
 thresholds. One package fix remains package precedent unless a primary source defines the
 general behavior.
@@ -108,3 +114,15 @@ destination.
 For workflow changes, verify action tags against the action's official repository. Keep
 workflow permissions minimal, preserve complete failure reports, and make issue mutation
 idempotent.
+
+## Release Gate
+
+An unattended cycle cannot tag or publish. A release requires current user authorization,
+a clean synchronized canonical `master`, one exact commit with all local and remote gates
+complete, and an authenticated reference-audit run on that revision.
+
+Keep the package version declarations and `v<version>` tag identical. State whether
+installations follow a tag or a branch. If the repository has no explicit license, do not
+invent one or upload a wheel, sdist, executable, or other custom package artifact. Record
+the undeclared rights status and require an owner decision before enabling package
+distribution.

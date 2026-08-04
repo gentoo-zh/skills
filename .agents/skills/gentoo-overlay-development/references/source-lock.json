@@ -378,7 +378,42 @@
       "kind": "git",
       "revision": "291610e1260bd09ac0d90271da519da7429b39a3",
       "checked_at": "2026-08-04T00:10:19Z"
+    },
+    "python-tarfile": {
+      "kind": "http",
+      "sha256": "30769edc6a30486f6f33942002f74f1ed3c1cd8dfac7909b0e151bcaf26717bc",
+      "bytes": 194933,
+      "final_url": "https://docs.python.org/3/library/tarfile.html",
+      "checked_at": "2026-08-04T02:30:49Z"
+    },
+    "python-zipfile": {
+      "kind": "http",
+      "sha256": "1b5387c4b4cf1cf020f4dc52c70896590c01de0d7e8a23f881fe8ee5ef24959e",
+      "bytes": 139422,
+      "final_url": "https://docs.python.org/3/library/zipfile.html",
+      "checked_at": "2026-08-04T02:30:49Z"
+    },
+    "github-release-management": {
+      "kind": "http",
+      "sha256": "f960453d1fe6da92f2559c33b5e86bb45ebe62a5d8f61d0d754806baefddc19a",
+      "bytes": 239991,
+      "final_url": "https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository",
+      "checked_at": "2026-08-04T02:30:49Z"
+    },
+    "github-source-archives": {
+      "kind": "http",
+      "sha256": "25f45144c057b1b80775da9cc12cbaa306d9b5d8797d4ae77c8c9281faa13d89",
+      "bytes": 237953,
+      "final_url": "https://docs.github.com/en/repositories/working-with-files/using-files/downloading-source-code-archives",
+      "checked_at": "2026-08-04T02:30:49Z"
+    },
+    "github-repository-licensing": {
+      "kind": "http",
+      "sha256": "fd1cedfea98d57e401737afe25d49473663386f24d80c4eade88cd096a041e22",
+      "bytes": 235783,
+      "final_url": "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository",
+      "checked_at": "2026-08-04T02:30:49Z"
     }
   },
-  "updated_at": "2026-08-04T01:29:43Z"
+  "updated_at": "2026-08-04T02:30:49Z"
 }

@@ -132,7 +132,7 @@ def test_default_plan_preserves_context_in_every_task(tmp_path):
     with queue_module.MaintenanceQueue(tmp_path / "queue.db") as queue:
         queue_module.enqueue_default(queue, "plan", context, None)
         rows = queue.status("plan")["tasks"]
-    assert len(rows) == 3
+    assert len(rows) == 4
     assert all(json.loads(row["payload_json"])["input"] == context for row in rows)
 
 
@@ -675,6 +675,7 @@ def test_default_plan_advances_cursor_only_after_other_gates(tmp_path):
             "example-adapter", "example/overlay", "stable", "a" * 40)
         kinds = [task["kind"] for task in queue.status("plan")["tasks"]]
     assert kinds[-1] == "qa-style-collect"
+    assert kinds.index("release-check") < kinds.index("qa-style-collect")
     assert kinds.index("tests") < kinds.index("qa-style-collect")
     assert kinds.index("diff-check") < kinds.index("qa-style-collect")
 

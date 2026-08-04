@@ -13,7 +13,6 @@ Run every applicable gate after the version-specific edit. Treat the live overla
 - [6. Review the Change](#6-review-the-change)
 - [7. Commit Locally](#7-commit-locally)
 - [8. Run the Networked Commit Gate](#8-run-the-networked-commit-gate)
-- [9. Prepare and Create a Pull Request](#9-prepare-and-create-a-pull-request)
 - [Failure Limit](#failure-limit)
 - [Delivery Report](#delivery-report)
 
@@ -225,43 +224,8 @@ commit message, then rerun the network gate. Never use a raw amend or leave a se
 package commit. Apply this repair loop to CI failures after inspecting the failing job
 log; a CI repair does not permit an extra commit or waive any invalidated gate.
 
-If the branch was already pushed, force-push the rebuilt commit with lease only to the
-same personal topic branch. Rebuild the exact pull request title, complete body, and file
-list after the repair. If any of them changed, obtain confirmation for that specific
-updated pull request before changing its branch or metadata. Stop after the network gate
-unless the user explicitly asks to publish or update a pull request.
-
-## 9. Prepare and Create a Pull Request
-
-Before preparing the final pull request text:
-
-1. Fetch the canonical remote and rebase the topic branch onto its current `master`.
-2. Re-run every gate invalidated by the rebase.
-3. Re-run `gzh urls` when the rebase changed its commit range or inputs.
-4. Build the pull request body above the live template marker. Preserve the template and
-   tick only checks that actually ran. Follow the live `AGENTS.md` for the description;
-   do not turn broader checklist wording into routine passing-test or tested-architecture
-   prose. Do not let an agent attest the human review box.
-5. Write the complete body to a file and run
-   `gzh pr-plan --title '<pkgdev subject>' --body <body-file>`. Show the user its immutable
-   plan ID, exact title, complete body, and file list. Obtain confirmation for every
-   identified plan before running `gh pr create` or `gh pr edit`. One response may approve
-   several separately enumerated exact plan IDs. A request made before the plans were
-   rendered, a wildcard, or draft status does not satisfy this gate.
-6. Recompute every confirmed plan immediately before publication. Stop when its head SHA,
-   base SHA, base-sensitive file set, title, body, or live template changes.
-7. Push only the topic branch to the uniquely identified personal fork. Resolve the fork
-   owner from `gh api user`; never push `master` or a canonical remote.
-8. Run `gh pr create` with the confirmed title and complete body, including the preserved
-   template. Do not change either after confirmation.
-9. Run `gzh ci <pr-number> --watch` to retain full check names, URLs, state counts, head
-   SHA, and final PR state. For a failure, inspect the failing job log and apply the
-   complete post-commit repair loop above before pushing a replacement commit.
-
-When live policy explicitly permits a local install skip because the environment cannot
-merge, publication may proceed only when the exact install and elog risk is included in
-the delivery report. Preserve the live template without inventing a checkbox, and do not
-describe the branch as fully verified.
+Stop after the network gate unless the user explicitly asks to publish or update a pull
+request. Publication follows the separate conditional procedure linked from `SKILL.md`.
 
 ## Failure Limit
 

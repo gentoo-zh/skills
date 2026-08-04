@@ -55,7 +55,9 @@ Run additional tools only for the surface they prove: dependency analysis for de
 
 ## Keep publishing under human control
 
-Do not push or create or edit a PR automatically. If the user separately asks to publish, first complete the pre-PR gates in the finish pipeline and record each exact draft with `gzh pr-plan`. Then show the immutable plan ID, exact title, complete body, and file list and obtain confirmation for every identified plan before `gh pr create` or `gh pr edit`. One response may confirm several separately rendered plan IDs; an instruction given before those plans existed does not. Recompute each plan immediately before publication and stop on any changed digest. Observe checks with `gzh ci` after publication. A draft PR is not an exception. When repository policy requires a Chinese PR body, invoke `chinese-skill`; keep Chinese writing rules and examples in that skill instead of duplicating them here.
+Do not push or create or edit a pull request automatically. Read
+[publishing.md](references/publishing.md) only when the user separately asks to publish or
+update a pull request.
 
 ## Exclusions
 

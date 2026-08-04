@@ -4,6 +4,8 @@ import importlib.util
 import json
 from pathlib import Path
 import sqlite3
+import subprocess
+import sys
 import threading
 
 import pytest
@@ -236,6 +238,237 @@ def test_candidate_cannot_skip_review_or_use_secondary_observation(tmp_path):
                 "No primary evidence was attached.",
                 evidence_fingerprint=secondary["fingerprint"],
                 checklist=checklist())
+
+
+def two_candidate_store(store):
+    first = report()
+    second = report()
+    second["generated_at"] = "2026-08-05T00:00:00Z"
+    second["candidates"][0]["candidate_key"] = "second-candidate"
+    store.ingest(first, "qa-style")
+    store.ingest(second, "qa-style")
+
+
+def test_batch_transition_applies_explicit_decisions_atomically(tmp_path):
+    manifest = {
+        "schema": 1,
+        "decisions": [{
+            "candidate_key": "qa-candidate",
+            "from_state": "candidate",
+            "to_state": "reviewed",
+            "reason": "Primary confirmation is still required.",
+        }, {
+            "candidate_key": "second-candidate",
+            "from_state": "candidate",
+            "to_state": "rejected",
+            "reason": "The change is package-specific precedent.",
+        }],
+    }
+    with evidence.EvidenceStore(tmp_path / "evidence.db") as store:
+        two_candidate_store(store)
+        result = store.batch_transition(manifest)
+        states = {
+            row["candidate_key"]: row["state"]
+            for row in store.list_candidates()
+        }
+        transitions = [dict(row) for row in store.connection.execute(
+            "SELECT * FROM candidate_transitions ORDER BY transition_id")]
+
+    assert result == {
+        "schema": 1,
+        "applied": 2,
+        "decisions": manifest["decisions"],
+    }
+    assert states == {
+        "qa-candidate": "reviewed",
+        "second-candidate": "rejected",
+    }
+    assert [item["candidate_key"] for item in transitions] == [
+        "qa-candidate", "second-candidate"]
+    assert [item["reason"] for item in transitions] == [
+        decision["reason"] for decision in manifest["decisions"]]
+    assert {item["changed_at"] for item in transitions} == {
+        transitions[0]["changed_at"]}
+
+
+def test_batch_transition_validates_every_candidate_before_mutation(tmp_path):
+    manifest = {
+        "schema": 1,
+        "decisions": [{
+            "candidate_key": "qa-candidate",
+            "from_state": "candidate",
+            "to_state": "rejected",
+            "reason": "This decision is valid by itself.",
+        }, {
+            "candidate_key": "missing-candidate",
+            "from_state": "candidate",
+            "to_state": "rejected",
+            "reason": "This exact key does not exist.",
+        }],
+    }
+    with evidence.EvidenceStore(tmp_path / "evidence.db") as store:
+        two_candidate_store(store)
+        with pytest.raises(ValueError, match="unknown candidate"):
+            store.batch_transition(manifest)
+        states = {row["state"] for row in store.list_candidates()}
+        transitions = store.connection.execute(
+            "SELECT COUNT(*) AS count FROM candidate_transitions").fetchone()[
+                "count"]
+
+    assert states == {"candidate"}
+    assert transitions == 0
+
+
+def test_batch_transition_rolls_back_an_apply_failure(tmp_path):
+    manifest = {
+        "schema": 1,
+        "decisions": [{
+            "candidate_key": key,
+            "from_state": "candidate",
+            "to_state": "rejected",
+            "reason": "Package history does not establish policy.",
+        } for key in ("qa-candidate", "second-candidate")],
+    }
+    with evidence.EvidenceStore(tmp_path / "evidence.db") as store:
+        two_candidate_store(store)
+        store.connection.execute("""
+            CREATE TRIGGER reject_second_batch_update
+            BEFORE UPDATE ON candidates
+            WHEN OLD.candidate_key = 'second-candidate'
+            BEGIN
+                SELECT RAISE(ABORT, 'forced batch failure');
+            END
+        """)
+        store.connection.commit()
+        with pytest.raises(sqlite3.IntegrityError, match="forced batch failure"):
+            store.batch_transition(manifest)
+        states = {row["state"] for row in store.list_candidates()}
+        transitions = store.connection.execute(
+            "SELECT COUNT(*) AS count FROM candidate_transitions").fetchone()[
+                "count"]
+
+    assert states == {"candidate"}
+    assert transitions == 0
+
+
+@pytest.mark.parametrize(("mutate", "message"), [
+    (lambda value: value.update({"schema": 2}), "schema"),
+    (lambda value: value.update({"schema": 1.0}), "schema"),
+    (lambda value: value.update({"extra": True}), "fields"),
+    (lambda value: value.update({"decisions": []}), "between 1 and"),
+    (lambda value: value["decisions"].append(
+        dict(value["decisions"][0])), "duplicate"),
+    (lambda value: value["decisions"][0].update(
+        {"to_state": "promoted", "from_state": "reviewed"}),
+     "cannot promote"),
+    (lambda value: value["decisions"][0].update(
+        {"reason": "x" * (evidence.MAX_BATCH_REASON_CHARACTERS + 1)}),
+     "reason exceeds"),
+])
+def test_batch_transition_manifest_rejects_invalid_contract(mutate, message):
+    manifest = {
+        "schema": 1,
+        "decisions": [{
+            "candidate_key": "qa-candidate",
+            "from_state": "candidate",
+            "to_state": "rejected",
+            "reason": "Package history does not establish policy.",
+        }],
+    }
+    mutate(manifest)
+
+    with pytest.raises(ValueError, match=message):
+        evidence.validate_batch_transition_manifest(manifest)
+
+
+def test_batch_transition_manifest_bounds_decision_count():
+    decision = {
+        "candidate_key": "candidate-0",
+        "from_state": "candidate",
+        "to_state": "rejected",
+        "reason": "Package history does not establish policy.",
+    }
+    manifest = {
+        "schema": 1,
+        "decisions": [
+            {**decision, "candidate_key": f"candidate-{number}"}
+            for number in range(evidence.MAX_BATCH_TRANSITIONS + 1)
+        ],
+    }
+
+    with pytest.raises(ValueError, match="between 1 and"):
+        evidence.validate_batch_transition_manifest(manifest)
+
+
+def test_batch_transition_cli_reads_bounded_manifest(tmp_path, monkeypatch, capsys):
+    database = tmp_path / "evidence.db"
+    manifest = tmp_path / "batch.json"
+    manifest.write_text(json.dumps({
+        "schema": 1,
+        "decisions": [{
+            "candidate_key": "qa-candidate",
+            "from_state": "candidate",
+            "to_state": "rejected",
+            "reason": "Package history does not establish policy.",
+        }],
+    }), encoding="utf-8")
+    with evidence.EvidenceStore(database) as store:
+        store.ingest(report(), "qa-style")
+    monkeypatch.setattr("sys.argv", [
+        str(PATH), "--db", str(database), "batch-transition", str(manifest),
+    ])
+
+    assert evidence.main() == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["applied"] == 1
+    with evidence.EvidenceStore(database) as store:
+        assert store.list_candidates()[0]["state"] == "rejected"
+
+
+def test_batch_transition_cli_rejects_oversized_manifest(tmp_path):
+    manifest = tmp_path / "batch.json"
+    manifest.write_bytes(b" " * (evidence.MAX_BATCH_MANIFEST_BYTES + 1))
+
+    with pytest.raises(ValueError, match="exceeds"):
+        evidence.load_batch_transition_manifest(manifest)
+
+
+@pytest.mark.parametrize(("raw_manifest", "duplicate_key"), [
+    (
+        '{"schema":1,"schema":1,"decisions":['
+        '{"candidate_key":"qa-candidate","from_state":"candidate",'
+        '"to_state":"rejected","reason":"Not portable."}]}',
+        "schema",
+    ),
+    (
+        '{"schema":1,"decisions":['
+        '{"candidate_key":"qa-candidate",'
+        '"candidate_key":"second-candidate","from_state":"candidate",'
+        '"to_state":"rejected","reason":"Not portable."}]}',
+        "candidate_key",
+    ),
+])
+def test_batch_transition_cli_rejects_duplicate_json_keys_cleanly(
+        tmp_path, raw_manifest, duplicate_key):
+    database = tmp_path / "evidence.db"
+    manifest = tmp_path / "batch.json"
+    manifest.write_text(raw_manifest, encoding="utf-8")
+    with evidence.EvidenceStore(database) as store:
+        store.ingest(report(), "qa-style")
+
+    result = subprocess.run([
+        sys.executable, str(PATH), "--db", str(database),
+        "batch-transition", str(manifest),
+    ], check=False, capture_output=True, text=True)
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr == (
+        f"error: duplicate JSON object key: {duplicate_key!r}\n")
+    with evidence.EvidenceStore(database) as store:
+        assert store.list_candidates()[0]["state"] == "candidate"
+        assert store.connection.execute(
+            "SELECT COUNT(*) FROM candidate_transitions").fetchone()[0] == 0
 
 
 def test_primary_evidence_must_include_revision(tmp_path):

@@ -5,6 +5,18 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github" / "workflows" / "reference-audit.yml"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+
+
+def test_ci_validates_source_only_release_contract_on_every_python_version():
+    text = CI_WORKFLOW.read_text(encoding="utf-8")
+
+    assert 'python-version: ["3.11", "3.12", "3.13", "3.14"]' in text
+    assert "python scripts/release_check.py --mode source-only" in text
+    assert "fetch-depth: 0" in text
+    assert '"$GITHUB_REF_TYPE" == "tag"' in text
+    assert '--tag "$GITHUB_REF_NAME" --require-annotated-tag' in text
+    assert text.index("Validate release contract") < text.index("Run tests")
 
 
 @pytest.fixture
@@ -136,9 +148,13 @@ def test_manual_candidate_decision_requires_authenticated_restored_state():
     for input_name in (
             "candidate_action:", "candidate_key:", "candidate_from_state:",
             "candidate_to_state:", "candidate_reason:",
-            "evidence_fingerprint:", "checklist_json:"):
+            "evidence_fingerprint:", "checklist_json:",
+            "candidate_batch_json:"):
         assert input_name in text
     assert '"$GITHUB_EVENT_NAME" != "workflow_dispatch"' in decision
+    assert '"$GITHUB_REF" != "refs/heads/master"' in decision
+    assert decision.index('"$GITHUB_REF" != "refs/heads/master"') < (
+        decision.index("command=("))
     assert 'state-bootstrap.txt)" != "restored"' in decision
     assert "authenticated-state.json" in decision
     assert "authenticated-provenance.json" in decision
@@ -150,7 +166,21 @@ def test_manual_candidate_decision_requires_authenticated_restored_state():
     assert "--reason \"$CANDIDATE_REASON\"" in decision
     assert "--evidence-fingerprint \"$EVIDENCE_FINGERPRINT\"" in decision
     assert "--checklist maintenance-output/candidate-checklist.json" in decision
+    assert "batch-transition maintenance-output/candidate-batch.json" in decision
+    assert "batch transitions cannot include single-candidate fields" in decision
+    assert "maintenance-output/candidate-batch.json" in text
     assert "--to-state promoted" not in decision
+
+
+def test_review_issue_synchronization_only_runs_from_master():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    start = text.index("- name: Synchronize the review issue")
+    end = text.index("- name: Fail after preserving maintenance evidence")
+    issue_sync = text[start:end]
+
+    assert "if: always() && github.ref == 'refs/heads/master'" in issue_sync
+    for mutation in ("gh issue edit", "gh issue create", "gh issue close"):
+        assert mutation in issue_sync
 
 
 def test_candidate_decision_continues_to_review_and_authenticated_persistence():
