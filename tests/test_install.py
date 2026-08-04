@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import fcntl
 import importlib.util
 import json
+import multiprocessing
 import os
 import shutil
 import subprocess
+import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -52,6 +56,26 @@ def load_installer():
 
 def installation_state(tmp_path: Path) -> Path:
     return tmp_path / "data" / "gentoo-zh-skills" / "skill-installations.json"
+
+
+def gated_installer_writer(env: dict[str, str], args: list[str], attempting,
+                           acquired, release) -> None:
+    os.environ.update(env)
+    installer = load_installer()
+    original_lock = installer.installation_mutation_lock
+
+    @contextmanager
+    def gated_lock():
+        attempting.set()
+        with original_lock():
+            acquired.set()
+            if not release.wait(timeout=10):
+                raise RuntimeError("installer writer release timed out")
+            yield
+
+    installer.installation_mutation_lock = gated_lock
+    sys.argv = [str(INSTALLER_MODULE), *args]
+    raise SystemExit(installer.main())
 
 
 def previous_bundle(tmp_path: Path, mode: str) -> tuple[dict[str, str], Path, str, str]:
@@ -200,6 +224,98 @@ def test_default_clients_share_official_agents_scope(tmp_path):
     assert status.stdout.count("link, current") == len(SKILL_NAMES)
 
 
+def test_concurrent_client_installers_serialize_state_transactions(tmp_path):
+    env = environment(tmp_path)
+    context = multiprocessing.get_context("fork")
+    first_acquired = context.Event()
+    second_acquired = context.Event()
+    first_attempting = context.Event()
+    second_attempting = context.Event()
+    release_first = context.Event()
+    release_second = context.Event()
+    release_second.set()
+    first = context.Process(
+        target=gated_installer_writer,
+        args=(env, ["codex", "--skills-only"], first_attempting,
+              first_acquired, release_first))
+    second = context.Process(
+        target=gated_installer_writer,
+        args=(env, ["claude", "--skills-only"], second_attempting,
+              second_acquired, release_second))
+    try:
+        first.start()
+        assert first_attempting.wait(timeout=10)
+        assert first_acquired.wait(timeout=10)
+        lock_path = (
+            tmp_path / "data" / "gentoo-zh-skills"
+            / ".skill-installations.json.lock")
+        descriptor = os.open(lock_path, os.O_RDWR)
+        try:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            os.close(descriptor)
+        second.start()
+        assert second_attempting.wait(timeout=10)
+        assert not second_acquired.wait(timeout=0.5)
+        release_first.set()
+        first.join(timeout=20)
+        second.join(timeout=20)
+    finally:
+        release_first.set()
+        for process in (first, second):
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
+
+    assert first.exitcode == 0
+    assert second.exitcode == 0
+    state = json.loads(installation_state(tmp_path).read_text(encoding="utf-8"))
+    assert {tuple(record["clients"]) for record in state["targets"]} == {
+        ("claude",), ("codex",),
+    }
+
+
+def test_partial_uninstall_refuses_shared_client_bundle(tmp_path):
+    env = environment(tmp_path)
+    env.pop("CODEX_HOME")
+    invoke(INSTALLER, ["codex", "opencode", "--skills-only"], env)
+    base = tmp_path / "home" / ".agents" / "skills"
+
+    result = invoke(
+        INSTALLER, ["codex", "--skills-only", "--uninstall"], env,
+        expected=1)
+
+    assert "refusing partial uninstall" in result.stderr
+    assert "shared with opencode" in result.stderr
+    for name in SKILL_NAMES:
+        assert (base / name).is_symlink()
+    state = json.loads(installation_state(tmp_path).read_text(encoding="utf-8"))
+    assert state["targets"][0]["clients"] == ["codex", "opencode"]
+
+    invoke(
+        INSTALLER,
+        ["codex", "opencode", "--skills-only", "--uninstall"], env)
+    assert not any((base / name).exists() for name in SKILL_NAMES)
+    state = json.loads(installation_state(tmp_path).read_text(encoding="utf-8"))
+    assert state["targets"] == []
+
+
+def test_installer_refuses_symlinked_mutation_lock(tmp_path):
+    env = environment(tmp_path)
+    lock_path = (
+        tmp_path / "data" / "gentoo-zh-skills"
+        / ".skill-installations.json.lock")
+    lock_path.parent.mkdir(parents=True)
+    lock_path.symlink_to(tmp_path / "unowned-lock-target")
+
+    result = invoke(
+        INSTALLER, ["codex", "--skills-only"], env, expected=2)
+
+    assert "cannot open managed installation lock" in result.stderr
+    assert lock_path.is_symlink()
+
+
 def test_all_clients_refuse_planned_opencode_duplicates_before_writes(tmp_path):
     env = environment(tmp_path)
     env.pop("CODEX_HOME")
@@ -274,6 +390,56 @@ def test_opencode_install_refuses_cross_directory_duplicates(tmp_path):
     assert "duplicate OpenCode skill" in result.stderr
     for name in SKILL_NAMES:
         assert not (tmp_path / "home" / ".agents" / "skills" / name).exists()
+
+
+def test_sequential_claude_install_refuses_managed_opencode_duplicate(tmp_path):
+    env = environment(tmp_path)
+    env.pop("CODEX_HOME")
+    invoke(INSTALLER, ["codex", "opencode", "--skills-only"], env)
+
+    result = invoke(INSTALLER, ["claude", "--skills-only"], env, expected=1)
+
+    assert "duplicate OpenCode skills" in result.stderr
+    assert not (tmp_path / "claude" / "skills").exists()
+
+
+def test_all_clients_can_use_claude_compatibility_disabled(tmp_path):
+    env = environment(tmp_path)
+    env.pop("CODEX_HOME")
+    env["OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"] = "1"
+
+    invoke(
+        INSTALLER,
+        ["codex", "claude", "opencode", "--skills-only"], env)
+
+    for name in SKILL_NAMES:
+        assert (tmp_path / "home" / ".agents" / "skills" / name).is_symlink()
+        assert (tmp_path / "claude" / "skills" / name).is_symlink()
+
+
+def test_status_reports_cross_transaction_opencode_duplicates(tmp_path):
+    env = environment(tmp_path)
+    env.pop("CODEX_HOME")
+    invoke(INSTALLER, ["codex", "opencode", "--skills-only"], env)
+    env["OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"] = "1"
+    invoke(INSTALLER, ["claude", "--skills-only"], env)
+    env.pop("OPENCODE_DISABLE_CLAUDE_CODE_SKILLS")
+
+    result = invoke(INSTALLER, ["--skills-only", "--status"], env, expected=1)
+
+    assert "duplicate OpenCode skills are discoverable" in result.stderr
+
+
+def test_status_uses_recorded_codex_profile_after_environment_changes(tmp_path):
+    env = environment(tmp_path)
+    invoke(INSTALLER, ["codex", "--skills-only"], env)
+    env.pop("CODEX_HOME")
+
+    result = invoke(
+        INSTALLER, ["codex", "--skills-only", "--status"], env)
+
+    assert str(tmp_path / "codex" / "skills") in result.stdout
+    assert str(tmp_path / "home" / ".agents" / "skills") not in result.stdout
 
 
 def test_copy_status_refresh_and_uninstall(tmp_path):

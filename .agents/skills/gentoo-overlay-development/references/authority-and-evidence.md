@@ -3,6 +3,14 @@
 Use evidence according to the claim it supports. Do not use familiarity, a generated
 checklist, or a neighboring package as a substitute for a current source.
 
+## Contents
+
+- [Authority Order](#authority-order)
+- [Evidence Record](#evidence-record)
+- [Upstream and Ecosystem Discovery](#upstream-and-ecosystem-discovery)
+- [Conflict Handling](#conflict-handling)
+- [Registered Official Sources](#registered-official-sources)
+
 ## Authority Order
 
 1. Use the target repository's live policy, workflows, templates, and repository-owned
@@ -38,6 +46,27 @@ For every non-obvious decision, record:
 
 Read the complete relevant section and inspect later corrections before relying on an old
 commit. A fingerprint or successful download proves neither meaning nor provenance.
+
+## Upstream and Ecosystem Discovery
+
+1. Establish the canonical project identity from its current owned website, source
+   repository, release records, and package metadata. Treat search results, mirrors,
+   distribution packages, and version trackers as discovery leads.
+2. Resolve the exact release identifier, immutable tag or commit, source archive, build
+   metadata, dependency lockfiles, generated bundles, binary artifacts, signatures,
+   notices, and license texts affected by the change.
+3. Compare the current and target release records. Do not infer a renamed project,
+   repository transfer, tag prefix, artifact host, ecosystem package, or build-system
+   change from a version string alone.
+4. Use ecosystem registries and lockfiles for the facts they own. Confirm that their
+   package identity and release correspond to the canonical upstream release before using
+   them as package evidence.
+5. Treat `latest` endpoints, tracker output, issue text, and generated summaries as
+   mutable observations. Re-resolve them to immutable release evidence before a write.
+
+Record unresolved identities and conflicting release records as stop conditions. An
+upstream project defines its own release and files; it does not define Gentoo dependency
+classes, keyword policy, repository workflow, or publication authority.
 
 ## Conflict Handling
 

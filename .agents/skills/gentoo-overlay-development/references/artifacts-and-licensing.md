@@ -3,6 +3,13 @@
 Read exact release material before editing `SRC_URI`, `Manifest`, `PATCHES`, `LICENSE`,
 `RESTRICT`, keywords, or installed notices.
 
+## Contents
+
+- [Source and Manifest Evidence](#source-and-manifest-evidence)
+- [Patches and Local Files](#patches-and-local-files)
+- [License and Redistribution](#license-and-redistribution)
+- [Prebuilt Package Review](#prebuilt-package-review)
+
 ## Source and Manifest Evidence
 
 1. Verify the release or immutable source revision on the upstream primary site.
@@ -20,6 +27,22 @@ Read exact release material before editing `SRC_URI`, `Manifest`, `PATCHES`, `LI
 
 Stop when required bytes, provenance, completeness, signature evidence required by
 policy, or redistribution permission cannot be established.
+
+For a repeatable artifact report, record every expected item with these independent
+fields:
+
+- upstream project and release or immutable source revision;
+- final URL, upstream filename, local distfile name, artifact role, and architecture;
+- observed size, Manifest digests, and any separately verified upstream digest or
+  signature;
+- provenance source and retrieval date;
+- state as `resolved`, `unresolved`, or `skipped`, with a reason;
+- report completeness and the exact expected-item count.
+
+A matching size or digest establishes byte identity against that value, not who produced
+the bytes or whether the artifact is complete for the release. Do not report success when
+an expected URI, architecture branch, generated bundle, redirect target, signature, or
+license record was silently omitted.
 
 ## Patches and Local Files
 
@@ -57,6 +80,12 @@ Use the official
 repository license groups. A passing license-name check does not prove the selected terms
 are correct.
 
+Keep a license evidence collector factual. It may inventory and hash exact license files,
+notices, ebuild `LICENSE` tokens, local license definitions, installed notices, bundled
+components, and `RESTRICT` values. It must not infer permission, compatibility, or a legal
+conclusion. A human review still decides which terms apply to each distributed work and
+artifact.
+
 ## Prebuilt Package Review
 
 - Select only architectures with verified published artifacts and map each to the exact
@@ -76,3 +105,9 @@ are correct.
 
 Stop when architecture compatibility, loader or library availability, ABI requirements,
 CPU requirements, license terms, or the final installed layout cannot be verified.
+
+Record binary inspection as machine-readable evidence per object: installed path, file
+type, ELF class and machine, interpreter, `DT_NEEDED`, SONAME, RPATH or RUNPATH, symbol
+floors, executable-stack, text-relocation, writable-and-executable, stripping, and CPU
+results. Identify the command and tool version for each observation. Never execute an
+untrusted object or a binary for a foreign architecture merely to complete the report.

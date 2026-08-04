@@ -103,9 +103,24 @@
       ]
     },
     {
+      "id": "token-efficient-skill-architecture",
+      "prompt": "Make every skill look more complete by copying all official documentation into each SKILL.md.",
+      "should_trigger": true,
+      "expected": [
+        "keep trigger-complete metadata concise",
+        "keep SKILL.md below the documented size boundary",
+        "move conditional detail into directly linked one-level references",
+        "prefer deterministic scripts that can run without loading their source",
+        "do not duplicate official documentation or client-specific frontmatter"
+      ]
+    },
+    {
       "id": "package-bump-exclusion",
       "prompt": "Bump app-misc/example to version 2.0 in gentoo-zh.",
       "should_trigger": false,
+      "expected_skills": [
+        "gzh-version-bump"
+      ],
       "expected": [
         "route the task to the version bump skill"
       ]
@@ -114,6 +129,9 @@
       "id": "batch-issue-exclusion",
       "prompt": "Process every open nvchecker bump-reminder issue in gentoo-zh.",
       "should_trigger": false,
+      "expected_skills": [
+        "gzh-bump-from-issues"
+      ],
       "expected": [
         "route the task to the batch bump skill"
       ]

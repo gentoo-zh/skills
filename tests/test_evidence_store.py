@@ -102,10 +102,117 @@ def test_ingest_is_idempotent_and_keeps_full_payload(tmp_path):
         assert first["candidates_ingested"] == 1
         assert second["observations_ingested"] == 0
         assert second["candidates_ingested"] == 0
+        assert first["review"]["status"] == "review-required"
+        assert first["review"] == second["review"]
         stored = store.connection.execute(
             "SELECT report_json, report_sha256 FROM runs").fetchone()
         assert json.loads(stored["report_json"]) == original
         assert stored["report_sha256"] == evidence.sha256_json(original)
+
+
+def test_review_status_is_deterministic_and_clears_only_after_resolution(tmp_path):
+    with evidence.EvidenceStore(tmp_path / "evidence.db") as store:
+        store.ingest(report(), "qa-style")
+
+        first = store.review_status()
+        second = store.review_status()
+
+        assert first == second
+        assert first["status"] == "review-required"
+        assert first["review_required"] is True
+        assert first["counts"] == {
+            "candidate": 1,
+            "reviewed": 0,
+            "promoted": 0,
+            "rejected": 0,
+            "open": 1,
+            "total": 1,
+        }
+        assert first["summary_complete"] is True
+        assert first["candidates_emitted"] == 1
+        assert first["candidates_omitted"] == 0
+        assert first["candidates"] == [{
+            "candidate_key": "qa-candidate",
+            "state": "candidate",
+            "topic": "qa",
+            "scope": "example-overlay",
+            "summary": "A change that still requires primary confirmation.",
+            "source_id": f"candidate-history:{'a' * 40}",
+            "source_url": "https://example.invalid/overlay",
+            "source_revision": "a" * 40,
+            "policy_status": "not-established",
+        }]
+        markdown = evidence.render_review_markdown(first)
+        assert "- Status: `review-required`" in markdown
+        assert "A change that still requires primary confirmation." in markdown
+
+        store.transition(
+            "qa-candidate", "candidate", "rejected",
+            "Primary evidence does not support this candidate.")
+        resolved = store.review_status()
+
+        assert resolved["status"] == "current"
+        assert resolved["review_required"] is False
+        assert resolved["counts"]["rejected"] == 1
+        assert resolved["candidates"] == []
+
+
+def test_review_summary_is_bounded_and_escapes_external_markdown(tmp_path):
+    data = report()
+    data["candidates"][0]["summary"] = (
+        "@maintainer | <script> [link](https://example.invalid) `code` "
+        + "x" * 400)
+    with evidence.EvidenceStore(tmp_path / "evidence.db") as store:
+        store.ingest(data, "qa-style")
+        review = store.review_status()
+
+    assert len(review["candidates"][0]["summary"]) == 240
+    markdown = evidence.render_review_markdown(review)
+    assert "&#64;maintainer" in markdown
+    assert "&#124;" in markdown
+    assert "&lt;script&gt;" in markdown
+    assert "&#91;link&#93;&#40;https://example.invalid&#41;" in markdown
+    assert "&#96;code&#96;" in markdown
+    assert "@maintainer" not in markdown
+
+
+def test_review_markdown_strips_control_and_directional_characters(tmp_path):
+    with evidence.EvidenceStore(tmp_path / "evidence.db") as store:
+        store.ingest(report(), "qa-style")
+        review = store.review_status()
+
+    controls = "".join(chr(value) for value in (
+        *range(0x20), *range(0x7f, 0xa0)))
+    directional = "".join(sorted(evidence.BIDI_CONTROL_CHARACTERS))
+    for field in (
+            "candidate_key", "state", "topic", "scope", "source_revision",
+            "summary"):
+        review["candidates"][0][field] += controls + directional + "visible"
+
+    markdown = evidence.render_review_markdown(review)
+    candidate_line = next(
+        line for line in markdown.splitlines() if "visible" in line)
+
+    assert all(character not in candidate_line for character in controls)
+    assert all(character not in candidate_line for character in directional)
+    assert candidate_line.count("visible") == 6
+
+
+def test_review_summary_reports_deterministic_omissions(tmp_path, monkeypatch):
+    first = report()
+    second = report()
+    second["generated_at"] = "2026-08-05T00:00:00Z"
+    second["candidates"][0]["candidate_key"] = "zz-candidate"
+    monkeypatch.setattr(evidence, "MAX_REVIEW_SUMMARY_CANDIDATES", 1)
+    with evidence.EvidenceStore(tmp_path / "evidence.db") as store:
+        store.ingest(first, "qa-style")
+        store.ingest(second, "qa-style")
+        review = store.review_status()
+
+    assert review["summary_complete"] is False
+    assert review["candidates_emitted"] == 1
+    assert review["candidates_omitted"] == 1
+    assert review["candidates"][0]["candidate_key"] == "qa-candidate"
 
 
 def test_candidate_cannot_skip_review_or_use_secondary_observation(tmp_path):

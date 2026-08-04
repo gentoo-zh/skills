@@ -91,6 +91,8 @@ def test_apply_filters_by_maintainer_and_pkg():
 import json
 import subprocess
 
+import pytest
+
 from gzh.bump_issues import build_query, get_issue_updated_at, run_bump_issues
 
 
@@ -282,8 +284,14 @@ def test_run_bump_issues_paginates_to_requested_limit():
         queries.append(query)
         response = _resp()
         issues = response["data"]["repository"]["issues"]
+        issues["totalCount"] = 101
         if len(queries) == 1:
-            issues["nodes"] = issues["nodes"] * 100
+            template = issues["nodes"][0]
+            issues["nodes"] = [
+                {**template, "number": number,
+                 "url": f"https://github.com/Gentoo-zh/gentoo-zh/issues/{number}"}
+                for number in range(1, 101)
+            ]
             issues["pageInfo"] = {"hasNextPage": True, "endCursor": "next"}
         return subprocess.CompletedProcess(args, 0, json.dumps(response), "")
 
@@ -389,3 +397,362 @@ def test_cli_no_output_skips_file(tmp_path, monkeypatch):
         lambda **kw: {"ok": True, "results": [], "skipped": 0, "exit_code": 0})
     CliRunner().invoke(cli_mod.cli, ["bump-issues", "--no-output"])
     assert not (tmp_path / "queues").exists()
+
+
+def _selector_node(number, cat_pkg="app-misc/example", version="2.0",
+                   revision="2026-08-04T01:00:00Z", comments=None):
+    if comments is None:
+        comments = []
+    return {
+        "number": number,
+        "title": f"[nvchecker] {cat_pkg} can be bump to {version}",
+        "body": "oldver: 1.0\nCC: @maintainer",
+        "state": "OPEN",
+        "updatedAt": revision,
+        "url": f"https://github.com/gentoo-zh/overlay/issues/{number}",
+        "author": {"login": "gentoo-zh-bot"},
+        "labels": {
+            "totalCount": 1,
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
+            "nodes": [{"name": "nvchecker"}],
+        },
+        "comments": {
+            "totalCount": len(comments),
+            "pageInfo": {"hasNextPage": False, "endCursor": None},
+            "nodes": comments,
+        },
+    }
+
+
+def _selector_comment(body, revision="2026-08-04T01:00:00Z",
+                      author="gentoo-zh-autobump[bot]", comment_id="IC_1"):
+    return {
+        "id": comment_id,
+        "url": f"https://github.com/gentoo-zh/overlay/issues/1#issuecomment-{comment_id}",
+        "author": {"login": author},
+        "body": body,
+        "createdAt": revision,
+        "updatedAt": revision,
+    }
+
+
+def _manual_status(cat_pkg="app-misc/example", version="2.0"):
+    return (
+        f"**autobump** can't bump `{cat_pkg}` \u2192 `{version}` mechanically: "
+        "**payload layout changed**. Needs a manual bump.\n"
+        "\u2014 `autobump` enabled\n\n<!-- autobump-status -->"
+    )
+
+
+def _config_loader(content):
+    def load(remote_name, path, runner):
+        assert remote_name == "canonical"
+        assert path == ".github/workflows/overlay.toml"
+        return {
+            "remote_name": remote_name,
+            "remote_url": "git@github.com:gentoo-zh/overlay.git",
+            "base_oid": "a" * 40,
+            "config_path": path,
+            "content": content,
+            "fetched": True,
+        }
+    return load
+
+
+def _selector_runner(nodes, total_count=None, explicit=None):
+    explicit = explicit or {}
+    total_count = len(nodes) if total_count is None else total_count
+
+    def fake_run(args, **kwargs):
+        if args[:3] == ["gh", "auth", "status"]:
+            return subprocess.CompletedProcess(args, 0, "", "")
+        query = args[4]
+        if "issue(number:" in query:
+            number = int(query.split("issue(number:", 1)[1].split(")", 1)[0])
+            response = {"data": {"repository": {"issue": explicit.get(number)}}}
+        else:
+            response = {"data": {"repository": {"issues": {
+                "totalCount": total_count,
+                "pageInfo": {"hasNextPage": total_count > len(nodes),
+                             "endCursor": "more" if total_count > len(nodes) else None},
+                "nodes": nodes,
+            }}}}
+        return subprocess.CompletedProcess(args, 0, json.dumps(response), "")
+    return fake_run
+
+
+def _run_selector(selector, config, nodes, **kwargs):
+    return run_bump_issues(
+        autobump=selector,
+        canonical_remote="canonical",
+        canonical_loader=_config_loader(config),
+        runner=_selector_runner(nodes, kwargs.pop("total_count", None),
+                                kwargs.pop("explicit", None)),
+        **kwargs,
+    )
+
+
+def test_autobump_off_selects_absent_key_and_records_exact_entry():
+    node = _selector_node(1)
+    result = _run_selector(
+        "off", '["app-misc/example"]\nsource = "github"\n', [node])
+    assert result["selected_count"] == 1
+    evidence = result["results"][0]["config_evidence"]
+    assert evidence["state"] == "off"
+    assert evidence["reason"] == "autobump-key-absent"
+    assert evidence["entry"] == {"source": "github"}
+    assert len(evidence["sha256"]) == 64
+
+
+def test_autobump_true_and_false_are_typed():
+    node = _selector_node(1)
+    enabled = _run_selector(
+        "on", '["app-misc/example"]\nautobump = true\n', [node])
+    disabled = _run_selector(
+        "off", '["app-misc/example"]\nautobump = false\n', [node])
+    assert enabled["results"][0]["config_evidence"]["state"] == "on"
+    assert enabled["results"][0]["selection_reason"] == "selector:autobump-on"
+    assert disabled["results"][0]["config_evidence"]["state"] == "off"
+    assert disabled["results"][0]["config_evidence"]["autobump"] is False
+
+
+def test_missing_package_entry_is_unknown_and_not_selected():
+    result = _run_selector(
+        "off", '["app-misc/other"]\nautobump = false\n',
+        [_selector_node(1)])
+    assert result["results"] == []
+    candidate = result["candidates"][0]
+    assert candidate["config_evidence"]["state"] == "unknown"
+    assert candidate["selection_reason"] == "selector-evidence-unknown"
+
+
+def test_manual_required_accepts_only_current_repository_status():
+    revision = "2026-08-04T01:00:00Z"
+    comment = _selector_comment(_manual_status(), revision=revision)
+    result = _run_selector(
+        "manual-required", '["app-misc/example"]\nautobump = true\n',
+        [_selector_node(1, revision=revision, comments=[comment])])
+    item = result["results"][0]
+    assert item["status_evidence"]["state"] == "manual-required"
+    assert item["status_evidence"]["revision"] == revision
+    assert len(item["status_evidence"]["body_sha256"]) == 64
+    assert item["selection_reason"] == "selector:manual-required"
+
+
+def test_manual_required_rejects_stale_status_with_explicit_evidence():
+    comment = _selector_comment(
+        _manual_status(), revision="2026-08-04T00:59:00Z")
+    result = _run_selector(
+        "manual-required", '["app-misc/example"]\nautobump = true\n',
+        [_selector_node(1, comments=[comment])])
+    assert result["results"] == []
+    status = result["candidates"][0]["status_evidence"]
+    assert status["state"] == "unknown"
+    assert status["reason"] == "status-revision-stale"
+    assert status["comment_id"] == "IC_1"
+
+
+def test_manual_required_rejects_lookalike_author_and_body():
+    untrusted = _selector_comment(_manual_status(), author="lookalike[bot]")
+    malformed = _selector_comment(
+        _manual_status().replace("Needs a manual bump.", "manual bump needed."),
+        comment_id="IC_2")
+    for comment, reason in ((untrusted, "status-author-mismatch"),
+                            (malformed, "status-body-not-current-protocol")):
+        result = _run_selector(
+            "manual-required", '["app-misc/example"]\nautobump = true\n',
+            [_selector_node(1, comments=[comment])])
+        assert result["results"] == []
+        assert result["candidates"][0]["status_evidence"]["reason"] == reason
+
+
+def test_manual_required_rejects_incomplete_comment_pagination():
+    node = _selector_node(1, comments=[_selector_comment(_manual_status())])
+    node["comments"]["totalCount"] = 2
+    result = _run_selector(
+        "manual-required", '["app-misc/example"]\nautobump = true\n', [node])
+    assert result["results"] == []
+    candidate = result["candidates"][0]
+    assert candidate["comments_complete"] is False
+    assert candidate["status_evidence"]["reason"] == "comment-count-mismatch"
+
+
+def test_manual_required_rejects_ambiguous_marked_comments():
+    comments = [
+        _selector_comment(_manual_status(), comment_id="IC_1"),
+        _selector_comment(_manual_status(), comment_id="IC_2"),
+    ]
+    result = _run_selector(
+        "manual-required", '["app-misc/example"]\nautobump = true\n',
+        [_selector_node(1, comments=comments)])
+    assert result["results"] == []
+    status = result["candidates"][0]["status_evidence"]
+    assert status["reason"] == "ambiguous-status-comments"
+    assert len(status["candidates"]) == 2
+
+
+def test_explicit_issue_outside_queue_is_or_included_with_complete_comments():
+    queued = _selector_node(1, cat_pkg="app-misc/queued")
+    explicit_node = _selector_node(
+        2, cat_pkg="app-misc/explicit",
+        comments=[_selector_comment("ordinary comment", comment_id="IC_2")])
+    config = (
+        '["app-misc/queued"]\nautobump = true\n'
+        '["app-misc/explicit"]\nautobump = true\n'
+    )
+    result = _run_selector(
+        "off", config, [queued], issues=[2], explicit={2: explicit_node})
+    assert result["total_count"] == 1
+    assert result["fetched_count"] == 2
+    assert result["selected_count"] == 1
+    item = result["results"][0]
+    assert item["issue"] == 2
+    assert item["comments_complete"] is True
+    assert item["comments"][0]["body"] == "ordinary comment"
+    assert item["selection_reason"] == "explicit-issue"
+    assert result["selected"] == [{
+        "issue": 2,
+        "cat_pkg": "app-misc/explicit",
+        "selection_reason": "explicit-issue",
+        "selection_reasons": ["explicit-issue"],
+    }]
+
+
+def test_explicit_issue_fails_closed_on_incomplete_comments():
+    explicit_node = _selector_node(
+        2, comments=[_selector_comment("ordinary comment", comment_id="IC_2")])
+    explicit_node["comments"]["totalCount"] = 2
+    result = _run_selector(
+        "any", '["app-misc/example"]\nautobump = true\n', [],
+        issues=[2], explicit={2: explicit_node})
+    assert result["ok"] is False
+    assert "comments are incomplete" in result["error"]
+
+
+def test_explicit_issue_requires_complete_nvchecker_label_evidence():
+    missing_label = _selector_node(2)
+    missing_label["labels"] = {
+        "totalCount": 1,
+        "pageInfo": {"hasNextPage": False, "endCursor": None},
+        "nodes": [{"name": "unrelated"}],
+    }
+    result = _run_selector(
+        "any", '["app-misc/example"]\nautobump = true\n', [],
+        issues=[2], explicit={2: missing_label})
+    assert result["ok"] is False
+    assert "does not have the nvchecker label" in result["error"]
+
+    truncated = _selector_node(2)
+    truncated["labels"]["totalCount"] = 2
+    result = _run_selector(
+        "any", '["app-misc/example"]\nautobump = true\n', [],
+        issues=[2], explicit={2: truncated})
+    assert result["ok"] is False
+    assert "label evidence is incomplete" in result["error"]
+
+
+def test_non_any_selector_requires_complete_canonical_evidence():
+    result = run_bump_issues(
+        autobump="on", runner=_selector_runner([_selector_node(1)]))
+    assert result["ok"] is False
+    assert "explicit canonical remote" in result["error"]
+
+
+def test_snapshot_reconstruction_uses_stored_selection_without_body_parsing():
+    result = _run_selector(
+        "on", '["app-misc/example"]\nautobump = true\n',
+        [_selector_node(1)])
+    result.pop("exit_code")
+    from gzh.bump_issues import reconstruct_selected_results
+    reconstructed = reconstruct_selected_results(result)
+    assert reconstructed == result["results"]
+    reconstructed[0]["body"] = "changed"
+    assert result["results"][0]["body"] != "changed"
+
+    broken = json.loads(json.dumps(result))
+    broken["selected_count"] = 0
+    try:
+        reconstruct_selected_results(broken)
+    except ValueError as exc:
+        assert "counts" in str(exc)
+    else:
+        raise AssertionError("expected inconsistent snapshot to fail")
+
+
+def test_graphql_queries_request_stable_comment_evidence():
+    query = build_query("gentoo-zh", "overlay", "OPEN", 10, True)
+    assert "id url author{login} body createdAt updatedAt" in query
+    assert "labels(first:100){totalCount pageInfo{hasNextPage endCursor}" in query
+
+
+def test_default_config_loader_reads_the_explicit_fetched_oid():
+    from gzh.bump_issues import load_canonical_config
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        if args[:3] == ["git", "remote", "get-url"]:
+            stdout = "git@github.com:gentoo-zh/overlay.git\n"
+        elif args[:3] == ["git", "fetch", "--quiet"]:
+            stdout = ""
+        elif args[:3] == ["git", "rev-parse", "--verify"]:
+            stdout = "b" * 40 + "\n"
+        elif args[:2] == ["git", "show"]:
+            stdout = b'["app-misc/example"]\nautobump = true\n'
+        else:
+            raise AssertionError(args)
+        return subprocess.CompletedProcess(args, 0, stdout, "")
+
+    loaded = load_canonical_config("canonical", runner=fake_run)
+    assert loaded["base_oid"] == "b" * 40
+    assert loaded["content"].endswith(b"autobump = true\n")
+    assert calls[1][0] == [
+        "git", "fetch", "--quiet", "canonical",
+        "+refs/heads/master:refs/remotes/canonical/master",
+    ]
+    assert calls[-1][0] == [
+        "git", "show",
+        f"{'b' * 40}:.github/workflows/overlay.toml",
+    ]
+
+
+def test_config_loader_binds_every_git_query_to_the_overlay_root(tmp_path):
+    from gzh.bump_issues import load_canonical_config
+    calls = []
+
+    def fake_run(args, **_kwargs):
+        calls.append(args)
+        operation = args[3]
+        if operation == "remote":
+            stdout = "git@github.com:gentoo-zh/overlay.git\n"
+        elif operation == "fetch":
+            stdout = ""
+        elif operation == "rev-parse":
+            stdout = "b" * 40 + "\n"
+        elif operation == "show":
+            stdout = b'["app-misc/example"]\nautobump = true\n'
+        else:
+            raise AssertionError(args)
+        return subprocess.CompletedProcess(args, 0, stdout, "")
+
+    load_canonical_config("canonical", runner=fake_run, cwd=tmp_path)
+
+    assert all(command[:3] == ["git", "-C", str(tmp_path)]
+               for command in calls)
+
+
+def test_config_loader_rejects_noncanonical_url_before_fetch():
+    from gzh.bump_issues import load_canonical_config
+    calls = []
+
+    def fake_run(args, **_kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(
+            args, 0, "git@github.com:someone/fork.git\n", "")
+
+    with pytest.raises(RuntimeError, match="does not match"):
+        load_canonical_config(
+            "upstream", runner=fake_run,
+            expected_repository="gentoo-zh/overlay")
+
+    assert calls == [["git", "remote", "get-url", "upstream"]]

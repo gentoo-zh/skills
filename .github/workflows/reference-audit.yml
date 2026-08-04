@@ -2,6 +2,44 @@ name: Maintenance cycle
 
 on:
   workflow_dispatch:
+    inputs:
+      initial_cursor:
+        description: Reviewed gentoo-zh/overlay commit used only to seed missing state
+        required: false
+        type: string
+      candidate_action:
+        description: Reviewed action applied only to restored authenticated state
+        required: false
+        default: none
+        type: choice
+        options:
+          - none
+          - transition
+          - link-evidence
+      candidate_key:
+        description: Exact candidate key for the reviewed action
+        required: false
+        type: string
+      candidate_from_state:
+        description: Expected current state for a transition
+        required: false
+        type: string
+      candidate_to_state:
+        description: Requested state for a transition
+        required: false
+        type: string
+      candidate_reason:
+        description: Reviewed reason stored with the decision
+        required: false
+        type: string
+      evidence_fingerprint:
+        description: Stored evidence fingerprint for linking or promotion
+        required: false
+        type: string
+      checklist_json:
+        description: Optional promotion checklist encoded as one JSON object
+        required: false
+        type: string
   schedule:
     - cron: "17 3 * * 1"
 
@@ -21,7 +59,16 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: master
+          ref: ${{ github.sha }}
+      - name: Verify triggered checkout identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          checked_out_sha="$(git rev-parse HEAD)"
+          if [[ "$checked_out_sha" != "$GITHUB_SHA" ]]; then
+            echo "checked-out revision does not match the workflow trigger" >&2
+            exit 1
+          fi
       - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
@@ -30,6 +77,8 @@ jobs:
       - name: Restore authenticated maintenance state
         env:
           GH_TOKEN: ${{ github.token }}
+          REVIEWED_SEED: ${{ inputs.initial_cursor || '' }}
+          CANDIDATE_ACTION: ${{ inputs.candidate_action || 'none' }}
         shell: bash
         run: |
           set +e
@@ -41,6 +90,13 @@ jobs:
             state_db="maintenance-output/maintenance-state.db"
             artifact_json="maintenance-output/artifacts.json"
             gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=skill-maintenance-state&per_page=100" > "$artifact_json"
+            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/reference-audit.yml/runs?branch=master&per_page=100" > maintenance-output/workflow-runs.json
+            prior_runs="$(jq --argjson current_run_id "$GITHUB_RUN_ID" '[.workflow_runs[] | select(
+                  .id != $current_run_id
+                  and .status == "completed"
+                  and (.conclusion == "success" or .conclusion == "failure")
+                  and (.event == "schedule" or .event == "workflow_dispatch")
+                )] | length' maintenance-output/workflow-runs.json)"
             mapfile -t candidates < <(
               jq -r '.artifacts
                 | map(select(.expired == false))
@@ -91,8 +147,8 @@ jobs:
                       echo "state artifact has an unexpected file set" >&2
                       exit 1
                     fi
-                    python .agents/skills/gzh-maintain-skills/scripts/state_bundle.py verify --database "$candidate_dir/maintenance-state.db" --manifest "$candidate_dir/maintenance-state.manifest.json"
-                    python .agents/skills/gzh-maintain-skills/scripts/state_bundle.py verify-provenance --manifest "$candidate_dir/maintenance-state.manifest.json" --run-record maintenance-output/candidate-run.json --job-record maintenance-output/candidate-job.json --repository "$GITHUB_REPOSITORY" --workflow "$workflow_path" --branch master
+                    python .agents/skills/gzh-maintain-skills/scripts/state_bundle.py verify --database "$candidate_dir/maintenance-state.db" --manifest "$candidate_dir/maintenance-state.manifest.json" > maintenance-output/authenticated-state.json
+                    python .agents/skills/gzh-maintain-skills/scripts/state_bundle.py verify-provenance --manifest "$candidate_dir/maintenance-state.manifest.json" --run-record maintenance-output/candidate-run.json --job-record maintenance-output/candidate-job.json --repository "$GITHUB_REPOSITORY" --workflow "$workflow_path" --branch master > maintenance-output/authenticated-provenance.json
                   ); then
                     selected_artifact="$artifact_id"
                     cp maintenance-output/candidate-run.json maintenance-output/authenticated-run.json
@@ -101,30 +157,47 @@ jobs:
                     break
                   fi
                   echo "eligible state artifact ${artifact_id} failed content verification" >&2
+                  exit 1
                 fi
               fi
             done
 
+            restored=false
+            stored_cursor=""
             if [[ -n "$selected_artifact" ]]; then
-              printf 'false\n' > maintenance-output/state-bootstrap.txt
+              restored=true
+              python .agents/skills/gzh-maintain-skills/scripts/evidence_store.py --db "$state_db" latest-cursor --adapter-id gentoo-zh --canonical-repository gentoo-zh/overlay > maintenance-output/cursor.json
+              stored_cursor="$(jq -r '.revision // empty' maintenance-output/cursor.json)"
             elif (( eligible_candidates > 0 )); then
               echo "no eligible state artifact passed content verification" >&2
               exit 1
-            else
-              python .agents/skills/gzh-maintain-skills/scripts/evidence_store.py --db "$state_db" init
-              printf 'true\n' > maintenance-output/state-bootstrap.txt
             fi
 
-            python .agents/skills/gzh-maintain-skills/scripts/evidence_store.py --db "$state_db" latest-cursor --adapter-id gentoo-zh --canonical-repository gentoo-zh/overlay > maintenance-output/cursor.json
-            cursor="$(jq -r '.revision // empty' maintenance-output/cursor.json)"
-            if [[ -z "$cursor" ]]; then
-              cursor="$(python .agents/skills/gentoo-overlay-development/scripts/source_manager.py resolve-git-ref --url https://github.com/gentoo-zh/overlay.git --ref refs/heads/master)"
-              printf 'true\n' > maintenance-output/state-bootstrap.txt
+            decision=(
+              python .agents/skills/gzh-maintain-skills/scripts/state_bundle.py
+              restore-decision --prior-runs "$prior_runs" --event "$GITHUB_EVENT_NAME"
+            )
+            if [[ "$restored" == "true" ]]; then
+              decision+=(--restored)
             fi
-            if [[ ! "$cursor" =~ ^[0-9a-f]{40}$ ]]; then
-              echo "overlay cursor is not an immutable commit ID" >&2
+            if [[ -n "$REVIEWED_SEED" ]]; then
+              decision+=(--reviewed-seed "$REVIEWED_SEED")
+            fi
+            if [[ -n "$stored_cursor" ]]; then
+              decision+=(--stored-cursor "$stored_cursor")
+            fi
+            "${decision[@]}" > maintenance-output/state-restore-decision.json
+            cursor="$(jq -r '.cursor' maintenance-output/state-restore-decision.json)"
+            mode="$(jq -r '.mode' maintenance-output/state-restore-decision.json)"
+            if [[ "$CANDIDATE_ACTION" != "none" && "$mode" != "restored" ]]; then
+              echo "candidate decisions require existing authenticated state with an established cursor" >&2
               exit 1
             fi
+            if [[ "$(jq -r '.initialize' maintenance-output/state-restore-decision.json)" == "true" ]]; then
+              python .agents/skills/gzh-maintain-skills/scripts/evidence_store.py --db "$state_db" init
+            fi
+            printf '%s\n' "$mode" > maintenance-output/state-bootstrap.txt
+            printf '%s\n' "$REVIEWED_SEED" > maintenance-output/reviewed-seed.txt
             printf '%s\n' "$cursor" > maintenance-output/after-revision.txt
           ) > maintenance-output/state-restore.log 2>&1
           status=$?
@@ -142,11 +215,105 @@ jobs:
           fi
           cat maintenance-output/state-restore.log
           exit 0
+      - name: Apply reviewed candidate decision
+        env:
+          CANDIDATE_ACTION: ${{ inputs.candidate_action || 'none' }}
+          CANDIDATE_KEY: ${{ inputs.candidate_key || '' }}
+          CANDIDATE_FROM_STATE: ${{ inputs.candidate_from_state || '' }}
+          CANDIDATE_TO_STATE: ${{ inputs.candidate_to_state || '' }}
+          CANDIDATE_REASON: ${{ inputs.candidate_reason || '' }}
+          EVIDENCE_FINGERPRINT: ${{ inputs.evidence_fingerprint || '' }}
+          CHECKLIST_JSON: ${{ inputs.checklist_json || '' }}
+        shell: bash
+        run: |
+          set +e
+          (
+            set -euo pipefail
+            if [[ "$CANDIDATE_ACTION" == "none" ]]; then
+              if [[ -n "$CANDIDATE_KEY$CANDIDATE_FROM_STATE$CANDIDATE_TO_STATE$CANDIDATE_REASON$EVIDENCE_FINGERPRINT$CHECKLIST_JSON" ]]; then
+                echo "candidate decision fields require an explicit candidate action" >&2
+                exit 1
+              fi
+              jq -n --arg actor "$GITHUB_ACTOR" --arg action "$CANDIDATE_ACTION" '{schema: 1, status: "not-requested", changed: false, actor: $actor, action: $action}' > maintenance-output/candidate-decision.json
+              exit 0
+            fi
+            if [[ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]]; then
+              echo "candidate decisions require an authenticated workflow_dispatch event" >&2
+              exit 1
+            fi
+            if [[ "$(cat maintenance-output/state.status 2>/dev/null || printf 1)" != "0" ]]; then
+              echo "candidate decisions require successful authenticated state restoration" >&2
+              exit 1
+            fi
+            if [[ "$(cat maintenance-output/state-bootstrap.txt)" != "restored" ]]; then
+              echo "candidate decisions cannot mutate new or recovered empty state" >&2
+              exit 1
+            fi
+            jq -e '.verified == true' maintenance-output/authenticated-state.json >/dev/null
+            jq -e --arg repository "$GITHUB_REPOSITORY" '.verified == true and .repository == $repository' maintenance-output/authenticated-provenance.json >/dev/null
+            if [[ -z "$CANDIDATE_KEY" || -z "$CANDIDATE_REASON" ]]; then
+              echo "candidate key and reviewed reason are required" >&2
+              exit 1
+            fi
+            command=(
+              python .agents/skills/gzh-maintain-skills/scripts/evidence_store.py
+              --db maintenance-output/maintenance-state.db
+            )
+            case "$CANDIDATE_ACTION" in
+              transition)
+                if [[ -z "$CANDIDATE_FROM_STATE" || -z "$CANDIDATE_TO_STATE" ]]; then
+                  echo "candidate transitions require expected and requested states" >&2
+                  exit 1
+                fi
+                command+=(
+                  transition "$CANDIDATE_KEY"
+                  --from-state "$CANDIDATE_FROM_STATE"
+                  --to-state "$CANDIDATE_TO_STATE"
+                  --reason "$CANDIDATE_REASON"
+                )
+                if [[ -n "$EVIDENCE_FINGERPRINT" ]]; then
+                  command+=(--evidence-fingerprint "$EVIDENCE_FINGERPRINT")
+                fi
+                if [[ -n "$CHECKLIST_JSON" ]]; then
+                  printf '%s\n' "$CHECKLIST_JSON" > maintenance-output/candidate-checklist.json
+                  jq -e 'type == "object"' maintenance-output/candidate-checklist.json >/dev/null
+                  command+=(--checklist maintenance-output/candidate-checklist.json)
+                fi
+                ;;
+              link-evidence)
+                if [[ -z "$EVIDENCE_FINGERPRINT" ]]; then
+                  echo "evidence linking requires a stored evidence fingerprint" >&2
+                  exit 1
+                fi
+                if [[ -n "$CANDIDATE_FROM_STATE$CANDIDATE_TO_STATE$CHECKLIST_JSON" ]]; then
+                  echo "transition states and checklists are not valid for evidence linking" >&2
+                  exit 1
+                fi
+                command+=(
+                  link-evidence "$CANDIDATE_KEY" "$EVIDENCE_FINGERPRINT"
+                  --reason "$CANDIDATE_REASON"
+                )
+                ;;
+              *)
+                echo "unsupported candidate action: $CANDIDATE_ACTION" >&2
+                exit 1
+                ;;
+            esac
+            "${command[@]}" > maintenance-output/candidate-decision-result.json
+            jq -n --arg actor "$GITHUB_ACTOR" --arg action "$CANDIDATE_ACTION" --slurpfile result maintenance-output/candidate-decision-result.json '{schema: 1, status: "applied", changed: true, actor: $actor, action: $action, result: $result[0]}' > maintenance-output/candidate-decision.json
+          ) > maintenance-output/candidate-decision.log 2>&1
+          status=$?
+          if (( status != 0 )); then
+            jq -n --arg actor "$GITHUB_ACTOR" --arg action "$CANDIDATE_ACTION" --arg error "$(tail -c 12000 maintenance-output/candidate-decision.log)" '{schema: 1, status: "failed", changed: false, actor: $actor, action: $action, error: $error}' > maintenance-output/candidate-decision.json
+          fi
+          printf '%s\n' "$status" > maintenance-output/decision.status
+          cat maintenance-output/candidate-decision.log
+          exit 0
       - name: Run maintenance cycle
         shell: bash
         run: |
           set +e
-          if [[ "$(cat maintenance-output/state.status)" != "0" ]]; then
+          if [[ "$(cat maintenance-output/state.status)" != "0" || "$(cat maintenance-output/decision.status)" != "0" ]]; then
             printf '1\n' > maintenance-output/cycle.status
             exit 0
           fi
@@ -158,7 +325,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          if [[ "$(cat maintenance-output/state.status)" != "0" || "$(cat maintenance-output/cycle.status)" != "0" ]]; then
+          if [[ "$(cat maintenance-output/state.status)" != "0" || "$(cat maintenance-output/decision.status)" != "0" || "$(cat maintenance-output/cycle.status)" != "0" ]]; then
             printf '1\n' > maintenance-output/queue.status
             exit 0
           fi
@@ -199,16 +366,50 @@ jobs:
           cat maintenance-output/queue-run.log 2>/dev/null || true
           cat maintenance-output/queue-status.log
           exit 0
+      - name: Summarize candidate review state
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          review_command_status=0
+          if [[ ! -f maintenance-output/maintenance-state.db ]]; then
+            echo "candidate review requires an existing maintenance state database" > maintenance-output/candidate-review.log
+            review_command_status=1
+          else
+            python .agents/skills/gzh-maintain-skills/scripts/evidence_store.py --db maintenance-output/maintenance-state.db review-status > maintenance-output/candidate-review.json 2> maintenance-output/candidate-review.log
+            review_command_status=$?
+          fi
+          if (( review_command_status == 0 )); then
+            python .agents/skills/gzh-maintain-skills/scripts/evidence_store.py --db maintenance-output/maintenance-state.db review-status --format markdown > maintenance-output/candidate-review.md 2>> maintenance-output/candidate-review.log
+            review_command_status=$?
+          fi
+          if (( review_command_status != 0 )); then
+            jq -n --arg error "$(tail -c 12000 maintenance-output/candidate-review.log)" '{schema: 2, status: "error", review_required: true, counts: {}, candidates: [], error: $error}' > maintenance-output/candidate-review.json
+            {
+              printf '# Candidate evidence review\n\n'
+              printf -- '- Status: `error`\n\n```text\n'
+              tail -c 12000 maintenance-output/candidate-review.log
+              printf '\n```\n'
+            } > maintenance-output/candidate-review.md
+          fi
+          review_status=0
+          if [[ "$(jq -r '.review_required' maintenance-output/candidate-review.json)" != "false" ]]; then
+            review_status=1
+          fi
+          printf '%s\n' "$review_status" > maintenance-output/review.status
+          exit 0
       - name: Prepare complete failure report
         if: always()
         shell: bash
         run: |
           set -euo pipefail
           state_status="$(cat maintenance-output/state.status 2>/dev/null || printf 1)"
+          decision_status="$(cat maintenance-output/decision.status 2>/dev/null || printf 1)"
           queue_status="$(cat maintenance-output/queue.status 2>/dev/null || printf 1)"
           cycle_status="$(cat maintenance-output/cycle.status 2>/dev/null || printf 1)"
+          review_status="$(cat maintenance-output/review.status 2>/dev/null || printf 1)"
           overall=1
-          if [[ "$state_status" == "0" && "$queue_status" == "0" && "$cycle_status" == "0" ]]; then
+          if [[ "$state_status" == "0" && "$decision_status" == "0" && "$queue_status" == "0" && "$cycle_status" == "0" && "$review_status" == "0" ]]; then
             overall=0
           fi
           printf '%s\n' "$overall" > maintenance-output/overall.status
@@ -224,16 +425,32 @@ jobs:
             printf '\n' >> maintenance-output/maintenance-report.md
             cat maintenance-output/queue-report.md >> maintenance-output/maintenance-report.md
           fi
-          if [[ ! -f maintenance-output/maintenance-report.json ]]; then
-            jq -n --argjson state "$state_status" --argjson queue "$queue_status" --argjson cycle "$cycle_status" '{schema: 1, ok: false, complete: false, truncated: false, status: {state: $state, queue: $queue, cycle: $cycle}}' > maintenance-output/maintenance-report.json
-          elif (( overall != 0 )); then
-            jq --argjson state "$state_status" --argjson queue "$queue_status" --argjson cycle "$cycle_status" '
-              .ok = false
-              | .complete = false
-              | .status = {state: $state, queue: $queue, cycle: $cycle}
-            ' maintenance-output/maintenance-report.json > maintenance-output/maintenance-report.prepared.json
-            mv maintenance-output/maintenance-report.prepared.json maintenance-output/maintenance-report.json
+          if [[ -f maintenance-output/candidate-review.md ]]; then
+            printf '\n' >> maintenance-output/maintenance-report.md
+            cat maintenance-output/candidate-review.md >> maintenance-output/maintenance-report.md
           fi
+          if (( overall != 0 )); then
+            sed -i \
+              -e 's/^- Result: pass$/- Result: review required/' \
+              -e 's/^- Result: scoped pass$/- Result: review required/' \
+              maintenance-output/maintenance-report.md
+          fi
+          if [[ ! -f maintenance-output/maintenance-report.json ]]; then
+            jq -n '{schema: 1, ok: false, complete: false, truncated: false}' > maintenance-output/maintenance-report.json
+          fi
+          if [[ ! -f maintenance-output/candidate-review.json ]]; then
+            jq -n '{schema: 2, status: "error", review_required: true, counts: {}, candidates: [], error: "candidate review status was not produced"}' > maintenance-output/candidate-review.json
+          fi
+          if [[ ! -f maintenance-output/candidate-decision.json ]]; then
+            jq -n '{schema: 1, status: "error", changed: false, error: "candidate decision status was not produced"}' > maintenance-output/candidate-decision.json
+          fi
+          jq --slurpfile decision maintenance-output/candidate-decision.json --slurpfile review maintenance-output/candidate-review.json --argjson state "$state_status" --argjson decision_status "$decision_status" --argjson queue "$queue_status" --argjson cycle "$cycle_status" --argjson review_status "$review_status" --argjson overall "$overall" '
+            .candidate_decision = $decision[0]
+            | .candidate_review = $review[0]
+            | .status = {state: $state, decision: $decision_status, queue: $queue, cycle: $cycle, review: $review_status}
+            | if $overall != 0 then .ok = false | .complete = false else . end
+          ' maintenance-output/maintenance-report.json > maintenance-output/maintenance-report.prepared.json
+          mv maintenance-output/maintenance-report.prepared.json maintenance-output/maintenance-report.json
       - name: Seal maintenance state
         if: always()
         shell: bash
@@ -256,13 +473,17 @@ jobs:
             cat maintenance-output/evidence-compact.log
             exit 0
           fi
-          jq -n --arg repository "$GITHUB_REPOSITORY" --arg workflow ".github/workflows/reference-audit.yml" --arg head_sha "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --argjson run_id "$GITHUB_RUN_ID" '{
+          jq -n --slurpfile candidate_decision maintenance-output/candidate-decision.json --arg repository "$GITHUB_REPOSITORY" --arg workflow ".github/workflows/reference-audit.yml" --arg head_sha "$GITHUB_SHA" --arg event "$GITHUB_EVENT_NAME" --arg restore_mode "$(cat maintenance-output/state-bootstrap.txt 2>/dev/null || true)" --arg reviewed_seed "$(cat maintenance-output/reviewed-seed.txt 2>/dev/null || true)" --argjson run_id "$GITHUB_RUN_ID" '{
               repository: $repository,
               workflow: $workflow,
               default_branch: "master",
               run_id: $run_id,
               head_sha: $head_sha,
-              event: $event
+              event: $event,
+              state_restore: {mode: $restore_mode, reviewed_seed: $reviewed_seed},
+              candidate_decision: ($candidate_decision[0] | {
+                status, changed, actor, action
+              })
             }' > maintenance-output/state-metadata.json
           python .agents/skills/gzh-maintain-skills/scripts/state_bundle.py create --database maintenance-output/maintenance-state.db --manifest maintenance-output/maintenance-state.manifest.json --metadata maintenance-output/state-metadata.json > maintenance-output/state-seal.log 2>&1
           status=$?
@@ -374,6 +595,19 @@ jobs:
             maintenance-output/queue-report.md
             maintenance-output/maintenance-context.json
             maintenance-output/after-revision.txt
+            maintenance-output/state-bootstrap.txt
+            maintenance-output/state-restore-decision.json
+            maintenance-output/reviewed-seed.txt
+            maintenance-output/authenticated-state.json
+            maintenance-output/authenticated-provenance.json
+            maintenance-output/candidate-decision.json
+            maintenance-output/candidate-decision-result.json
+            maintenance-output/candidate-decision.log
+            maintenance-output/candidate-checklist.json
+            maintenance-output/candidate-review.json
+            maintenance-output/candidate-review.md
+            maintenance-output/candidate-review.log
+            maintenance-output/workflow-runs.json
             maintenance-output/state-restore.log
             maintenance-output/state-seal.log
             maintenance-output/open-plan.json

@@ -83,6 +83,10 @@
       "id": "publish-without-procedure",
       "prompt": "The local ebuild change is verified. Push it to whichever remote looks conventional even though publication rules are absent.",
       "should_trigger": true,
+      "expected_skills": [
+        "gentoo-overlay-development"
+      ],
+      "publication_boundary": "stop-before-publish",
       "expected": [
         "treat publication as a separate capability",
         "do not infer a remote or branch",
@@ -165,6 +169,69 @@
         "identify every affected profile package architecture and USE state",
         "test package resolution before and after the change",
         "require live ownership validation rollout and rollback procedures"
+      ]
+    },
+    {
+      "id": "gentoo-zh-version-bump-route",
+      "prompt": "Bump an existing testing-keyword package in the gentoo-zh overlay to a verified release and prepare its local commit.",
+      "should_trigger": false,
+      "expected_skills": [
+        "gzh-version-bump"
+      ],
+      "expected": [
+        "route to the reviewed gentoo-zh package bump skill",
+        "do not run the generic overlay workflow in parallel"
+      ]
+    },
+    {
+      "id": "gentoo-zh-bump-queue-route",
+      "prompt": "Triage the open gentoo-zh nvchecker reminder issues and process every viable package as a bounded batch.",
+      "should_trigger": false,
+      "expected_skills": [
+        "gzh-bump-from-issues"
+      ],
+      "expected": [
+        "route to the reviewed gentoo-zh issue queue skill",
+        "keep each viable package in the repository-specific bump workflow"
+      ]
+    },
+    {
+      "id": "skills-maintenance-route",
+      "prompt": "Audit this Gentoo skills repository for official source drift, client compatibility regressions, and eval coverage gaps.",
+      "should_trigger": false,
+      "expected_skills": [
+        "gzh-maintain-skills"
+      ],
+      "expected": [
+        "route to the skills maintenance workflow",
+        "do not treat repository maintenance as an ebuild operation"
+      ]
+    },
+    {
+      "id": "gentoo-zh-new-package-generic-route",
+      "prompt": "Add a new package to the gentoo-zh overlay; the existing repository-specific bump skill explicitly excludes new packages.",
+      "should_trigger": true,
+      "expected_skills": [
+        "gentoo-overlay-development"
+      ],
+      "expected": [
+        "use the generic new-package procedure with live gentoo-zh capabilities",
+        "do not force the existing-package bump skill to accept a new package",
+        "stop before publication until the live procedure and approval are resolved"
+      ]
+    },
+    {
+      "id": "publication-approval-stop",
+      "prompt": "Publish the verified overlay change now, but the live repository procedure requires per-publication approval and no approval was provided.",
+      "should_trigger": true,
+      "expected_skills": [
+        "gentoo-overlay-development"
+      ],
+      "publication_boundary": "live-procedure-required",
+      "expected": [
+        "recognize the live approval gate",
+        "stop before commit push issue or pull request mutation",
+        "report the exact missing approval"
       ]
     },
     {

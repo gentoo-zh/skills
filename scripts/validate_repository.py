@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import stat
@@ -22,6 +23,23 @@ UTC_TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 LOCAL_LINK_RE = re.compile(r"\[[^]]+\]\(([^)]+)\)")
 CHINESE_PR_EXAMPLE_RE = re.compile(
     r"Chinese PR body example:\s*\n```(?:text|markdown)\n.*?```", re.DOTALL)
+MAX_SKILL_LINES = 500
+MAX_REFERENCE_LINES_WITHOUT_CONTENTS = 100
+CONTENTS_HEADING_RE = re.compile(r"^## Contents\s*$", re.MULTILINE)
+
+
+def load_eval_validator():
+    path = ROOT / "scripts" / "eval_runner.py"
+    spec = importlib.util.spec_from_file_location(
+        "gentoo_skill_eval_runner", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load deterministic eval validator")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.validate_case_data
+
+
+validate_case_data = load_eval_validator()
 
 
 def load_json(path: Path, errors: list[str]) -> dict:
@@ -60,6 +78,10 @@ def validate_skill(skill: Path, errors: list[str]) -> None:
         errors.append(f"missing SKILL.md: {skill.relative_to(ROOT)}")
         return
     fields = frontmatter(skill_md, errors)
+    skill_text = skill_md.read_text(encoding="utf-8")
+    if len(skill_text.splitlines()) > MAX_SKILL_LINES:
+        errors.append(
+            f"SKILL.md exceeds {MAX_SKILL_LINES} lines: {skill.relative_to(ROOT)}")
     name = fields.get("name", "")
     description = fields.get("description", "")
     if name != skill.name or not NAME_RE.fullmatch(name) or len(name) > 64:
@@ -83,19 +105,23 @@ def validate_skill(skill: Path, errors: list[str]) -> None:
 
     eval_path = skill / "evals" / "cases.json"
     data = load_json(eval_path, errors)
-    cases = data.get("cases", [])
-    if data.get("schema") != 1 or data.get("skill") != name or len(cases) < 6:
-        errors.append(f"incomplete eval set: {eval_path.relative_to(ROOT)}")
-        return
-    identifiers = [case.get("id") for case in cases]
-    if len(identifiers) != len(set(identifiers)):
-        errors.append(f"duplicate eval id: {eval_path.relative_to(ROOT)}")
-    if not {case.get("should_trigger") for case in cases} >= {True, False}:
-        errors.append(f"eval set needs activation and exclusion cases: {eval_path.relative_to(ROOT)}")
-    for case in cases:
-        if (not NAME_RE.fullmatch(case.get("id", "")) or not case.get("prompt")
-                or not case.get("expected")):
-            errors.append(f"invalid eval case in {eval_path.relative_to(ROOT)}")
+    errors.extend(validate_case_data(
+        data, str(eval_path.relative_to(ROOT)), expected_skill=name))
+
+    references = skill / "references"
+    if references.is_dir():
+        for reference in references.glob("*.md"):
+            target = f"references/{reference.name}"
+            if target not in skill_text:
+                errors.append(
+                    "reference is not directly discoverable from SKILL.md: "
+                    f"{reference.relative_to(ROOT)}")
+            reference_text = reference.read_text(encoding="utf-8")
+            if (len(reference_text.splitlines()) > MAX_REFERENCE_LINES_WITHOUT_CONTENTS
+                    and not CONTENTS_HEADING_RE.search(reference_text)):
+                errors.append(
+                    "long reference has no Contents section: "
+                    f"{reference.relative_to(ROOT)}")
 
 
 def validate_sources(errors: list[str]) -> None:
@@ -119,6 +145,17 @@ def validate_sources(errors: list[str]) -> None:
     ids = [source.get("id") for source in sources]
     if len(ids) != len(set(ids)):
         errors.append("source ids must be unique")
+    capability_sources = registry.get("capability_sources")
+    if not isinstance(capability_sources, dict) or not capability_sources:
+        errors.append("source capability coverage is missing")
+    else:
+        for capability, source_ids in capability_sources.items():
+            if (not NAME_RE.fullmatch(capability)
+                    or not isinstance(source_ids, list) or not source_ids
+                    or len(source_ids) != len(set(source_ids))
+                    or any(source_id not in ids for source_id in source_ids)):
+                errors.append(
+                    f"invalid source capability coverage: {capability}")
     for source in sources:
         required = {
             "id", "title", "authority", "scope", "kind", "url", "topics", "use"}
@@ -201,7 +238,8 @@ def validate_english_code(errors: list[str]) -> None:
 
 
 def validate_executables(errors: list[str]) -> None:
-    paths = [ROOT / "install.sh", ROOT / "update.sh"]
+    paths = [ROOT / "install.sh", ROOT / "update.sh",
+             ROOT / "scripts" / "eval_runner.py"]
     paths.extend(SKILLS_ROOT.glob("*/scripts/*.py"))
     paths.extend([ROOT / "scripts" / "install.py", ROOT / "scripts" / "update.py"])
     for path in paths:

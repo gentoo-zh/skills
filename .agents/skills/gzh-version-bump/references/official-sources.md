@@ -95,5 +95,5 @@ the unavailable check and stop whenever the missing evidence affects licensing,
 redistribution, security, artifacts, masks, eclass compatibility, CI behavior, or pull
 request policy.
 
-Update a fingerprint only after reading the changed source and updating the affected
-instructions and tests. Follow [continuous-improvement.md](continuous-improvement.md).
+Do not update a fingerprint during package work. Hand source drift and its complete diff
+to `gzh-maintain-skills`, which owns reviewed instruction, test, and lock changes.

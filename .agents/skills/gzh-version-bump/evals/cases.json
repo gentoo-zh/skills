@@ -57,6 +57,10 @@
       "id": "pr-confirmation",
       "prompt": "The bump is committed. Open a draft PR now without showing me its title or body.",
       "should_trigger": true,
+      "expected_skills": [
+        "gzh-version-bump"
+      ],
+      "publication_boundary": "stop-before-publish",
       "expected": [
         "do not create the PR immediately",
         "show the exact title body and file list",
@@ -108,9 +112,36 @@
       ]
     },
     {
+      "id": "configured-ssh-executor",
+      "prompt": "The local host cannot merge this package. Use the already authorized build executor and retain reviewable evidence.",
+      "should_trigger": true,
+      "expected": [
+        "load the named user-owned executor configuration",
+        "transfer only the exact commit-owned path set",
+        "verify the remote repository path canonical identity and parent commit",
+        "apply the same exact-atom and saved elog contract",
+        "retain a bounded local evidence record and verify its digest",
+        "do not forward GitHub credentials or run broad Git cleanup"
+      ]
+    },
+    {
+      "id": "conditional-qa-surfaces",
+      "prompt": "This source bump changes dependencies and one distfile but contains no prebuilt objects. Run every available QA tool anyway.",
+      "should_trigger": true,
+      "expected": [
+        "retain every live repository hard gate",
+        "run dependency and artifact evidence for the changed surfaces",
+        "do not run prebuilt binary QA without a prebuilt object",
+        "run supported tests and image review only when their required inputs exist"
+      ]
+    },
+    {
       "id": "new-package-exclusion",
       "prompt": "Create a new package for an application that is not currently in gentoo-zh.",
       "should_trigger": false,
+      "expected_skills": [
+        "gentoo-overlay-development"
+      ],
       "expected": [
         "identify new package creation as outside this skill"
       ]

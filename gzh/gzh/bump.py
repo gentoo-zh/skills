@@ -88,6 +88,10 @@ def bump_scaffold(pkg_dir: Path, pn: str, new_pv: str) -> Path:
         raise FileNotFoundError(
             f"no released ebuild for {pn} in {pkg_dir} "
             "(live-only or empty); escalate instead of scaffolding from 9999")
+    current_pv = pv_from_name(src.name)
+    if vercmp(new_pv, current_pv) <= 0:
+        raise ValueError(
+            f"new version {new_pv} must be greater than current version {current_pv}")
     dst = pkg_dir / f"{pn}-{new_pv}.ebuild"
     if dst.exists():
         raise FileExistsError(f"target already exists: {dst}")

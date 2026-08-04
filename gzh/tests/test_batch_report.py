@@ -98,3 +98,81 @@ def test_batch_report_cli_rejects_report_outside_state(tmp_path, monkeypatch):
 
     assert result.exit_code == 1
     assert outside.read_text(encoding="utf-8") == "keep\n"
+
+
+def test_batch_report_cli_creates_structured_json_checkpoint(tmp_path, monkeypatch):
+    monkeypatch.setenv("GZH_STATE_DIR", str(tmp_path))
+    result = CliRunner().invoke(
+        cli_mod.cli, ["batch-report", "create", "--format", "json"],
+        input='{"items": [], "schema_version": 1}\n')
+
+    assert result.exit_code == 0, result.output
+    created = json.loads(result.output)
+    report = Path(created["path"])
+    assert report.suffix == ".json"
+    assert json.loads(report.read_text(encoding="utf-8"))["items"] == []
+    assert created["sha256"] == report_sha256(report)
+
+
+def test_batch_report_cli_reconciles_json_through_cas(tmp_path, monkeypatch):
+    state = tmp_path / "state"
+    batches = state / "batches"
+    batches.mkdir(parents=True)
+    report = batches / "bump-batch-fixture.json"
+    report.write_text(json.dumps({
+        "schema_version": 1,
+        "items": [{
+            "id": "cat/pkg@1",
+            "issue": 9,
+            "branch": "cat-pkg-1",
+            "commit": "a" * 40,
+        }],
+    }), encoding="utf-8")
+    monkeypatch.setenv("GZH_STATE_DIR", str(state))
+
+    class Provider:
+        def __init__(self, repository, fork_repository=None):
+            assert repository == "gentoo-zh/overlay"
+            assert fork_repository is None
+
+        def __call__(self, item):
+            return {
+                "complete": True,
+                "refs": [{"branch": item["branch"], "sha": item["commit"]}],
+                "pull_requests": [],
+                "issue": {"number": 9, "state": "open"},
+            }
+
+    monkeypatch.setattr(cli_mod, "GitHubPublicationProvider", Provider)
+    result = CliRunner().invoke(cli_mod.cli, [
+        "batch-report", "reconcile", str(report),
+        "--expected-sha256", report_sha256(report),
+    ])
+
+    assert result.exit_code == 0, result.output
+    output = json.loads(result.output)
+    assert output["observation"]["items"][0]["state"] == "pushed"
+    assert output["sha256"] == report_sha256(report)
+    assert len(json.loads(report.read_text())["publication_observations"]) == 1
+
+
+def test_batch_reconciliation_rejects_stale_file_before_provider(tmp_path, monkeypatch):
+    state = tmp_path / "state"
+    batches = state / "batches"
+    batches.mkdir(parents=True)
+    report = batches / "bump-batch-fixture.json"
+    report.write_text('{"items": []}\n', encoding="utf-8")
+    monkeypatch.setenv("GZH_STATE_DIR", str(state))
+    calls = []
+    monkeypatch.setattr(
+        cli_mod, "GitHubPublicationProvider",
+        lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    result = CliRunner().invoke(cli_mod.cli, [
+        "batch-report", "reconcile", str(report),
+        "--expected-sha256", "0" * 64,
+    ])
+
+    assert result.exit_code == 1
+    assert "batch report changed" in result.output
+    assert calls == []

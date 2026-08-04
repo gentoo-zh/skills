@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
 from pathlib import Path
 
+from gzh.qa_evidence import (DEFAULT_MAX_OUTPUT_BYTES, DEFAULT_TIMEOUT,
+                             identify_input, read_tool_version,
+                             run_evidence_command)
 from gzh.repo import find_canonical_remote, validate_canonical_remote
 
 # pkgcheck severities, highest to lowest. Used to scope the pass/fail gate via `--exit`
@@ -22,43 +26,143 @@ _URL_RE = re.compile(r"https?://[^\s\"'<>]+")
 _TRULY_DEAD = {"404", "410"}
 
 
-def _parse_ndjson(text: str) -> list[dict]:
-    """pkgcheck's JsonStream reporter emits one flat JSON object per line (NDJSON), with
-    the keyword name in `__class__`. Mirror it to `code` so callers can key on either."""
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"invalid JSON constant: {value}")
+
+
+def _parse_ndjson_evidence(text: str) -> tuple[list[dict], list[dict]]:
+    """Parse JsonStream without discarding malformed or non-finding records."""
     out: list[dict] = []
-    for line in (text or "").splitlines():
-        line = line.strip()
+    malformed: list[dict] = []
+    for number, raw_line in enumerate((text or "").splitlines(), 1):
+        line = raw_line.strip()
         if not line:
             continue
         try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
+            obj = json.loads(line, parse_constant=_reject_json_constant)
+        except (json.JSONDecodeError, ValueError) as exc:
+            malformed.append({
+                "line": number,
+                "reason": str(exc),
+                "sha256": hashlib.sha256(line.encode()).hexdigest(),
+                "preview": line[:512],
+            })
             continue
-        if isinstance(obj, dict):
-            if "__class__" in obj and "code" not in obj:
-                obj["code"] = obj["__class__"]
-            out.append(obj)
-    return out
+        if (not isinstance(obj, dict)
+                or not isinstance(obj.get("__class__"), str)
+                or not obj["__class__"].strip()):
+            malformed.append({
+                "line": number,
+                "reason": "record is not a pkgcheck finding object",
+                "sha256": hashlib.sha256(line.encode()).hexdigest(),
+                "preview": line[:512],
+            })
+            continue
+        if "code" not in obj:
+            obj["code"] = obj["__class__"]
+        out.append(obj)
+    return out, malformed
+
+
+def _parse_ndjson(text: str) -> list[dict]:
+    """Compatibility wrapper returning only valid findings."""
+    return _parse_ndjson_evidence(text)[0]
+
+
+def _scan_report(command: list[str], cwd: Path | None, input_path: Path,
+                 runner, timeout: int, max_output_bytes: int) -> dict:
+    version = read_tool_version(
+        [command[0], "--version"], timeout=min(timeout, 30),
+        max_output_bytes=1024, runner=runner)
+    execution = run_evidence_command(
+        command, cwd=cwd, timeout=timeout,
+        max_output_bytes=max_output_bytes, runner=runner)
+    results, malformed = _parse_ndjson_evidence(execution["stdout"])
+    returncode = execution["returncode"]
+    stream_complete = execution["complete"] and not execution["truncated"]
+    verdict_complete = (returncode == 0
+                        or (returncode == 1 and bool(results)))
+    scan_complete = stream_complete and verdict_complete and not malformed
+    complete = scan_complete and version["complete"]
+    ok = stream_complete and returncode == 0 and not malformed
+    truncated = (execution["truncated"]
+                 or version["execution"]["truncated"])
+    timed_out = (execution["timed_out"]
+                 or version["execution"]["timed_out"])
+    if truncated:
+        state = "truncated"
+    elif not complete:
+        state = "incomplete"
+    elif ok:
+        state = "passed"
+    else:
+        state = "failed"
+    errors = []
+    if not version["complete"]:
+        errors.append({
+            "stage": "tool-version",
+            "type": "IncompleteToolVersion",
+            "message": "cannot obtain complete bounded pkgcheck version evidence",
+        })
+    if execution["error"]:
+        errors.append({"stage": "execution", **execution["error"]})
+    if malformed:
+        errors.append({
+            "stage": "parse",
+            "type": "MalformedJsonStream",
+            "message": f"pkgcheck emitted {len(malformed)} malformed record(s)",
+        })
+    if stream_complete and not verdict_complete:
+        errors.append({
+            "stage": "verdict",
+            "type": "IncompletePkgcheckVerdict",
+            "message": (
+                f"pkgcheck return code {returncode} has no complete finding stream"),
+        })
+    return {
+        # Keep the original keys stable for existing CLI and library callers.
+        "ok": ok,
+        "results": results,
+        "raw_returncode": returncode,
+        "complete": complete,
+        "truncated": truncated,
+        "skipped": False,
+        "state": state,
+        "command": command,
+        "tool_version": version["version"],
+        "tool_version_evidence": version,
+        "input": identify_input(input_path),
+        "duration_seconds": execution["duration_seconds"],
+        "stderr": execution["stderr"],
+        "malformed_output": malformed,
+        "timed_out": timed_out,
+        "execution": execution,
+        "errors": errors,
+    }
 
 
 def run_pkgcheck(path: Path, min_severity: str = "warning",
-                 net: bool = False, runner=subprocess.run) -> dict:
-    """Scan a package/path. `ok` is pkgcheck's own `--exit <min_severity>` verdict
-    (non-zero when a result at or above min_severity exists, or on an internal error),
-    NOT a severity filter over the results, because JsonStream carries no severity."""
+                 net: bool = False, runner=subprocess.run,
+                 timeout: int = DEFAULT_TIMEOUT,
+                 max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES) -> dict:
+    """Scan a path and retain pkgcheck's verdict plus bounded execution evidence.
+
+    For a complete JsonStream, `ok` follows pkgcheck's own `--exit` status. Malformed,
+    timed-out, or truncated evidence is incomplete and cannot report success.
+    """
     level = min_severity if min_severity in SEVERITIES else "warning"
     args = ["pkgcheck", "scan", "-R", "JsonStream", "--exit", level]
     if net:  # enables the DeadUrl/RedirectedUrl network keychecks
         args.append("--net")
     args.append(str(path))
-    proc = runner(args, cwd=str(path) if path.is_dir() else None,
-                  capture_output=True, text=True)
-    return {"ok": proc.returncode == 0, "results": _parse_ndjson(proc.stdout),
-            "raw_returncode": proc.returncode}
+    return _scan_report(
+        args, path if path.is_dir() else None, path, runner, timeout,
+        max_output_bytes)
 
 
 def run_pkgcheck_commits(cwd: Path, net: bool = True, remote: str | None = None,
-                         runner=subprocess.run) -> dict:
+                         runner=subprocess.run, timeout: int = DEFAULT_TIMEOUT,
+                         max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES) -> dict:
     """Run the pre-PR networked gate the overlay AGENTS.md prescribes.
 
     This is not a CI reproduction: the overlay's pkgcheck workflow runs offline, so this
@@ -76,8 +180,9 @@ def run_pkgcheck_commits(cwd: Path, net: bool = True, remote: str | None = None,
     # of any explicit range, so `<remote>/HEAD` has to resolve first.
     if runner(["git", "symbolic-ref", "-q", f"refs/remotes/{remote}/HEAD"],
               cwd=str(cwd), capture_output=True, text=True).returncode != 0:
-        runner(["git", "remote", "set-head", remote, "master"],
-               cwd=str(cwd), capture_output=True, text=True)
+        raise RuntimeError(
+            f"canonical remote HEAD is unavailable for {remote}; fetch the remote and "
+            "set its HEAD before running the gate")
     proc = runner(["git", "merge-base", f"{remote}/master", "HEAD"],
                   cwd=str(cwd), capture_output=True, text=True)
     base = (proc.stdout or "").strip()
@@ -100,9 +205,15 @@ def run_pkgcheck_commits(cwd: Path, net: bool = True, remote: str | None = None,
             "-R", "JsonStream", "--exit", "error"]
     if net:
         args.append("--net")
-    proc = runner(args, cwd=str(cwd), capture_output=True, text=True)
-    return {"ok": proc.returncode == 0, "results": _parse_ndjson(proc.stdout),
-            "raw_returncode": proc.returncode}
+    report = _scan_report(
+        args, cwd, cwd, runner, timeout, max_output_bytes)
+    report["commit_range"] = {
+        "canonical_remote": remote,
+        "merge_base": base,
+        "range": range_spec,
+        "commit_count": commit_count,
+    }
+    return report
 
 
 def reverify_url_findings(results: list[dict], runner=subprocess.run) -> dict:

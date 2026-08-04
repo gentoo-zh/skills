@@ -3,6 +3,14 @@
 Use this contract to decide whether evidence justifies a repository change and how an
 unattended cycle must stop.
 
+## Contents
+
+- [Authority Order](#authority-order)
+- [Cycle States](#cycle-states)
+- [Promotion Gate](#promotion-gate)
+- [Unattended Boundaries](#unattended-boundaries)
+- [Compatibility Gate](#compatibility-gate)
+
 ## Authority Order
 
 1. A target repository's live policy, workflows, templates, and repository-owned docs for

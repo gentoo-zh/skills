@@ -34,6 +34,53 @@
       "skills-maintenance"
     ]
   },
+  "capability_sources": {
+    "authority-resolution": [
+      "pms-latest",
+      "devmanual",
+      "portage-ebuild-format"
+    ],
+    "repository-discovery": [
+      "pms-latest",
+      "portage-config",
+      "portage-source"
+    ],
+    "dependency-review": [
+      "pms-latest",
+      "devmanual-dependencies",
+      "portage-dependency-api"
+    ],
+    "artifact-and-license-review": [
+      "devmanual-manifest",
+      "devmanual-licenses",
+      "pkgdev"
+    ],
+    "build-test-install": [
+      "portage-ebuild-command",
+      "portage-ebuild-format",
+      "portage-make-conf",
+      "portage-emerge",
+      "pkgdev"
+    ],
+    "package-qa": [
+      "gentoo-qa-policy",
+      "pkgcheck",
+      "pkgcheck-source"
+    ],
+    "package-lifecycle": [
+      "devmanual-new-ebuild",
+      "devmanual-package-moves",
+      "devmanual-removal"
+    ],
+    "gentoo-zh-adapter": [
+      "overlay-policy",
+      "overlay-ci-pkgcheck",
+      "overlay-ci-emerge",
+      "overlay-pr-template",
+      "overlay-version-tracking-config",
+      "overlay-version-tracking-workflow"
+    ]
+  },
   "sources": [
     {
       "id": "overlay-policy",
@@ -122,6 +169,38 @@
         "profile"
       ],
       "use": "Current overlay-specific license group membership.",
+      "scope": "adapter:gentoo-zh"
+    },
+    {
+      "id": "overlay-version-tracking-config",
+      "title": "gentoo-zh upstream version tracking configuration",
+      "authority": "overlay-policy",
+      "kind": "http",
+      "url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/.github/workflows/overlay.toml",
+      "topics": [
+        "nvchecker",
+        "upstream",
+        "version",
+        "tracking",
+        "new-package"
+      ],
+      "use": "Live package-to-upstream mapping and repository-owned tracking options.",
+      "scope": "adapter:gentoo-zh"
+    },
+    {
+      "id": "overlay-version-tracking-workflow",
+      "title": "gentoo-zh upstream version tracking workflow",
+      "authority": "overlay-policy",
+      "kind": "http",
+      "url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/.github/workflows/nvchecker.yml",
+      "topics": [
+        "ci",
+        "nvchecker",
+        "upstream",
+        "version",
+        "tracking"
+      ],
+      "use": "Executable contract for discovering versions and creating repository issues.",
       "scope": "adapter:gentoo-zh"
     },
     {
@@ -482,6 +561,137 @@
       "scope": "portable-core"
     },
     {
+      "id": "portage-ebuild-command",
+      "title": "Portage ebuild command manual",
+      "authority": "gentoo-tool",
+      "kind": "http",
+      "url": "https://dev.gentoo.org/~zmedico/portage/doc/man/ebuild.1.html",
+      "topics": [
+        "portage",
+        "ebuild",
+        "phase",
+        "test",
+        "install"
+      ],
+      "use": "Current command phase ordering and package test execution behavior.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "portage-ebuild-format",
+      "title": "Portage ebuild format manual",
+      "authority": "gentoo-tool",
+      "kind": "http",
+      "url": "https://dev.gentoo.org/~zmedico/portage/doc/man/ebuild.5.html",
+      "topics": [
+        "portage",
+        "ebuild",
+        "eapi",
+        "dependency",
+        "variable",
+        "phase"
+      ],
+      "use": "Current Portage implementation reference for ebuild variables, phases, and dependency syntax.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "portage-make-conf",
+      "title": "Portage make.conf manual",
+      "authority": "gentoo-tool",
+      "kind": "http",
+      "url": "https://dev.gentoo.org/~zmedico/portage/doc/man/make.conf.5.html",
+      "topics": [
+        "portage",
+        "features",
+        "test",
+        "network-sandbox",
+        "qa"
+      ],
+      "use": "Current FEATURES, test, sandbox, and QA execution settings.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "portage-config",
+      "title": "Portage repository and profile configuration manual",
+      "authority": "gentoo-tool",
+      "kind": "http",
+      "url": "https://dev.gentoo.org/~zmedico/portage/doc/man/portage.5.html",
+      "topics": [
+        "portage",
+        "repository",
+        "repos-conf",
+        "layout-conf",
+        "profile"
+      ],
+      "use": "Current repository discovery, layout, and profile configuration behavior.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "portage-source",
+      "title": "Portage source repository",
+      "authority": "gentoo-tool",
+      "kind": "git",
+      "url": "https://github.com/gentoo/portage.git",
+      "ref": "refs/heads/master",
+      "topics": [
+        "portage",
+        "repository",
+        "dependency",
+        "ebuild",
+        "implementation"
+      ],
+      "use": "Current official implementation evidence for documented Portage behavior.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "devmanual-source",
+      "title": "Gentoo Development Guide source repository",
+      "authority": "gentoo-standard",
+      "kind": "git",
+      "url": "https://github.com/gentoo/devmanual.git",
+      "ref": "refs/heads/master",
+      "topics": [
+        "devmanual",
+        "ebuild",
+        "maintenance",
+        "source"
+      ],
+      "use": "Current official source revision behind Development Guide behavior.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "pkgcheck-source",
+      "title": "pkgcheck source repository",
+      "authority": "gentoo-tool",
+      "kind": "git",
+      "url": "https://github.com/pkgcore/pkgcheck.git",
+      "ref": "refs/heads/master",
+      "topics": [
+        "pkgcheck",
+        "qa",
+        "repository",
+        "implementation"
+      ],
+      "use": "Current implementation evidence for pkgcheck reports and command behavior.",
+      "scope": "portable-core"
+    },
+    {
+      "id": "pkgdev-source",
+      "title": "pkgdev source repository",
+      "authority": "gentoo-tool",
+      "kind": "git",
+      "url": "https://github.com/pkgcore/pkgdev.git",
+      "ref": "refs/heads/main",
+      "topics": [
+        "pkgdev",
+        "manifest",
+        "test",
+        "commit",
+        "implementation"
+      ],
+      "use": "Current implementation evidence for pkgdev manifest, test, and commit behavior.",
+      "scope": "portable-core"
+    },
+    {
       "id": "nvchecker-usage",
       "title": "nvchecker usage documentation",
       "authority": "upstream-primary",
@@ -661,7 +871,7 @@
       "title": "OpenCode skills documentation",
       "authority": "skill-architecture",
       "kind": "http",
-      "url": "https://opencode.ai/docs/skills",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/web/src/content/docs/skills.mdx",
       "topics": [
         "skill",
         "opencode",

@@ -85,7 +85,8 @@ def test_topic_routing_is_ordered():
         "cat/pkg: fix test install QA",
         ["cat/pkg/Manifest", "cat/pkg/files/fix-license.patch"])
 
-    assert topics == ["qa", "manifest", "license", "patch", "test", "install"]
+    assert topics == [
+        "qa", "manifest", "license", "patch", "test", "install", "artifact"]
 
 
 def test_local_collection_validates_identity_and_normalizes_candidates(tmp_path):
@@ -126,7 +127,7 @@ def test_local_collection_validates_identity_and_normalizes_candidates(tmp_path)
     current = [candidate for candidate in report["candidates"]
                if candidate["source_revision"] == report["scope"]["resolved_ref"]]
     assert [candidate["topic"] for candidate in current] == [
-        "metadata", "manifest"]
+        "metadata", "manifest", "artifact"]
     assert all(candidate["scope"] == "example/overlay" for candidate in current)
     assert all(candidate["adapter_id"] == "fixture" for candidate in current)
     assert all(candidate["authority"] == "candidate-history"
@@ -146,7 +147,8 @@ def test_local_collection_validates_identity_and_normalizes_candidates(tmp_path)
         source for source in report["source_records"]
         if source.get("role") == "candidate"]
     assert len(candidate_sources) == 1
-    assert candidate_sources[0]["topics"] == ["metadata", "manifest"]
+    assert candidate_sources[0]["topics"] == [
+        "metadata", "manifest", "artifact"]
     for candidate in current:
         assert any(
             source["id"] == candidate["source_id"]
@@ -646,3 +648,22 @@ def test_cli_bounds_limit_and_workers():
         collector.parse_args([
             "--overlay-path", "/tmp/overlay", "--adapter-id", "fixture",
             "--canonical-repository", "example/overlay", "--workers", "33"])
+
+
+@pytest.mark.parametrize(("subject", "path", "topic"), [
+    ("foo.eclass: support EAPI 9", "eclass/foo.eclass", "eclass"),
+    ("profiles: update defaults", "profiles/default/linux/make.defaults", "profile"),
+    ("cat/pkg: add arm64 keyword", "cat/pkg/pkg-1.ebuild", "keyword"),
+    ("profiles: move cat/old to cat/new", "profiles/updates/1Q-2026", "move"),
+    ("cat/pkg: remove obsolete package", "profiles/package.mask", "removal"),
+    ("cat/pkg: add initial ebuild", "cat/pkg/metadata.xml", "new-package"),
+    ("cat/pkg: refresh source artifact", "cat/pkg/Manifest", "artifact"),
+    ("cat/pkg-bin: audit prebuilt ELF", "cat/pkg/pkg-bin-1.ebuild", "prebuilt"),
+    ("nvchecker: track new release", ".github/workflows/overlay.toml",
+     "version-tracking"),
+])
+def test_extended_history_topics_route_to_primary_sources(subject, path, topic):
+    routed = collector.route_topics(subject, [path])
+
+    assert topic in routed
+    assert collector.TOPIC_SOURCE_IDS[topic]

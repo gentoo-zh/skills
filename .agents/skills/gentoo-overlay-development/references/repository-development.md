@@ -62,6 +62,19 @@ the target overlay only when its live policy adopts them.
   profile, and update records. Each repository-required standalone commit must leave a
   coherent state.
 
+## Version Tracking and Automation
+
+- Treat upstream-version discovery as repository automation, not portable package
+  policy. Resolve the live tracker configuration, workflow, package mapping, credentials,
+  issue behavior, and ownership from the target repository.
+- Validate the tracker source and its options against the current upstream tool manual.
+  A valid tracker configuration proves only what it queried; verify the resulting release
+  against upstream primary records before changing an ebuild.
+- Keep package names, maintainers, issue formats, generated-bundle dispatch, and automatic
+  bump flags in the repository adapter. Do not copy them into the portable core.
+- Require an explicit supported operation and publication procedure before tracker output
+  can cause a write, commit, issue update, push, or pull request.
+
 ## Completion Rule
 
 Record affected consumers and profiles, not only changed files. Stop when ownership,

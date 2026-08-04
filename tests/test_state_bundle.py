@@ -139,6 +139,48 @@ def test_provenance_matches_authenticated_workflow_run():
     assert result["run_id"] == 123
 
 
+@pytest.mark.parametrize("length", [40, 64])
+def test_provenance_accepts_exact_git_oid_lengths(length):
+    manifest, run, job = provenance_fixture()
+    oid = "a" * length
+    manifest["metadata"]["head_sha"] = oid
+    run["head_sha"] = oid
+    job["head_sha"] = oid
+
+    result = bundle.verify_provenance(
+        manifest, run, job, repository="example/skills",
+        workflow=".github/workflows/reference-audit.yml", branch="master")
+
+    assert result["head_sha"] == oid
+
+
+@pytest.mark.parametrize("length", [0, 1, 39, *range(41, 64), 65])
+def test_provenance_rejects_all_other_git_oid_lengths(length):
+    manifest, run, job = provenance_fixture()
+    oid = "a" * length
+    manifest["metadata"]["head_sha"] = oid
+    run["head_sha"] = oid
+    job["head_sha"] = oid
+
+    with pytest.raises(ValueError, match="head SHA is invalid"):
+        bundle.verify_provenance(
+            manifest, run, job, repository="example/skills",
+            workflow=".github/workflows/reference-audit.yml", branch="master")
+
+
+@pytest.mark.parametrize("oid", ["g" * 40, "-" * 64])
+def test_provenance_rejects_nonhex_git_oids(oid):
+    manifest, run, job = provenance_fixture()
+    manifest["metadata"]["head_sha"] = oid
+    run["head_sha"] = oid
+    job["head_sha"] = oid
+
+    with pytest.raises(ValueError, match="head SHA is invalid"):
+        bundle.verify_provenance(
+            manifest, run, job, repository="example/skills",
+            workflow=".github/workflows/reference-audit.yml", branch="master")
+
+
 @pytest.mark.parametrize(("field", "value"), [
     ("repository", {"full_name": "other/skills"}),
     ("path", ".github/workflows/other.yml"),
@@ -177,3 +219,61 @@ def test_provenance_rejects_failed_state_step(step_name):
         bundle.verify_provenance(
             manifest, run, job, repository="example/skills",
             workflow=".github/workflows/reference-audit.yml", branch="master")
+
+
+def test_restore_decision_resumes_authenticated_cursor_without_a_seed():
+    result = bundle.restore_decision(
+        restored=True, prior_runs=4, event="schedule",
+        stored_cursor="a" * 40)
+
+    assert result == {
+        "schema": 1,
+        "mode": "restored",
+        "initialize": False,
+        "cursor": "a" * 40,
+    }
+
+
+@pytest.mark.parametrize(("restored", "prior_runs", "message"), [
+    (False, 0, "first initialization requires"),
+    (False, 3, "historical maintenance state is missing"),
+    (True, 3, "authenticated state has no repository cursor"),
+])
+def test_restore_decision_never_seeds_implicitly(restored, prior_runs, message):
+    with pytest.raises(ValueError, match=message):
+        bundle.restore_decision(
+            restored=restored, prior_runs=prior_runs, event="schedule")
+
+
+@pytest.mark.parametrize(("restored", "prior_runs", "expected_mode", "initialize"), [
+    (False, 0, "reviewed-initialization", True),
+    (False, 3, "reviewed-state-recovery", True),
+    (True, 3, "reviewed-cursor-recovery", False),
+])
+def test_restore_decision_accepts_only_explicit_reviewed_seed(
+        restored, prior_runs, expected_mode, initialize):
+    result = bundle.restore_decision(
+        restored=restored, prior_runs=prior_runs, event="workflow_dispatch",
+        reviewed_seed="b" * 40)
+
+    assert result["mode"] == expected_mode
+    assert result["initialize"] is initialize
+    assert result["cursor"] == "b" * 40
+
+
+@pytest.mark.parametrize(("event", "seed"), [
+    ("schedule", "b" * 40),
+    ("workflow_dispatch", "main"),
+    ("workflow_dispatch", "B" * 40),
+])
+def test_restore_decision_rejects_unreviewable_seed(event, seed):
+    with pytest.raises(ValueError, match="explicit reviewed seed"):
+        bundle.restore_decision(
+            restored=False, prior_runs=0, event=event, reviewed_seed=seed)
+
+
+def test_restore_decision_does_not_replace_established_cursor():
+    with pytest.raises(ValueError, match="cannot replace"):
+        bundle.restore_decision(
+            restored=True, prior_runs=3, event="workflow_dispatch",
+            reviewed_seed="b" * 40, stored_cursor="a" * 40)

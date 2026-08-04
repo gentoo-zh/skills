@@ -26,10 +26,10 @@ Coordinate queue discovery and one-package bump workflows. Produce evidence-base
 
 ### 1. Discover work
 
-1. Run `gzh bump-issues --limit 1000`, adding its supported maintainer or package filters when requested. Require `truncated` to be false before claiming the queue is complete; otherwise report the uncovered count and stop batch-wide conclusions.
+1. Run `gzh bump-issues --limit 1000`, adding its supported maintainer or package filters when requested. Use `--autobump any|off|on|manual-required` for the requested scope and repeat `--issue <number>` for explicitly included issues. Non-`any` selection binds to a fetched canonical remote, reads `.github/workflows/overlay.toml` at its exact base OID, and stores typed configuration evidence. `manual-required` additionally requires the current repository-owned status marker, expected bot identity, exact issue revision, and complete comments. Require `truncated` to be false before claiming the queue is complete; otherwise report the uncovered count and stop batch-wide conclusions.
 2. Run `gzh triage list --kind skip` and `gzh triage list --kind escalate`. Records are exact to issue, package, and target version. Exclude a current item only when its `updated_at` exactly equals the record's `issue_updated_at`. For a legacy record without `issue_updated_at`, use `recorded_at` only as a fallback and reassess when the issue is newer; legacy `skipped_at` is exposed as `recorded_at`. Otherwise reassess the complete issue and supersede obsolete state with `gzh triage resolve` or a new skip/escalation event. Pass the complete issue snapshot's `updated_at` as `--issue-updated-at` and the listed record's `event_id` as `--expected-event-id`; use `none` only when no record exists. The command checks the live GitHub revision before every write and rechecks an active event afterward. A revision or local-state conflict means the evidence changed, so reload the complete issue and triage log instead of overwriting it.
 3. Keep the issue body and all paginated comments with each remaining queue item. Require `comments_truncated` to be false before classifying that item; stop the item and retrieve the missing comments when it is true.
-4. Read prior reports under `$(gzh state-dir)/batches/` and inspect matching topic branches and commits. Resume owned work when its base and state are unambiguous; do not create duplicate branches or commits for an open issue.
+4. Read prior reports under `$(gzh state-dir)/batches/` and inspect matching topic branches and commits. Reconstruct the selected set from the versioned snapshot instead of reparsing issue prose. Verify every referenced executor evidence digest and report a missing or changed artifact as incomplete. Resume owned work when its base and state are unambiguous; do not create duplicate branches or commits for an open issue.
 
 ### 2. Triage each issue
 
@@ -54,14 +54,16 @@ For each **Process** item:
 
 ### 4. Report the batch
 
-Render the complete English Markdown report and pipe it to `gzh batch-report create`.
+Render a structured JSON report and pipe it to `gzh batch-report create --format json`.
 The command exclusively reserves a path under `$(gzh state-dir)/batches/` named
-`bump-batch-YYYYMMDDTHHMMSSZ-<8-hex-run-id>.md` and returns JSON containing `path` and
-`sha256`. Include:
+`bump-batch-YYYYMMDDTHHMMSSZ-<8-hex-run-id>.json` and returns JSON containing `path` and
+`sha256`. Keep a concise English Markdown summary in a report field when a human-readable
+batch narrative is useful. Include:
 
 - batch scope, source queue path, queue total, fetched count, and truncation state;
 - canonical remote, fetch result, base commit, and synchronization state;
-- successful local commits: issue, package, version, branch, commit, changed files, and gate results;
+- successful local commits under `items`: stable item ID, issue, package, version, branch,
+  full commit, commit time, changed files, gate results, executor evidence path and digest;
 - failures: issue, package, branch, failed step, exact error, attempts, and retained work state;
 - skips or escalations: issue, package, evidence-based reason, and whether a persistent triage record was written;
 - checks skipped for environmental reasons, warnings, and residual risk.
@@ -71,8 +73,8 @@ not create a triage record; its report and existing branch provide the resume ev
 
 Create the report before processing the first item. Only the coordinating agent may write
 it; delegates return structured evidence to that agent. After every classification,
-failed attempt, gate result, commit, and network result, render the complete updated report
-and pipe it to `gzh batch-report checkpoint <report-path> --expected-sha256 <sha256>`.
+failed attempt, gate result, commit, and network result, render the complete updated JSON
+report and pipe it to `gzh batch-report checkpoint <report-path> --expected-sha256 <sha256>`.
 Carry forward the new hash returned by each successful checkpoint. A stale hash stops
 instead of losing another result, and a failed replacement retains the prior complete
 file. Do not rewrite the report directly. On an interrupted run, inspect the report,
@@ -83,7 +85,16 @@ Send an optional notification with `gzh notify telegram` only when its credentia
 
 ## PR boundary
 
-This skill stops at local commits. If the user later asks to publish a successful package, handle each PR separately under the live overlay policy and `gzh-version-bump` finish pipeline. Before each `gh pr create` or `gh pr edit`, show the exact title, body, and file list and obtain confirmation for that specific PR. Draft status and prior batch approval do not waive confirmation. Invoke `chinese-skill` when repository policy requires a Chinese PR body; do not duplicate its writing rules or examples here.
+This skill stops at local commits. If the user later asks to publish successful packages,
+handle them under the live overlay policy and `gzh-version-bump` finish pipeline. Build a
+separate immutable `gzh pr-plan` for every branch. One response may approve several
+separately enumerated exact plan IDs, but prior batch or wildcard authorization does not.
+Recompute each plan before `gh pr create` or `gh pr edit`, observe checks with `gzh ci`,
+then run `gzh batch-report reconcile <report> --expected-sha256 <sha256>` to append read-only
+push, PR, CI, merge, and issue states. Run `gzh batch cleanup <report> --dry-run` only after
+reconciliation. It lists candidates and never deletes a branch or worktree. Invoke
+`chinese-skill` when repository policy requires a Chinese PR body; do not duplicate its
+writing rules or examples here.
 
 ## Exclusions
 

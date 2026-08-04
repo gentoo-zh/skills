@@ -1,28 +1,52 @@
 import json as _json
-from datetime import datetime
+import os
+import re
+import subprocess
+import tempfile
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
 
+from gzh.artifacts import ArtifactError, audit_artifacts
+from gzh.binary_qa import inspect_binaries
 from gzh.bump import (bump_scaffold, diff_ebuild, highest_ebuild,
                       resolve_package_directory)
-from gzh.bump_issues import (get_issue_updated_at, run_bump_issues,
-                             write_output)
+from gzh.bump_plan import build_bump_plan
+from gzh.bump_issues import (get_issue_updated_at, load_canonical_config,
+                             run_bump_issues, write_output)
 from gzh.batch_report import (BatchReportConflict, checkpoint_batch_report,
-                              create_batch_report, report_sha256)
+                              batch_report_digest, create_batch_report,
+                              reconcile_batch_report, report_sha256)
 from gzh.buildtest import run_build_test
+from gzh.capabilities import inspect_repository, load_bundled_adapter
+from gzh.check import Gate, run_read_only_checks
 from gzh.commit import run_commit, run_recommit
 from gzh.drop_old import run_drop_old
 from gzh.ebuild_parser import parse_ebuild
+from gzh.deps import DependencyMetadataError, analyze_ebuild_dependencies
+from gzh.executor import (ExecutorError, InstallRequest, create_commit_patch,
+                          create_executor, load_executor_config)
+from gzh.executor_evidence import verify_evidence
+from gzh.github_observation import (GitHubPublicationProvider,
+                                    GitHubReadError, read_ci)
+from gzh.image_qa import inspect_image
 from gzh.lint import lint_ebuild
 from gzh.manifest import (run_manifest, verify_manifest_sizes,
                           extract_src_uri_map, _pv_subs)
 from gzh.notify import send_telegram
 from gzh.nvcheck_audit import run_audit
 from gzh.nvchecker_config import get_entry, set_entry
+from gzh.package_test import (MAX_USE_COMBOS, USE_PREFERENCES,
+                              run_package_test)
 from gzh.pkgcheck import (run_pkgcheck, run_pkgcheck_commits,
                           reverify_url_findings)
-from gzh.repo import find_overlay_root
+from gzh.pr_plan import build_pr_plan
+from gzh.ci_observation import observe_ci
+from gzh.cleanup_plan import analyze_cleanup_dry_run
+from gzh.repo import (fetch_canonical_remote, find_canonical_remote,
+                      find_overlay_root, validate_canonical_remote)
 from gzh.state import state_dir
 from gzh.triage import TriageConflict, list_skipped, resolve_issue, skip_issue
 from gzh.upstream import get_latest_version
@@ -76,6 +100,154 @@ def _checked_state_dir() -> Path:
     return directory
 
 
+def _package_test_evidence_dir(atom: str) -> Path:
+    safe_atom = re.sub(r"[^A-Za-z0-9._-]+", "-", atom).strip(".-_")[:80]
+    timestamp = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S%f%z")
+    return _checked_state_dir() / "evidence" / "tests" / f"{safe_atom}-{timestamp}"
+
+
+def _executor_evidence_dir(atom: str) -> Path:
+    safe_atom = re.sub(r"[^A-Za-z0-9._-]+", "-", atom).strip(".-_")[:80]
+    timestamp = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S%f%z")
+    return _checked_state_dir() / "evidence" / "executors" / f"{safe_atom}-{timestamp}"
+
+
+def _default_executor_config() -> Path:
+    explicit = os.environ.get("GZH_EXECUTOR_CONFIG")
+    if explicit:
+        return Path(explicit).expanduser()
+    config_root = Path(
+        os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
+    return config_root / "gzh" / "executors.toml"
+
+
+def _git_output(root: Path, arguments: list[str]) -> str:
+    proc = subprocess.run(
+        ["git", *arguments], cwd=root, capture_output=True, text=True,
+        timeout=60)
+    if proc.returncode != 0:
+        raise click.ClickException(
+            proc.stderr.strip() or f"git {' '.join(arguments)} failed")
+    return proc.stdout.strip()
+
+
+def _atomic_json(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists() or path.is_symlink():
+        raise click.ClickException(f"output path already exists: {path}")
+    payload = _json.dumps(
+        value, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+    descriptor, name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            os.link(temporary, path, follow_symlinks=False)
+        except FileExistsError as exc:
+            raise click.ClickException(
+                f"output path already exists: {path}") from exc
+        temporary.unlink()
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def _owned_batch_report(path: Path, *, suffixes: set[str]) -> Path:
+    report = path.resolve()
+    directory = (_checked_state_dir() / "batches").resolve()
+    if (report.parent != directory or not report.name.startswith("bump-batch-")
+            or report.suffix not in suffixes):
+        expected = ", ".join(sorted(suffixes))
+        raise click.ClickException(
+            f"report must be a gzh batch report ({expected}) under {directory}")
+    return report
+
+
+def _pr_template(root: Path, requested: Path | None) -> str:
+    candidates = ([requested] if requested is not None else [
+        Path(".github/PULL_REQUEST_TEMPLATE.md"),
+        Path(".github/pull_request_template.md"),
+    ])
+    for relative in candidates:
+        assert relative is not None
+        path = relative if relative.is_absolute() else root / relative
+        try:
+            resolved = path.resolve(strict=True)
+            resolved.relative_to(root.resolve())
+        except (FileNotFoundError, ValueError):
+            continue
+        if resolved.is_file() and not resolved.is_symlink():
+            return resolved.read_text(encoding="utf-8")
+    raise click.ClickException("the live pull request template was not found")
+
+
+def _worktree_inventory(root: Path, publication_items: list[dict]) -> list[dict]:
+    raw = _git_output(root, ["worktree", "list", "--porcelain", "-z"])
+    records = []
+    current: dict[str, object] = {}
+    for field in raw.split("\x00"):
+        if not field:
+            if current:
+                records.append(current)
+                current = {}
+            continue
+        key, _, value = field.partition(" ")
+        if key in {"detached", "bare", "locked", "prunable"} and not value:
+            current[key] = True
+        else:
+            current[key] = value
+    if current:
+        records.append(current)
+
+    publications = {
+        item.get("branch"): item for item in publication_items
+        if isinstance(item.get("branch"), str)
+    }
+    inventory = []
+    for record in records:
+        path_value = record.get("worktree")
+        if not isinstance(path_value, str) or not path_value:
+            continue
+        path = Path(path_value)
+        branch_ref = record.get("branch")
+        branch = None
+        if isinstance(branch_ref, str) and branch_ref.startswith("refs/heads/"):
+            branch = branch_ref.removeprefix("refs/heads/")
+        status = subprocess.run(
+            ["git", "-C", str(path), "status", "--porcelain=v1"],
+            capture_output=True, text=True, timeout=60)
+        dirty = status.returncode != 0 or bool(status.stdout)
+        ahead_proc = subprocess.run(
+            ["git", "-C", str(path), "rev-list", "--count", "@{upstream}..HEAD"],
+            capture_output=True, text=True, timeout=60)
+        ahead = None
+        if ahead_proc.returncode == 0 and ahead_proc.stdout.strip().isdigit():
+            ahead = int(ahead_proc.stdout.strip())
+        matched = publications.get(branch)
+        if (ahead is None and matched is not None
+                and matched.get("state") == "merged"
+                and matched.get("recorded_commit") == record.get("HEAD")):
+            ahead = 0
+        inventory.append({
+            "path": str(path),
+            "branch": branch,
+            "head_sha": record.get("HEAD"),
+            "detached": record.get("detached") is True or branch is None,
+            "dirty": dirty,
+            "unpushed_commits": ahead,
+        })
+    return inventory
+
+
 def _require_live_issue_revision(repo: str, issue: int,
                                  expected: str) -> None:
     try:
@@ -93,6 +265,68 @@ def _require_live_issue_revision(repo: str, issue: int,
 def repo_cmd():
     """Print the detected overlay development checkout root."""
     click.echo(str(find_overlay_root()))
+
+
+@cli.command("doctor")
+@click.option("--repository", type=click.Path(exists=True, file_okay=False,
+                                               path_type=Path), default=".",
+              show_default=True)
+@click.option("--adapter", "adapter_id", default="gentoo-zh", show_default=True)
+@click.option("--operation", default="inspect", show_default=True,
+              help="adapter operation whose readiness should be reported")
+def doctor_cmd(repository, adapter_id, operation):
+    """Inspect repository identity, capabilities, Git state, and readiness."""
+    try:
+        adapter = load_bundled_adapter(adapter_id)
+        report = inspect_repository(repository, adapter, operation=operation)
+    except (KeyError, RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
+    if not report["ok"] or not report["complete"]:
+        raise SystemExit(1)
+
+
+@cli.command("check")
+@click.argument("target", type=click.Path(exists=True, path_type=Path))
+@click.option("--adapter", "adapter_id", default="gentoo-zh", show_default=True)
+@click.option("--min-severity", default="warning",
+              type=click.Choice(["error", "warning", "info", "style"]))
+@click.option("--net", is_flag=True, default=False,
+              help="enable pkgcheck network checks for the selected target")
+def check_cmd(target, adapter_id, min_severity, net):
+    """Run the side-effect-free adapter, lint, and pkgcheck gates."""
+    target = Path(target).resolve()
+    try:
+        root = find_overlay_root(target if target.is_dir() else target.parent)
+        adapter = load_bundled_adapter(adapter_id)
+    except (KeyError, RuntimeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    gates = [
+        Gate("doctor", lambda _root: inspect_repository(
+            root, adapter, operation="inspect")),
+    ]
+    if target.is_file() and target.suffix == ".ebuild":
+        def run_lint(_root):
+            issues = lint_ebuild(parse_ebuild(target))
+            return {
+                "complete": True,
+                "issues": issues,
+                "ok": not any(item["severity"] == "error" for item in issues),
+                "truncated": False,
+            }
+        gates.append(Gate("lint", run_lint))
+    else:
+        gates.append(Gate(
+            "lint", runner=None, required=False,
+            skip_reason="target is not an ebuild"))
+    gates.append(Gate(
+        "qa", lambda _root: run_pkgcheck(
+            target, min_severity=min_severity, net=net)))
+    report = run_read_only_checks(root, gates)
+    click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
+    if not report["ok"] or not report["complete"]:
+        raise SystemExit(1)
 
 
 @cli.command("state-dir")
@@ -138,6 +372,18 @@ def bump_scaffold_cmd(cat_pkg, new_pv):
     except (FileExistsError, FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(str(dst))
+
+
+@cli.command("plan")
+@click.argument("cat_pkg")
+@click.argument("new_pv")
+def bump_plan_cmd(cat_pkg, new_pv):
+    """Create a read-only, source-pinned bump plan."""
+    try:
+        report = build_bump_plan(find_overlay_root(), cat_pkg, new_pv)
+    except (FileExistsError, FileNotFoundError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
 
 
 @cli.command("diff-ebuild")
@@ -199,7 +445,7 @@ def pkgcheck_cmd(path, min_severity, net):
     """Run pkgcheck scan and print structured results filtered by severity."""
     res = run_pkgcheck(path, min_severity=min_severity, net=net)
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
-    if not res["ok"]:
+    if not res["ok"] or not res["complete"]:
         raise SystemExit(1)
 
 
@@ -215,8 +461,17 @@ def pkgcheck_commits_cmd(reverify, remote):
     own pkgcheck workflow runs offline, so this is not a CI reproduction.
     """
     root = find_overlay_root()
-    scan = run_pkgcheck_commits(root, net=True, remote=remote)
-    out = {"scan_ok": scan["ok"], "results": scan["results"]}
+    try:
+        selected_remote = (
+            validate_canonical_remote(root, remote) if remote
+            else find_canonical_remote(root))
+        fetch = fetch_canonical_remote(root, selected_remote)
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
+    scan = run_pkgcheck_commits(root, net=True, remote=selected_remote)
+    scan_complete = scan.get("complete", False)
+    out = {"scan_ok": scan["ok"], "scan_complete": scan_complete,
+           "results": scan["results"], "fetch": fetch, "scan": scan}
     url_blockers = []
     if reverify:
         rv = reverify_url_findings(scan["results"])
@@ -225,7 +480,7 @@ def pkgcheck_commits_cmd(reverify, remote):
     else:
         out["url_recheck"] = {"skipped": True}
     click.echo(_json.dumps(out, indent=2, ensure_ascii=False))
-    if not scan["ok"] or not reverify or url_blockers:
+    if not scan["ok"] or not scan_complete or not reverify or url_blockers:
         raise SystemExit(1)
 
 
@@ -243,7 +498,86 @@ def manifest_verify_cmd(manifest, ebuild):
     src_map = extract_src_uri_map(Path(ebuild).read_text(encoding="utf-8"), subs)
     res = verify_manifest_sizes(Path(manifest).read_text(encoding="utf-8"), src_map)
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
-    if not res["ok"]:
+    if not res["ok"] or not res["complete"]:
+        raise SystemExit(1)
+
+
+@cli.command("artifacts")
+@click.argument("manifest", type=click.Path(exists=True, dir_okay=False,
+                                             path_type=Path))
+@click.option("--evidence", type=click.Path(exists=True, dir_okay=False,
+                                             path_type=Path), required=True,
+              help="reviewed JSON mapping for every DIST entry")
+@click.option("--distdir", type=click.Path(exists=True, file_okay=False,
+                                            path_type=Path), default=None,
+              help="verify local DIST files and Manifest digests")
+def artifacts_cmd(manifest, evidence, distdir):
+    """Audit every Manifest DIST entry and its reviewed source mapping."""
+    try:
+        report = audit_artifacts(manifest, evidence=evidence, distdir=distdir)
+    except (ArtifactError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
+    if not report["ok"] or not report["complete"]:
+        raise SystemExit(1)
+
+
+@cli.command("deps")
+@click.argument("ebuild", type=click.Path(exists=True, dir_okay=False,
+                                           path_type=Path))
+@click.option("--use", "use_flags", multiple=True,
+              help="explicit +FLAG or -FLAG state; repeat for every referenced flag")
+@click.option("--resolve-providers", is_flag=True, default=False,
+              help="query the active Portage repository set for matching providers")
+def deps_cmd(ebuild, use_flags, resolve_providers):
+    """Analyze verified Portage cache metadata without sourcing an ebuild."""
+    try:
+        report = analyze_ebuild_dependencies(
+            ebuild,
+            use=list(use_flags) if use_flags else None,
+            resolve_providers=resolve_providers,
+        )
+    except (DependencyMetadataError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
+    if not report["ok"] or not report["complete"]:
+        raise SystemExit(1)
+
+
+@cli.command("binary")
+@click.argument("target", type=click.Path(exists=True, path_type=Path))
+@click.option("--expected-machine", default=None,
+              help="exact readelf Machine value required for every ELF")
+@click.option("--max-files", default=4096, show_default=True,
+              type=click.IntRange(1, 4096))
+def binary_cmd(target, expected_machine, max_files):
+    """Inspect ELF metadata without executing target binaries."""
+    try:
+        report = inspect_binaries(
+            target, expected_machine=expected_machine, max_files=max_files)
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
+    if not report["ok"] or not report["complete"]:
+        raise SystemExit(1)
+
+
+@cli.command("image")
+@click.argument("root", type=click.Path(exists=True, file_okay=False,
+                                         path_type=Path))
+@click.option("--expected-machine", default=None,
+              help="exact readelf Machine value required for every ELF")
+@click.option("--binaries/--no-binaries", default=True, show_default=True)
+def image_cmd(root, expected_machine, binaries):
+    """Audit an installed or staged filesystem image without executing it."""
+    try:
+        report = inspect_image(
+            root, include_binaries=binaries,
+            expected_machine=expected_machine)
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
+    if not report["ok"] or not report["complete"]:
         raise SystemExit(1)
 
 
@@ -256,6 +590,105 @@ def build_test_cmd(ebuild, level):
     res = run_build_test(ebuild, level=level)
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
     if not res["ok"]:
+        raise SystemExit(1)
+
+
+@cli.command("test")
+@click.argument("atom")
+@click.option("--execute", "-x", is_flag=True, default=False,
+              help="acknowledge Portage configuration changes and package merges")
+@click.option("--evidence-dir", type=click.Path(file_okay=False, path_type=Path),
+              default=None, help="new directory for the bounded test evidence")
+@click.option("--job-name", default=None,
+              help="pkgdev tatt job name; a unique name is generated by default")
+@click.option("--use-combos", default=0, show_default=True,
+              type=click.IntRange(0, MAX_USE_COMBOS))
+@click.option("--use-preference", default="default", show_default=True,
+              type=click.Choice(sorted(USE_PREFERENCES)))
+@click.option("--timeout", default=21600, show_default=True,
+              type=click.IntRange(1, 86400), help="package test timeout in seconds")
+def package_test_cmd(atom, execute, evidence_dir, job_name, use_combos,
+                     use_preference, timeout):
+    """Run a pkgdev tatt package test and retain bounded evidence."""
+    if not execute:
+        raise click.UsageError(
+            "--execute is required because package testing changes Portage "
+            "configuration and merges packages")
+    selected_evidence_dir = (
+        evidence_dir if evidence_dir is not None
+        else _package_test_evidence_dir(atom))
+    try:
+        report = run_package_test(
+            atom, selected_evidence_dir, allow_side_effects=True,
+            job_name=job_name, use_combos=use_combos,
+            use_preference=use_preference, timeout=timeout)
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
+    if not report["ok"] or not report["complete"]:
+        raise SystemExit(1)
+
+
+@cli.command("exec")
+@click.argument("atom")
+@click.option("--executor", "executor_name", required=True,
+              help="named executor from the strict TOML configuration")
+@click.option("--config", type=click.Path(exists=True, dir_okay=False,
+                                            path_type=Path),
+              default=_default_executor_config, show_default=True)
+@click.option("--commit", default="HEAD", show_default=True,
+              help="full local commit recorded in evidence")
+@click.option("--path", "owned_paths", multiple=True,
+              help="exact commit-owned path; required and repeatable for SSH")
+@click.option("--use", "use_state", multiple=True,
+              help="selected +FLAG or -FLAG evidence")
+@click.option("--evidence-dir", type=click.Path(file_okay=False, path_type=Path),
+              default=None, help="new durable evidence directory")
+@click.option("--execute", "allow_execute", "-x", is_flag=True, default=False,
+              help="acknowledge dependency installation and exact package merge")
+def executor_cmd(atom, executor_name, config, commit, owned_paths, use_state,
+                 evidence_dir, allow_execute):
+    """Run the local or configured SSH install contract with durable evidence."""
+    if not allow_execute:
+        raise click.UsageError(
+            "--execute is required because the executor installs dependencies "
+            "and merges the exact package")
+    root = find_overlay_root()
+    resolved_commit = _git_output(root, ["rev-parse", "--verify", f"{commit}^{{commit}}"])
+    selected_evidence = evidence_dir or _executor_evidence_dir(atom)
+    try:
+        specs = load_executor_config(config)
+        if executor_name not in specs:
+            raise click.ClickException(
+                f"executor is not configured: {executor_name}")
+        spec = specs[executor_name]
+        if spec.type == "local" and owned_paths:
+            raise click.UsageError("--path applies only to SSH executors")
+        if spec.type == "ssh" and not owned_paths:
+            raise click.UsageError(
+                "SSH execution requires every commit-owned path through --path")
+        with tempfile.TemporaryDirectory(prefix="gzh-owned-patch-") as temporary:
+            transfer = None
+            if spec.type == "ssh":
+                transfer = create_commit_patch(
+                    root, resolved_commit, owned_paths,
+                    Path(temporary) / "owned.patch")
+            report = create_executor(spec).execute(InstallRequest(
+                atom=atom,
+                commit=resolved_commit,
+                evidence_dir=selected_evidence,
+                use_state=tuple(use_state),
+                transfer=transfer,
+            ))
+    except click.ClickException:
+        raise
+    except (ExecutorError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    verification = verify_evidence(
+        selected_evidence, expected_digest=report.get("digest"))
+    output = {"execution": report, "verification": verification}
+    click.echo(_json.dumps(output, indent=2, ensure_ascii=False))
+    if not report.get("ok") or not verification["ok"]:
         raise SystemExit(1)
 
 
@@ -305,14 +738,37 @@ def recommit_cmd(paths, message):
 @click.option("--maintainer", default=None, help="filter by issue body 'CC: @<name>'")
 @click.option("--pkg", default=None, help="filter by cat/pkg")
 @click.option("--comments/--no-comments", default=True, show_default=True)
+@click.option("--autobump", default="any", show_default=True,
+              type=click.Choice(["any", "off", "on", "manual-required"]),
+              help="select from canonical autobump config or current bot status")
+@click.option("--issue", "issues", multiple=True, type=click.IntRange(min=1),
+              help="include an exact issue with complete revision evidence")
+@click.option("--git-remote", default=None,
+              help="fetched canonical remote used for selector provenance")
 @click.option("--limit", default=100, show_default=True,
               type=click.IntRange(1, 1000))
 @click.option("--no-output", is_flag=True, default=False,
               help="skip writing the state/queues/bump-issues-<ts>.json snapshot")
-def bump_issues_cmd(repo, state, maintainer, pkg, comments, limit, no_output):
+def bump_issues_cmd(repo, state, maintainer, pkg, comments, autobump, issues,
+                    git_remote, limit, no_output):
     """List nvchecker bump-reminder issues as a JSON queue (read-only)."""
+    selected_remote = git_remote
+    canonical_loader = None
+    if autobump != "any" or selected_remote is not None:
+        try:
+            root = find_overlay_root()
+            selected_remote = (
+                validate_canonical_remote(root, selected_remote)
+                if selected_remote else find_canonical_remote(root))
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc)) from exc
+        canonical_loader = lambda remote, path, runner: load_canonical_config(
+            remote, path, runner, cwd=root, expected_repository=repo)
     res = run_bump_issues(repo=repo, state=state, maintainer=maintainer, pkg=pkg,
-                          with_comments=comments, limit=limit)
+                          with_comments=comments, limit=limit,
+                          autobump=autobump, issues=issues,
+                          canonical_remote=selected_remote,
+                          canonical_loader=canonical_loader)
     exit_code = res.pop("exit_code", 0)
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
     if not no_output and res.get("ok"):
@@ -408,6 +864,118 @@ def triage_resolve_cmd(issue, repo, cat_pkg, target_version, issue_updated_at,
     click.echo(_json.dumps(rec, indent=2, ensure_ascii=False))
 
 
+@cli.command("pr-plan")
+@click.option("--title", required=True, help="exact pkgdev-generated PR title")
+@click.option("--body", "body_file", required=True,
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="file containing the complete body and retained template")
+@click.option("--head", "head_branch", default=None,
+              help="local topic branch; defaults to the current branch")
+@click.option("--base", "base_branch", default="master", show_default=True)
+@click.option("--git-remote", default=None,
+              help="canonical remote; discovered by URL when omitted")
+@click.option("--template", "template_path", default=None,
+              type=click.Path(dir_okay=False, path_type=Path),
+              help="live PR template path when the repository uses a custom path")
+@click.option("--output", type=click.Path(dir_okay=False, path_type=Path),
+              default=None, help="new content-addressed plan path")
+def pr_plan_cmd(title, body_file, head_branch, base_branch, git_remote,
+                template_path, output):
+    """Record an immutable PR plan without pushing or calling gh pr create."""
+    root = find_overlay_root()
+    try:
+        remote = (
+            validate_canonical_remote(root, git_remote) if git_remote
+            else find_canonical_remote(root))
+        fetch = fetch_canonical_remote(root, remote)
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if base_branch != fetch["default_branch"]:
+        raise click.ClickException(
+            f"PR base must be the fetched canonical branch "
+            f"{fetch['default_branch']!r}")
+    selected_head = head_branch or _git_output(
+        root, ["symbolic-ref", "--short", "HEAD"])
+    head_sha = _git_output(
+        root, ["rev-parse", "--verify", f"refs/heads/{selected_head}^{{commit}}"])
+    base_sha = _git_output(
+        root, ["rev-parse", "--verify", f"{remote}/{base_branch}^{{commit}}"])
+    if base_sha != fetch["after_oid"]:
+        raise click.ClickException(
+            f"fetched {remote}/{base_branch} does not match its recorded OID")
+    changed = _git_output(root, [
+        "diff", "--name-only", "--diff-filter=ACDMRTUXB",
+        f"{base_sha}...{head_sha}", "--",
+    ]).splitlines()
+    if not changed:
+        raise click.ClickException("the PR plan has no changed files")
+    try:
+        plan = build_pr_plan(
+            title=title,
+            body=body_file.read_text(encoding="utf-8"),
+            files=changed,
+            head_branch=selected_head,
+            head_sha=head_sha,
+            base_branch=base_branch,
+            base_sha=base_sha,
+            template=_pr_template(root, template_path),
+        )
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    destination = output or (
+        _checked_state_dir() / "plans" / f"{plan['plan_id'].replace(':', '-')}.json")
+    _atomic_json(destination, plan)
+    click.echo(_json.dumps({
+        "path": str(destination.resolve()), "plan": plan,
+    }, indent=2, ensure_ascii=False))
+
+
+@cli.command("ci")
+@click.argument("pr_number", type=click.IntRange(min=1))
+@click.option("--repo", default="gentoo-zh/overlay", show_default=True)
+@click.option("--watch", is_flag=True, default=False,
+              help="poll until every check reaches a terminal state")
+@click.option("--interval", default=15, show_default=True,
+              type=click.IntRange(5, 60), help="watch interval in seconds")
+@click.option("--timeout", default=3600, show_default=True,
+              type=click.IntRange(1, 86400), help="maximum watch duration")
+def ci_cmd(pr_number, repo, watch, interval, timeout):
+    """Report complete pull request check names, URLs, counts, and final state."""
+    deadline = time.monotonic() + timeout
+    snapshots = []
+    last_signature = None
+    while True:
+        observed_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        try:
+            snapshot = observe_ci(
+                repo, pr_number,
+                lambda repository, number: read_ci(repository, number),
+                observed_at=observed_at)
+        except (GitHubReadError, TypeError, ValueError) as exc:
+            raise click.ClickException(str(exc)) from exc
+        signature = {
+            key: value for key, value in snapshot.items()
+            if key != "observed_at"
+        }
+        if signature != last_signature:
+            snapshots.append(snapshot)
+            last_signature = signature
+        terminal = snapshot["checks_state"] in {"passed", "failed"}
+        if not watch or terminal or time.monotonic() >= deadline:
+            break
+        time.sleep(min(interval, max(0, deadline - time.monotonic())))
+    report = {
+        "schema_version": 1,
+        "watch": watch,
+        "timed_out": watch and not terminal,
+        "snapshots": snapshots,
+        "final": snapshot,
+    }
+    click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
+    if not snapshot["complete"] or snapshot["checks_state"] != "passed":
+        raise SystemExit(1)
+
+
 @cli.group("batch-report")
 def batch_report_group():
     """Create and atomically checkpoint durable batch reports."""
@@ -415,13 +983,28 @@ def batch_report_group():
 
 @batch_report_group.command("create")
 @click.option("--input", "input_stream", type=click.File("r"), default="-",
-              show_default=True, help="complete Markdown report, or '-' for stdin")
-def batch_report_create_cmd(input_stream):
+              show_default=True, help="complete report, or '-' for stdin")
+@click.option("--format", "report_format", default="markdown", show_default=True,
+              type=click.Choice(["markdown", "json"]),
+              help="JSON is required for publication reconciliation")
+def batch_report_create_cmd(input_stream, report_format):
     """Create a uniquely named initial report checkpoint."""
     content = input_stream.read()
     if not content.strip():
         raise click.UsageError("batch report input must not be empty")
-    path = create_batch_report(_checked_state_dir() / "batches", content)
+    suffix = ".md"
+    if report_format == "json":
+        try:
+            value = _json.loads(content)
+        except _json.JSONDecodeError as exc:
+            raise click.UsageError(f"invalid JSON report: {exc}") from exc
+        if not isinstance(value, dict):
+            raise click.UsageError("JSON batch report must be an object")
+        content = _json.dumps(
+            value, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+        suffix = ".json"
+    path = create_batch_report(
+        _checked_state_dir() / "batches", content, suffix=suffix)
     click.echo(_json.dumps({"path": str(path), "sha256": report_sha256(path)},
                            indent=2))
 
@@ -433,21 +1016,100 @@ def batch_report_create_cmd(input_stream):
 @click.option("--input", "input_stream", type=click.File("r"), default="-",
               show_default=True, help="complete Markdown report, or '-' for stdin")
 def batch_report_checkpoint_cmd(report, expected_sha256, input_stream):
-    """Atomically replace an owned batch report with complete Markdown."""
-    report = report.resolve()
-    directory = (_checked_state_dir() / "batches").resolve()
-    if report.parent != directory or not report.name.startswith("bump-batch-"):
-        raise click.ClickException(
-            f"report must be a gzh batch report under {directory}")
+    """Atomically replace an owned Markdown or JSON batch report."""
+    report = _owned_batch_report(report, suffixes={".json", ".md"})
     content = input_stream.read()
     if not content.strip():
         raise click.UsageError("batch report input must not be empty")
+    if report.suffix == ".json":
+        try:
+            value = _json.loads(content)
+        except _json.JSONDecodeError as exc:
+            raise click.UsageError(f"invalid JSON report: {exc}") from exc
+        if not isinstance(value, dict):
+            raise click.UsageError("JSON batch report must be an object")
+        content = _json.dumps(
+            value, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
     try:
         digest = checkpoint_batch_report(
             report, content, expected_sha256=expected_sha256)
     except (BatchReportConflict, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(_json.dumps({"path": str(report), "sha256": digest}, indent=2))
+
+
+@batch_report_group.command("reconcile")
+@click.argument("report", type=click.Path(exists=True, dir_okay=False,
+                                            path_type=Path))
+@click.option("--expected-sha256", required=True,
+              help="file sha256 returned by the preceding checkpoint")
+@click.option("--repo", default="gentoo-zh/overlay", show_default=True)
+@click.option("--fork", "fork_repository", default=None,
+              help="publication fork owner/name; defaults to the current user fork")
+def batch_report_reconcile_cmd(report, expected_sha256, repo, fork_repository):
+    """Read GitHub publication state into a structured report checkpoint."""
+    report = _owned_batch_report(report, suffixes={".json"})
+    current_file_sha = report_sha256(report)
+    if current_file_sha != expected_sha256:
+        raise click.ClickException(
+            f"batch report changed: expected {expected_sha256}, "
+            f"found {current_file_sha}")
+    try:
+        value = _json.loads(report.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("batch report must contain a JSON object")
+        provider = GitHubPublicationProvider(
+            repo, fork_repository=fork_repository)
+        reconciled = reconcile_batch_report(
+            value,
+            expected_input_sha256=batch_report_digest(value),
+            provider=provider,
+            observed_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        )
+        content = _json.dumps(
+            reconciled, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+        digest = checkpoint_batch_report(
+            report, content, expected_sha256=expected_sha256)
+    except (BatchReportConflict, GitHubReadError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(_json.dumps({
+        "path": str(report),
+        "sha256": digest,
+        "observation": reconciled["publication_observations"][-1],
+    }, indent=2, ensure_ascii=False))
+
+
+@cli.group("batch")
+def batch_group():
+    """Inspect durable batch closeout state without publishing or deleting."""
+
+
+@batch_group.command("cleanup")
+@click.argument("report", type=click.Path(exists=True, dir_okay=False,
+                                            path_type=Path))
+@click.option("--dry-run", is_flag=True, default=False,
+              help="list candidates only; removal is intentionally unsupported")
+def batch_cleanup_cmd(report, dry_run):
+    """Classify safe worktree cleanup candidates without removing anything."""
+    if not dry_run:
+        raise click.UsageError(
+            "--dry-run is required; this command never removes worktrees or branches")
+    report = _owned_batch_report(report, suffixes={".json"})
+    try:
+        value = _json.loads(report.read_text(encoding="utf-8"))
+    except (_json.JSONDecodeError, OSError) as exc:
+        raise click.ClickException(f"cannot read batch report: {exc}") from exc
+    observations = value.get("publication_observations") if isinstance(value, dict) else None
+    if not isinstance(observations, list) or not observations:
+        raise click.ClickException("batch report has no publication observation")
+    latest = observations[-1]
+    items = latest.get("items") if isinstance(latest, dict) else None
+    if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+        raise click.ClickException("latest publication observation is incomplete")
+    root = find_overlay_root()
+    inventory = _worktree_inventory(root, items)
+    result = analyze_cleanup_dry_run(inventory, items)
+    click.echo(_json.dumps(result, indent=2, ensure_ascii=False))
 
 
 @cli.group("notify")

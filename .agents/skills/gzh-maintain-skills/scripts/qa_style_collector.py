@@ -37,7 +37,9 @@ SOURCE_MANAGER_PATH = (
 
 TOPIC_ORDER = (
     "qa", "dependencies", "style", "metadata", "manifest", "license",
-    "patch", "test", "build", "install",
+    "patch", "test", "build", "install", "eclass", "profile", "keyword",
+    "move", "removal", "new-package", "artifact", "prebuilt",
+    "version-tracking",
 )
 
 TOPIC_SOURCE_IDS = {
@@ -51,6 +53,15 @@ TOPIC_SOURCE_IDS = {
     "test": ("devmanual-tests", "ebuild-manual"),
     "build": ("devmanual", "ebuild-manual"),
     "install": ("ebuild-manual", "portage-emerge"),
+    "eclass": ("devmanual-eclasses", "devmanual-eclass-writing"),
+    "profile": ("pms-latest", "portage-config", "portage-source"),
+    "keyword": ("pms-latest", "devmanual-new-ebuild"),
+    "move": ("pms-latest", "devmanual-package-moves"),
+    "removal": ("devmanual-removal", "devmanual-dependencies"),
+    "new-package": ("devmanual-new-ebuild", "devmanual-metadata"),
+    "artifact": ("devmanual-manifest", "devmanual-licenses", "pkgdev"),
+    "prebuilt": ("ebuild-manual", "devmanual-licenses", "gentoo-qa-policy"),
+    "version-tracking": ("nvchecker-usage",),
 }
 
 SUBJECT_PATTERNS = {
@@ -79,6 +90,29 @@ SUBJECT_PATTERNS = {
         re.IGNORECASE),
     "install": re.compile(
         r"\b(?:install|merge|emerge|src_install|postinst|preinst)\b",
+        re.IGNORECASE),
+    "eclass": re.compile(
+        r"\b(?:eclass|eclasses|inherit|export-functions)\b", re.IGNORECASE),
+    "profile": re.compile(
+        r"\b(?:profiles?|layout\.conf|repo_name|package\.mask|use\.mask)\b",
+        re.IGNORECASE),
+    "keyword": re.compile(
+        r"\b(?:keywords?|stabili[sz](?:e|ation)|dekeyword)\b", re.IGNORECASE),
+    "move": re.compile(
+        r"\b(?:move|rename|slotmove|profiles?/updates)\b", re.IGNORECASE),
+    "removal": re.compile(
+        r"\b(?:remove|removal|drop|treeclean|last-rite)\b", re.IGNORECASE),
+    "new-package": re.compile(
+        r"\b(?:new package|new ebuild|add package|initial ebuild)\b",
+        re.IGNORECASE),
+    "artifact": re.compile(
+        r"\b(?:artifacts?|distfiles?|src_uri|vendor bundle|source archive)\b",
+        re.IGNORECASE),
+    "prebuilt": re.compile(
+        r"\b(?:prebuilt|binary package|qa_prebuilt|elf|rpath|runpath|soname)\b",
+        re.IGNORECASE),
+    "version-tracking": re.compile(
+        r"\b(?:nvchecker|nvcmp|version tracking|upstream version)\b",
         re.IGNORECASE),
 }
 
@@ -592,6 +626,26 @@ def path_matches(topic: str, path: str) -> bool:
         }
     if topic == "install":
         return name in {"install", "install.sh", "emerge-on-pr.yml"}
+    if topic == "eclass":
+        return lowered.endswith(".eclass") or "eclass" in parts
+    if topic == "profile":
+        return "profiles" in parts or name in {"layout.conf", "repo_name"}
+    if topic == "keyword":
+        return name in {"package.accept_keywords", "package.keywords"}
+    if topic == "move":
+        return "profiles" in parts and "updates" in parts
+    if topic == "removal":
+        return name in {"package.mask", "package.mask.last-rites"}
+    if topic == "new-package":
+        return False
+    if topic == "artifact":
+        return name == "manifest" or lowered.endswith((
+            ".tar", ".tar.gz", ".tar.xz", ".tar.zst", ".zip"))
+    if topic == "prebuilt":
+        return name.endswith("-bin.ebuild") or "prebuilt" in parts
+    if topic == "version-tracking":
+        return name in {"overlay.toml", "nvchecker.toml", "nvchecker.yml",
+                        "nvchecker.yaml"}
     raise ValueError(f"unknown topic: {topic}")
 
 

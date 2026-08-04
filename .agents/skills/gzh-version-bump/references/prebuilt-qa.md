@@ -4,6 +4,17 @@ Use this checklist for packages that install upstream-built executables or libra
 Read the live overlay `AGENTS.md` and CI workflows first. The PMS, Devmanual, current
 ebuild manual, Portage behavior, and upstream primary material are authoritative.
 
+## Contents
+
+- [Provenance, license, and architecture](#provenance-license-and-architecture)
+- [Ebuild declarations](#ebuild-declarations)
+- [Audit every installed object](#audit-every-installed-object)
+- [Dependencies and binary changes](#dependencies-and-binary-changes)
+- [Installed image](#installed-image)
+- [Required verification](#required-verification)
+- [Heuristic review targets](#heuristic-review-targets)
+- [Primary references](#primary-references)
+
 ## Provenance, license, and architecture
 
 - Verify every downloaded asset on the upstream release or distribution page. Record

@@ -4,14 +4,18 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -91,13 +95,30 @@ def codex_discovery_destinations() -> list[Path]:
 
 def opencode_discovery_destinations() -> list[Path]:
     home = Path.home()
-    paths = [
-        expand_env_path("CLAUDE_CONFIG_DIR", home / ".claude") / "skills",
-        expand_env_path(
-            "XDG_CONFIG_HOME", home / ".config") / "opencode" / "skills",
-        home / ".agents" / "skills",
-    ]
+    paths = [expand_env_path(
+        "XDG_CONFIG_HOME", home / ".config") / "opencode" / "skills"]
+    if os.environ.get("OPENCODE_DISABLE_EXTERNAL_SKILLS") != "1":
+        if os.environ.get("OPENCODE_DISABLE_CLAUDE_CODE_SKILLS") != "1":
+            paths.append(
+                expand_env_path("CLAUDE_CONFIG_DIR", home / ".claude") / "skills")
+        paths.append(home / ".agents" / "skills")
     return list(dict.fromkeys(paths))
+
+
+def opencode_duplicate_bases(
+        clients: list[str], records: dict[Path, dict],
+        planned: set[Path] | None = None) -> list[Path]:
+    active = "opencode" in clients or any(
+        "opencode" in record["clients"] for record in records.values())
+    if not active:
+        return []
+    planned = planned or set()
+    duplicates = []
+    for candidate in opencode_discovery_destinations():
+        base = absolute_path(candidate)
+        if base in planned or any(path_present(base / name) for name in SKILL_NAMES):
+            duplicates.append(base)
+    return sorted(set(duplicates), key=str)
 
 
 def gzh_paths() -> tuple[Path, Path]:
@@ -117,6 +138,31 @@ def installation_state_path() -> Path:
     home = Path.home()
     data_home = expand_env_path("XDG_DATA_HOME", home / ".local" / "share")
     return data_home / "gentoo-zh-skills" / INSTALLATION_STATE
+
+
+def installation_lock_path() -> Path:
+    state = installation_state_path()
+    return state.parent / f".{state.name}.lock"
+
+
+@contextmanager
+def installation_mutation_lock() -> Iterator[None]:
+    path = installation_lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_RDWR | os.O_CREAT | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise InstallError(f"cannot open managed installation lock: {path}") from exc
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise InstallError(f"invalid managed installation lock: {path}")
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(descriptor)
 
 
 def valid_skill_name(name: object) -> bool:
@@ -456,12 +502,17 @@ def synchronize_skill_bundle(records: dict[Path, dict], old_record: dict | None,
                 pass
 
 
-def remove_skill_bundle(records: dict[Path, dict], record: dict) -> None:
+def validate_remove_skill_bundle(record: dict) -> None:
     base = Path(record["target"])
     for name in record["skills"]:
         destination = base / name
         if path_present(destination) and not recorded_skill_owned(record, name):
             raise InstallError(f"refusing to remove unowned path: {destination}")
+
+
+def remove_skill_bundle(records: dict[Path, dict], record: dict) -> None:
+    validate_remove_skill_bundle(record)
+    base = Path(record["target"])
     removed: list[tuple[Path, Path]] = []
     try:
         for name in record["skills"]:
@@ -657,23 +708,11 @@ def run_install(clients: list[str], mode: str, include_skills: bool,
                 bundles[base] = old_record, new_record
             except InstallError as exc:
                 conflicts.append(str(exc))
-        if "opencode" in clients:
-            planned_bases = set(targets)
-            planned_discovery = planned_bases.intersection(map(
-                absolute_path, opencode_discovery_destinations()))
-            if len(planned_discovery) > 1:
-                paths = ", ".join(str(path) for path in sorted(planned_discovery))
-                conflicts.append(
-                    f"selected clients would create duplicate OpenCode skills: {paths}")
-            for base in opencode_discovery_destinations():
-                base = absolute_path(base)
-                if base in planned_bases:
-                    continue
-                for name in SKILL_NAMES:
-                    alternate = base / name
-                    if path_present(alternate):
-                        conflicts.append(
-                            f"duplicate OpenCode skill exists outside the target: {alternate}")
+        duplicate_bases = opencode_duplicate_bases(
+            clients, records, planned=set(targets))
+        if len(duplicate_bases) > 1:
+            paths = ", ".join(str(path) for path in duplicate_bases)
+            conflicts.append(f"installation would create duplicate OpenCode skills: {paths}")
         if "codex" in clients:
             planned_bases = set(targets)
             for base in codex_discovery_destinations():
@@ -722,11 +761,18 @@ def run_install(clients: list[str], mode: str, include_skills: bool,
 
 def selected_skill_targets(clients: list[str], scan_all: bool,
                            records: dict[Path, dict]) -> dict[Path, list[str]]:
-    targets = {
-        absolute_path(base): consumers
-        for base, consumers in destinations(clients).items()
-    }
     selected = set(clients)
+    targets = {
+        base: record["clients"]
+        for base, record in records.items()
+        if scan_all or selected.intersection(record["clients"])
+    }
+    recorded_clients = {
+        client for record in records.values() for client in record["clients"]}
+    missing_clients = [
+        client for client in clients if client not in recorded_clients]
+    for base, consumers in destinations(missing_clients).items():
+        targets[absolute_path(base)] = consumers
     for base, record in records.items():
         if scan_all or selected.intersection(record["clients"]):
             targets.setdefault(base, record["clients"])
@@ -746,6 +792,13 @@ def run_status(clients: list[str], include_skills: bool,
     if include_skills:
         records = read_installation_state()
         targets = selected_skill_targets(clients, scan_all, records)
+        duplicate_bases = opencode_duplicate_bases(clients, records)
+        if len(duplicate_bases) > 1:
+            print(
+                "error: duplicate OpenCode skills are discoverable from: "
+                + ", ".join(str(path) for path in duplicate_bases),
+                file=sys.stderr)
+            failed = True
         for base, consumers in targets.items():
             label = "+".join(consumers)
             record = records.get(base)
@@ -771,24 +824,49 @@ def run_uninstall(clients: list[str], include_skills: bool,
     if include_skills:
         records = read_installation_state()
         targets = selected_skill_targets(clients, scan_all, records)
+        selected = set(clients)
+        planned: list[tuple[Path, list[str], dict, dict[str, bool]]] = []
+        absent: list[tuple[Path, list[str]]] = []
+        conflicts: list[tuple[str, str]] = []
         for base, consumers in targets.items():
             label = "+".join(consumers)
             try:
-                record = records.get(base) or legacy_skill_bundle(base, consumers)
+                record = records.get(base) or legacy_skill_bundle(base)
                 if record is None:
                     for name in SKILL_NAMES:
                         destination = base / name
-                        if not path_present(destination):
-                            print(f"{label:<18} {name:<23} not installed")
-                        else:
-                            print(
-                                f"{label:<18} {name:<23} refusing to remove unowned path: "
-                                f"{destination}", file=sys.stderr)
-                            failed = True
+                        if path_present(destination):
+                            conflicts.append((
+                                label,
+                                f"refusing to remove unowned path: {destination}"))
+                    absent.append((base, consumers))
                     continue
+                remaining = set(record["clients"]) - selected
+                if not scan_all and remaining:
+                    requested = ", ".join(sorted(selected))
+                    retained = ", ".join(sorted(remaining))
+                    raise InstallError(
+                        f"refusing partial uninstall at {base}: selecting {requested} "
+                        f"would remove skills shared with {retained}; select every "
+                        "recorded client together")
+                validate_remove_skill_bundle(record)
                 present = {
                     name: path_present(base / name) for name in record["skills"]
                 }
+                planned.append((base, consumers, record, present))
+            except (InstallError, OSError) as exc:
+                conflicts.append((label, str(exc)))
+        if conflicts:
+            for label, conflict in conflicts:
+                print(f"{label:<18} {'bundle':<23} {conflict}", file=sys.stderr)
+            return 1
+        for base, consumers in absent:
+            label = "+".join(consumers)
+            for name in SKILL_NAMES:
+                print(f"{label:<18} {name:<23} not installed")
+        for _base, consumers, record, present in planned:
+            label = "+".join(consumers)
+            try:
                 remove_skill_bundle(records, record)
                 for name in record["skills"]:
                     state = "removed" if present[name] else "not installed"
@@ -885,7 +963,8 @@ def main() -> int:
     if args.refresh_installed:
         if args.clients or args.mode or args.skills_only or args.gzh_only:
             raise InstallError("--refresh-installed does not accept target or mode options")
-        return refresh_installed()
+        with installation_mutation_lock():
+            return refresh_installed()
     clients = args.clients or ["codex", "opencode"]
     scan_all = not args.clients
     include_skills = not args.gzh_only
@@ -895,8 +974,11 @@ def main() -> int:
     if args.status:
         return run_status(clients, include_skills, include_gzh, scan_all=scan_all)
     if args.uninstall:
-        return run_uninstall(clients, include_skills, include_gzh, scan_all=scan_all)
-    return run_install(clients, args.mode or "link", include_skills, include_gzh)
+        with installation_mutation_lock():
+            return run_uninstall(
+                clients, include_skills, include_gzh, scan_all=scan_all)
+    with installation_mutation_lock():
+        return run_install(clients, args.mode or "link", include_skills, include_gzh)
 
 
 if __name__ == "__main__":

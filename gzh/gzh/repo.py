@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 _CANONICAL_SLUGS = ("gentoo-zh/overlay", "microcai/gentoo-zh")
 _PORTAGE_REPOS = Path("/var/db/repos")
+_DEFAULT_BRANCH = "master"
 
 
 def github_slug(url: str) -> str | None:
@@ -65,17 +66,13 @@ def find_overlay_root(start: Path | None = None) -> Path:
     return validate_overlay_root(Path(out.stdout.strip()))
 
 
-def find_canonical_remote(cwd: Path, runner=subprocess.run) -> str:
-    """Name of the remote pointing at gentoo-zh/overlay.
-
-    Usually `upstream` on a fork clone and `origin` on a direct clone, so it must be
-    discovered rather than assumed. Prefer the current repository over the accepted
-    legacy repository, then conventional remote names when duplicate aliases exist.
-    """
-    proc = runner(["git", "remote", "-v"], cwd=str(cwd), capture_output=True, text=True)
+def canonical_remote_candidates(cwd: Path, runner=subprocess.run) -> list[dict]:
+    """Return canonical fetch remotes with their tracked default-branch OIDs."""
+    proc = runner(["git", "remote", "-v"], cwd=str(cwd),
+                  capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(f"cannot list remotes in {cwd}: {proc.stderr.strip()}")
-    ranks = {}
+    matches: dict[str, dict] = {}
     for line in (proc.stdout or "").splitlines():
         parts = line.split()
         if len(parts) < 2 or (len(parts) >= 3 and parts[2] != "(fetch)"):
@@ -83,13 +80,45 @@ def find_canonical_remote(cwd: Path, runner=subprocess.run) -> str:
         slug = github_slug(parts[1])
         for rank, canonical_slug in enumerate(_CANONICAL_SLUGS):
             if slug == canonical_slug:
-                ranks[parts[0]] = min(rank, ranks.get(parts[0], rank))
+                current = matches.get(parts[0])
+                if current is None or rank < current["priority"]:
+                    matches[parts[0]] = {
+                        "name": parts[0], "url": parts[1],
+                        "slug": slug, "priority": rank,
+                    }
                 break
-    if not ranks:
+    for name, item in matches.items():
+        ref = f"refs/remotes/{name}/{_DEFAULT_BRANCH}"
+        oid = runner(["git", "rev-parse", "--verify", ref], cwd=str(cwd),
+                     capture_output=True, text=True)
+        value = (oid.stdout or "").strip()
+        item["default_branch"] = _DEFAULT_BRANCH
+        item["oid"] = value if oid.returncode == 0 and value else None
+    return sorted(matches.values(), key=lambda item: (item["priority"], item["name"]))
+
+
+def find_canonical_remote(cwd: Path, runner=subprocess.run) -> str:
+    """Name of the remote pointing at gentoo-zh/overlay.
+
+    Usually `upstream` on a fork clone and `origin` on a direct clone, so it must be
+    discovered rather than assumed. Prefer the current repository over the accepted
+    legacy repository, then conventional remote names when duplicate aliases exist.
+    """
+    candidates = canonical_remote_candidates(cwd, runner=runner)
+    if not candidates:
         raise RuntimeError(
             "no canonical gentoo-zh/overlay or microcai/gentoo-zh remote found")
-    best_rank = min(ranks.values())
-    names = {name for name, rank in ranks.items() if rank == best_rank}
+    best_rank = min(item["priority"] for item in candidates)
+    selected = [item for item in candidates if item["priority"] == best_rank]
+    if len(selected) > 1:
+        oids = {item["oid"] for item in selected}
+        if None in oids or len(oids) != 1:
+            detail = ", ".join(
+                f"{item['name']}={item['oid'] or 'missing'}" for item in selected)
+            raise RuntimeError(
+                "canonical remote aliases do not have one verified master OID; "
+                f"select and fetch one explicitly: {detail}")
+    names = {item["name"] for item in selected}
     for preferred in ("upstream", "origin", "canonical"):
         if preferred in names:
             return preferred
@@ -110,3 +139,47 @@ def validate_canonical_remote(cwd: Path, remote: str,
             f"remote {remote!r} does not point to gentoo-zh/overlay or "
             "microcai/gentoo-zh")
     return remote
+
+
+def fetch_canonical_remote(cwd: Path, remote: str,
+                           runner=subprocess.run) -> dict:
+    """Fetch one explicitly selected canonical remote and bind its HEAD to master."""
+    validate_canonical_remote(cwd, remote, runner=runner)
+
+    def oid() -> str | None:
+        proc = runner(
+            ["git", "rev-parse", "--verify",
+             f"refs/remotes/{remote}/{_DEFAULT_BRANCH}"],
+            cwd=str(cwd), capture_output=True, text=True)
+        value = (proc.stdout or "").strip()
+        return value if proc.returncode == 0 and value else None
+
+    before = oid()
+    fetch = runner(["git", "fetch", remote, _DEFAULT_BRANCH], cwd=str(cwd),
+                   capture_output=True, text=True)
+    if fetch.returncode != 0:
+        raise RuntimeError(
+            f"cannot fetch {remote}/{_DEFAULT_BRANCH}: {fetch.stderr.strip()}")
+    after = oid()
+    if after is None:
+        raise RuntimeError(
+            f"fetch completed without {remote}/{_DEFAULT_BRANCH}")
+    set_head = runner(
+        ["git", "remote", "set-head", remote, _DEFAULT_BRANCH], cwd=str(cwd),
+        capture_output=True, text=True)
+    if set_head.returncode != 0:
+        raise RuntimeError(
+            f"cannot set {remote}/HEAD to {_DEFAULT_BRANCH}: {set_head.stderr.strip()}")
+    return {
+        "after_oid": after,
+        "before_oid": before,
+        "changed": before != after,
+        "complete": True,
+        "default_branch": _DEFAULT_BRANCH,
+        "fetch_command": ["git", "fetch", remote, _DEFAULT_BRANCH],
+        "ok": True,
+        "remote": remote,
+        "stderr": fetch.stderr,
+        "stdout": fetch.stdout,
+        "truncated": False,
+    }

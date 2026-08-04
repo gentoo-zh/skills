@@ -17,6 +17,12 @@ Use the live gentoo-zh overlay `AGENTS.md` and `docs/devmanual.md` first for rep
 - Manifest maintenance: <https://devmanual.gentoo.org/general-concepts/manifest/>
 - Ebuild revisions: <https://devmanual.gentoo.org/general-concepts/ebuild-revisions/>
 - Licenses and redistribution restrictions: <https://devmanual.gentoo.org/general-concepts/licenses/>
+- Portage `ebuild(1)` phase command: <https://dev.gentoo.org/~zmedico/portage/doc/man/ebuild.1.html>
+- Portage `ebuild(5)` format and phase reference: <https://dev.gentoo.org/~zmedico/portage/doc/man/ebuild.5.html>
+- Portage `make.conf(5)` and `FEATURES`: <https://dev.gentoo.org/~zmedico/portage/doc/man/make.conf.5.html>
+- Portage repository and profile configuration: <https://dev.gentoo.org/~zmedico/portage/doc/man/portage.5.html>
+- pkgcheck command reference: <https://pkgcore.github.io/pkgcheck/man/pkgcheck.html>
+- pkgdev command reference: <https://pkgcore.github.io/pkgdev/man/pkgdev.html>
 - GLEP 66 repository policy: <https://www.gentoo.org/glep/glep-0066.html>
 - GLEP 76 copyright and certificate-of-origin policy: <https://www.gentoo.org/glep/glep-0076.html>
 

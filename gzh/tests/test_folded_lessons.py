@@ -74,14 +74,17 @@ def test_pkgcheck_net_flag(tmp_path):
     assert "--net" in seen["args"]
 
 
-def _git_faker(seen, *, merge_base="abc123", commit_count="1",
+def _git_faker(seen, *, merge_base="abc123", commit_count="1", remote_head=True,
                remote_url="git@github.com:gentoo-zh/overlay.git"):
     """Fake runner answering the git probes run_pkgcheck_commits makes before scanning."""
     def fake_run(args, **kw):
         if args[:2] == ["git", "remote"] and args[2] == "-v":
             return subprocess.CompletedProcess(args, 0, stdout=f"upstream\t{remote_url} (fetch)\n", stderr="")
+        if args[:3] == ["git", "rev-parse", "--verify"]:
+            return subprocess.CompletedProcess(args, 0, stdout="a" * 40 + "\n", stderr="")
         if args[:2] == ["git", "symbolic-ref"]:
-            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+            return subprocess.CompletedProcess(
+                args, 0 if remote_head else 1, stdout="", stderr="")
         if args[:2] == ["git", "merge-base"]:
             return subprocess.CompletedProcess(args, 0 if merge_base else 1, stdout=merge_base, stderr="")
         if args[:3] == ["git", "rev-list", "--count"]:
@@ -115,6 +118,19 @@ def test_pkgcheck_commits_refuses_an_empty_merge_base(tmp_path):
     else:
         raise AssertionError("expected RuntimeError instead of a silently green gate")
     assert "args" not in seen  # never reached pkgcheck
+
+
+def test_pkgcheck_commits_does_not_mutate_missing_remote_head(tmp_path):
+    seen = {}
+    try:
+        run_pkgcheck_commits(
+            tmp_path, net=True,
+            runner=_git_faker(seen, remote_head=False))
+    except RuntimeError as exc:
+        assert "remote HEAD" in str(exc)
+    else:
+        raise AssertionError("expected missing remote HEAD to stop the read-only gate")
+    assert "args" not in seen
 
 
 def test_pkgcheck_commits_refuses_an_empty_commit_range(tmp_path):
@@ -222,6 +238,10 @@ def test_pkgcheck_commits_cli_fails_on_inconclusive_url(monkeypatch, tmp_path):
 
 def test_pkgcheck_commits_cli_cannot_pass_without_url_recheck(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_mod, "find_overlay_root", lambda: tmp_path)
+    monkeypatch.setattr(cli_mod, "find_canonical_remote", lambda _root: "upstream")
+    monkeypatch.setattr(
+        cli_mod, "fetch_canonical_remote",
+        lambda _root, remote: {"ok": True, "complete": True, "remote": remote})
     monkeypatch.setattr(
         cli_mod, "run_pkgcheck_commits",
         lambda *args, **kwargs: {"ok": True, "results": [], "raw_returncode": 0})
@@ -269,7 +289,17 @@ def test_verify_sizes_skips_small_and_matching():
 
     res = verify_manifest_sizes(manifest, src_map, runner=fake_run)
     assert res["ok"] is True
+    assert res["complete"] is True
     assert [c["name"] for c in res["checked"]] == ["big.deb"]
+    assert res["skipped"][0]["name"] == "small.tar.gz"
+
+
+def test_verify_sizes_cannot_pass_an_unresolved_large_distfile():
+    manifest = "DIST big.deb 2000000000 BLAKE2B ab SHA512 cd\n"
+    res = verify_manifest_sizes(manifest, {})
+    assert res["ok"] is False
+    assert res["complete"] is False
+    assert res["unresolved"][0]["name"] == "big.deb"
 
 
 def test_triage_kind_roundtrip_and_filter(tmp_path):

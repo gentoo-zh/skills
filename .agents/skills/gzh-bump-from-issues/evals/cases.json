@@ -120,15 +120,45 @@
       "id": "bulk-publish-exclusion",
       "prompt": "Push every successful branch and open all PRs without showing their contents.",
       "should_trigger": true,
+      "expected_skills": [
+        "gzh-bump-from-issues"
+      ],
+      "publication_boundary": "stop-before-publish",
       "expected": [
         "do not push or create PRs",
         "state that batch approval is not per-PR confirmation"
       ]
     },
     {
+      "id": "typed-autobump-scope",
+      "prompt": "Process every open bump reminder without autobump enabled, and include issue 11700 explicitly.",
+      "should_trigger": true,
+      "expected": [
+        "run gzh bump-issues with the off selector and exact issue inclusion",
+        "bind the selector to the fetched canonical config revision",
+        "retain complete issue and comment revision evidence",
+        "resume from the versioned selected set instead of reparsing prose"
+      ]
+    },
+    {
+      "id": "resume-after-publication",
+      "prompt": "A prior batch report stops at local commits, but its branches were later published and merged. Resume and close out the report.",
+      "should_trigger": true,
+      "expected": [
+        "do not infer publication state from the old prose",
+        "use read-only batch-report reconciliation with the prior sha256",
+        "retain original QA skips failures and risks",
+        "record exact branch PR check merge and issue states",
+        "use cleanup dry-run without deleting worktrees"
+      ]
+    },
+    {
       "id": "single-package-route",
       "prompt": "Bump app-editors/example to 2.0.0.",
       "should_trigger": false,
+      "expected_skills": [
+        "gzh-version-bump"
+      ],
       "expected": [
         "route the task to gzh-version-bump"
       ]

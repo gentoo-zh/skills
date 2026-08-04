@@ -143,8 +143,8 @@
     },
     "gentoo-tree": {
       "kind": "git",
-      "revision": "e08eba179768b276aefe351ba13e523ba7eb819a",
-      "checked_at": "2026-08-03T22:29:22Z"
+      "revision": "e234b65366f34fc7132ff4c2d1c71d8737d227fc",
+      "checked_at": "2026-08-04T01:01:18Z"
     },
     "guru": {
       "kind": "git",
@@ -192,17 +192,17 @@
     },
     "claude-skills": {
       "kind": "http",
-      "sha256": "23d035ad222c1a288a0c05cb4202a394f91f1167aa80c522f9011729bab9168a",
-      "bytes": 73907,
+      "sha256": "9be360458169056f52477a8a318f1ea9178947a49de5105a254881ae9a3130c1",
+      "bytes": 73711,
       "final_url": "https://code.claude.com/docs/en/skills.md",
-      "checked_at": "2026-08-03T20:17:54Z"
+      "checked_at": "2026-08-04T01:02:45Z"
     },
     "opencode-skills": {
       "kind": "http",
-      "sha256": "7856d744ef01c0604f255b6f449b737960f6d04a36ea27005fbc89b8f19cc3cd",
-      "bytes": 71324,
-      "final_url": "https://opencode.ai/docs/skills",
-      "checked_at": "2026-08-03T15:48:54Z"
+      "sha256": "7ff4df3a1a4909fa0e0025a6f086c3dbc63d09fdd578bc13f3f4ae30fcfe4627",
+      "bytes": 4641,
+      "final_url": "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/web/src/content/docs/skills.mdx",
+      "checked_at": "2026-08-04T01:01:18Z"
     },
     "ebuild-manual": {
       "kind": "http",
@@ -255,10 +255,10 @@
     },
     "overlay-license-groups": {
       "kind": "http",
-      "sha256": "9eb8c6c75ebd520314daa73ce10beb491c8aa051f694453db3a0e923e0892045",
-      "bytes": 1057,
+      "sha256": "33cb0faca5f364d6a6f5fb6e1723a1a015933a7480944cc18bc9869dfcd48f96",
+      "bytes": 1068,
       "final_url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/profiles/license_groups",
-      "checked_at": "2026-08-03T16:43:33Z"
+      "checked_at": "2026-08-04T00:10:58Z"
     },
     "devmanual-licenses": {
       "kind": "http",
@@ -316,7 +316,69 @@
       "bytes": 4744,
       "final_url": "https://raw.githubusercontent.com/python/cpython/3.11/Doc/using/venv-create.inc",
       "checked_at": "2026-08-03T21:31:32Z"
+    },
+    "overlay-version-tracking-config": {
+      "kind": "http",
+      "sha256": "ebd4d0e07e823e3cf4fa006177c2ce9a97f26338d296efdabedcafec15e8614c",
+      "bytes": 58897,
+      "final_url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/.github/workflows/overlay.toml",
+      "checked_at": "2026-08-04T00:10:19Z"
+    },
+    "overlay-version-tracking-workflow": {
+      "kind": "http",
+      "sha256": "9ea538e3ab2eab981f4742b14909a200ec97d97a5764a37f3b30877a90a9f775",
+      "bytes": 5843,
+      "final_url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/.github/workflows/nvchecker.yml",
+      "checked_at": "2026-08-04T00:10:19Z"
+    },
+    "portage-ebuild-command": {
+      "kind": "http",
+      "sha256": "f5e6d04ce47f9e8eddddd1810ca126c9072d0a5cb9055674524712263ef56102",
+      "bytes": 12192,
+      "final_url": "https://dev.gentoo.org/~zmedico/portage/doc/man/ebuild.1.html",
+      "checked_at": "2026-08-04T00:10:19Z"
+    },
+    "portage-ebuild-format": {
+      "kind": "http",
+      "sha256": "72190648016cf4ebd302595a87f2a0f9e2f5fcad6ce3c4ff9ae669d612ae63dd",
+      "bytes": 68687,
+      "final_url": "https://dev.gentoo.org/~zmedico/portage/doc/man/ebuild.5.html",
+      "checked_at": "2026-08-04T00:10:19Z"
+    },
+    "portage-make-conf": {
+      "kind": "http",
+      "sha256": "13f71e3289c3b228d474c041b0bf8be715d76c0c245986f10b5360c76a274865",
+      "bytes": 63889,
+      "final_url": "https://dev.gentoo.org/~zmedico/portage/doc/man/make.conf.5.html",
+      "checked_at": "2026-08-04T00:10:19Z"
+    },
+    "portage-config": {
+      "kind": "http",
+      "sha256": "56db65b5cd1d4595fea25ab64179c7ae5e2b852563882dbcc15737733e304f6c",
+      "bytes": 71061,
+      "final_url": "https://dev.gentoo.org/~zmedico/portage/doc/man/portage.5.html",
+      "checked_at": "2026-08-04T00:10:19Z"
+    },
+    "portage-source": {
+      "kind": "git",
+      "revision": "c1caa6a9ebba7b532bb7564fb265b0e574075750",
+      "checked_at": "2026-08-04T00:10:19Z"
+    },
+    "devmanual-source": {
+      "kind": "git",
+      "revision": "d4be354314033c0910c18f1792f49043d396ba0a",
+      "checked_at": "2026-08-04T00:10:19Z"
+    },
+    "pkgcheck-source": {
+      "kind": "git",
+      "revision": "5577b93d569bd79a82cbf51cd818b34d3990288a",
+      "checked_at": "2026-08-04T00:10:19Z"
+    },
+    "pkgdev-source": {
+      "kind": "git",
+      "revision": "291610e1260bd09ac0d90271da519da7429b39a3",
+      "checked_at": "2026-08-04T00:10:19Z"
     }
   },
-  "updated_at": "2026-08-03T22:29:22Z"
+  "updated_at": "2026-08-04T01:02:45Z"
 }

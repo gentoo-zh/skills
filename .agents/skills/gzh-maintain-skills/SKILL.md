@@ -112,6 +112,21 @@ infer intent from a fingerprint.
 6. Require an independent review for high-risk installer, Git, publication, state, or
    concurrency changes when parallel review is available.
 
+Keep the shared skill format at the documented common denominator: `name` and a
+trigger-complete `description` in `SKILL.md`, with client-specific OpenAI interface data
+in `agents/openai.yaml`. Keep every `SKILL.md` below 500 lines, link each reference
+directly from its owning skill, and move detailed or variant-specific material into one
+level of references. Do not add context merely to resemble a large skill repository.
+
+Run the bounded eval surface after instruction or trigger changes:
+
+```bash
+python3 scripts/eval_runner.py static
+```
+
+Use the external JSON protocol only for an explicitly configured isolated runner. Give
+it the skill snapshot and task, not the expected answer or a prior diagnosis.
+
 Refresh only the fingerprints whose current content was reviewed, and do so after the
 behavioral diff is complete:
 

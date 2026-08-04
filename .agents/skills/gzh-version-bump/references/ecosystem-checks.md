@@ -4,6 +4,18 @@ Use this file as a selective checklist after reading the live overlay policy and
 package itself. It does not replace the PMS, Devmanual, current eclass documentation,
 or tool output. Follow the evidence order in [official-sources.md](official-sources.md).
 
+## Contents
+
+- [Evidence rules](#evidence-rules)
+- [Checks for every source package](#checks-for-every-source-package)
+- [C, C++, CMake, Meson, and Autotools](#c-c-cmake-meson-and-autotools)
+- [Rust](#rust)
+- [Go](#go)
+- [Python](#python)
+- [Other ecosystems](#other-ecosystems)
+- [Install and elog review](#install-and-elog-review)
+- [Primary references](#primary-references)
+
 ## Evidence rules
 
 - Treat a check as required only when it follows from current repository policy,

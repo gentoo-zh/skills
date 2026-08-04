@@ -44,3 +44,28 @@ def test_source_authorities_are_limited_to_reviewed_scopes():
              if source["id"] in {"glep-66", "glep-76"}}
     assert {source["scope"] for source in gleps.values()} == {
         "comparative-evidence"}
+
+
+def test_capability_source_coverage_uses_registered_sources():
+    registry = json.loads((
+        ROOT / ".agents/skills/gentoo-overlay-development/references/sources.json"
+    ).read_text())
+    source_ids = {source["id"] for source in registry["sources"]}
+
+    assert registry["capability_sources"]
+    assert all(
+        sources and set(sources) <= source_ids
+        for sources in registry["capability_sources"].values())
+
+
+def test_skills_stay_within_progressive_disclosure_limits():
+    for skill in (ROOT / ".agents" / "skills").iterdir():
+        if not skill.is_dir():
+            continue
+        text = (skill / "SKILL.md").read_text(encoding="utf-8")
+        assert len(text.splitlines()) <= 500
+        for reference in (skill / "references").glob("*.md"):
+            assert f"references/{reference.name}" in text
+            reference_text = reference.read_text(encoding="utf-8")
+            if len(reference_text.splitlines()) > 100:
+                assert "\n## Contents\n" in reference_text

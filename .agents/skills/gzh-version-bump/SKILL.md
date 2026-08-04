@@ -30,7 +30,7 @@ Complete the package-specific work, then run the full verification and local com
 
 1. **Select and verify the release.** Run `gzh latest <category/package>`, then verify the actual upstream release or tag and compare it with the highest current ebuild. Before editing, confirm every required source, generated dependency archive, and per-architecture artifact against upstream primary data. Never substitute an unverified host or unpublished file. Follow [upstream-lookup.md](references/upstream-lookup.md) when discovery is incomplete and [prebuilt-qa.md](references/prebuilt-qa.md) for prebuilt packages.
 2. **Normalize the version.** Convert the upstream version to a valid Gentoo version without changing the upstream identifier used in URLs or tags. Use an ebuild variable when the two forms differ.
-3. **Create or resume the topic branch.** Create `category-package-version` from the freshly synchronized local `master`, then run `gzh bump <category/package> <version>`. Reuse the correct existing topic branch when resuming. Stop if the remote, branch, or ownership of existing changes is ambiguous.
+3. **Create or resume the topic branch.** Run `gzh doctor --operation repository-write-preflight` and `gzh plan <category/package> <version>` before writing. Create `category-package-version` from the freshly synchronized local `master`, then run `gzh bump <category/package> <version>`. Reuse the correct existing topic branch when resuming. Stop if the remote, branch, or ownership of existing changes is ambiguous.
 4. **Reassess metadata.** Compare the new release's dependencies, build requirements, options, installed layout, licenses, and redistribution terms with the current ebuild. Follow [license-validation.md](references/license-validation.md) for license and redistribution evidence, and use [ecosystem-checks.md](references/ecosystem-checks.md) for ecosystem-specific questions.
 5. **Reassess patches and workarounds.** Verify each referenced patch and Gentoo-side workaround against the new source. Preserve files still used by another ebuild and record upstream provenance for new backports.
 6. **Decide whether to retain old versions.** Follow the package's established history and the live overlay policy. Check reverse dependencies and slots before removing anything; default to add-only when the evidence does not support a removal.
@@ -41,7 +41,7 @@ Use [escalate-classes.md](references/escalate-classes.md) to identify work that 
 
 ## Run the required finish pipeline
 
-After the package-specific work, run every applicable step in [finish-pipeline.md](references/finish-pipeline.md). A gate that live policy permits the environment to skip remains unverified and must be reported. Its core order is:
+After the package-specific work, run every applicable step in [finish-pipeline.md](references/finish-pipeline.md). Read [executors.md](references/executors.md) only when a named local or SSH executor is required. A gate that live policy permits the environment to skip remains unverified and must be reported. Its core order is:
 
 1. `gzh lint`
 2. `gzh manifest`
@@ -51,11 +51,11 @@ After the package-specific work, run every applicable step in [finish-pipeline.m
 6. `gzh commit`
 7. `gzh urls`
 
-Run the additional tests, installed-file review, network checks, and per-ebuild validation required by the live overlay policy and the finish pipeline. Use `gzh commit`, never a bare `git commit`. The normal result is a locally committed topic branch that has also passed the networked commit gate.
+Run additional tools only for the surface they prove: dependency analysis for dependency or USE changes, artifact evidence for changed distfiles, static binary QA for prebuilt objects, image QA after installation, and `pkgdev tatt` testing when the package supports a relevant test matrix. Use `gzh commit`, never a bare `git commit`. The normal result is a locally committed topic branch that has also passed the networked commit gate.
 
 ## Keep publishing under human control
 
-Do not push or create or edit a PR automatically. If the user separately asks to publish, first complete the pre-PR gates in the finish pipeline. Then show the exact PR title, body, and file list and obtain confirmation for that specific PR before `gh pr create` or `gh pr edit`. A draft PR and a batch authorization are not exceptions. When repository policy requires a Chinese PR body, invoke `chinese-skill`; keep Chinese writing rules and examples in that skill instead of duplicating them here.
+Do not push or create or edit a PR automatically. If the user separately asks to publish, first complete the pre-PR gates in the finish pipeline and record each exact draft with `gzh pr-plan`. Then show the immutable plan ID, exact title, complete body, and file list and obtain confirmation for every identified plan before `gh pr create` or `gh pr edit`. One response may confirm several separately rendered plan IDs; an instruction given before those plans existed does not. Recompute each plan immediately before publication and stop on any changed digest. Observe checks with `gzh ci` after publication. A draft PR is not an exception. When repository policy requires a Chinese PR body, invoke `chinese-skill`; keep Chinese writing rules and examples in that skill instead of duplicating them here.
 
 ## Exclusions
 

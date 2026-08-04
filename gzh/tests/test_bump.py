@@ -6,6 +6,7 @@ from click.testing import CliRunner
 import gzh.cli as cli_mod
 from gzh.bump import (bump_scaffold, diff_ebuild, highest_ebuild,
                       refresh_copyright_year, resolve_package_directory)
+from gzh.bump_plan import build_bump_plan
 
 
 def _pkgdir(tmp_path: Path) -> Path:
@@ -68,6 +69,28 @@ def test_bump_scaffold_rejects_invalid_or_live_version(tmp_path):
             assert "released Gentoo version" in str(exc)
         else:
             raise AssertionError(f"expected version {version!r} to be rejected")
+
+
+def test_bump_scaffold_rejects_equal_or_lower_version(tmp_path):
+    d = _pkgdir(tmp_path)
+    for version in ("1.1.0", "1.0.9"):
+        try:
+            bump_scaffold(d, "foo", version)
+        except ValueError as exc:
+            assert "must be greater" in str(exc)
+        else:
+            raise AssertionError(f"expected version {version!r} to be rejected")
+
+
+def test_build_bump_plan_is_read_only_and_pins_source(tmp_path):
+    d = _pkgdir(tmp_path)
+    report = build_bump_plan(tmp_path, "dev-python/foo", "1.2.0")
+
+    assert report["ok"] is True
+    assert report["current_version"] == "1.1.0"
+    assert report["retention"]["decision"] == "review-required"
+    assert len(report["actions"][0]["source_sha256"]) == 64
+    assert not (d / "foo-1.2.0.ebuild").exists()
 
 
 def test_resolve_package_directory_rejects_traversal_and_missing(tmp_path):

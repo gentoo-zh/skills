@@ -3,11 +3,35 @@
 Run every applicable gate after the version-specific edit. Treat the live overlay
 `AGENTS.md`, workflows, and pull request template as the current contract.
 
+## Contents
+
+- [1. Confirm Scope](#1-confirm-scope)
+- [2. Run the Local Structural Check](#2-run-the-local-structural-check)
+- [3. Regenerate and Review the Manifest](#3-regenerate-and-review-the-manifest)
+- [4. Run Package QA](#4-run-package-qa)
+- [5. Build, Test, and Verify Installation](#5-build-test-and-verify-installation)
+- [6. Review the Change](#6-review-the-change)
+- [7. Commit Locally](#7-commit-locally)
+- [8. Run the Networked Commit Gate](#8-run-the-networked-commit-gate)
+- [9. Prepare and Create a Pull Request](#9-prepare-and-create-a-pull-request)
+- [Failure Limit](#failure-limit)
+- [Delivery Report](#delivery-report)
+
 ## 1. Confirm Scope
 
 List every changed ebuild and every referenced `files/`, license, metadata, profile, or
 workflow file. Preserve unrelated worktree changes. Run each ebuild-specific gate for
 every changed ebuild, including a changed live ebuild or retained older revision.
+
+Run the adapter preflight before the first write and again after any repository-state
+ambiguity:
+
+```bash
+gzh doctor --operation repository-write-preflight
+```
+
+Require every operation capability to be `known`. An `unsupported` or `unknown`
+capability is a stop condition, not permission to copy another overlay's workflow.
 
 ## 2. Run the Local Structural Check
 
@@ -43,6 +67,18 @@ entries for retained versions, reused distfile names with different content, mis
 per-architecture artifacts, and unexpected files. Do not use an arbitrary file-size
 threshold as proof of integrity or provenance.
 
+When the release changes one or more distfiles, prepare a reviewed JSON record for every
+`DIST` entry and run:
+
+```bash
+gzh artifacts <Manifest> --evidence <reviewed-artifacts.json> \
+  [--distdir <writable-directory>]
+```
+
+The report proves Manifest coverage and any available local digest match. It does not
+infer upstream authorship, archive completeness, license terms, or redistribution
+permission.
+
 ## 4. Run Package QA
 
 ```bash
@@ -52,6 +88,16 @@ gzh qa <package-directory> --min-severity error
 Resolve every error. Record warnings and review whether the change introduced them. This
 package scan is offline and does not replace the networked commit scan before a pull
 request.
+
+For a dependency or USE change, analyze the matching Portage cache entry without sourcing
+the ebuild:
+
+```bash
+gzh deps <changed-ebuild> --use +flag --use -other
+```
+
+List every referenced USE state explicitly. Add `--resolve-providers` only when the
+active Portage repository set is the intended provider evidence.
 
 ## 5. Build, Test, and Verify Installation
 
@@ -85,6 +131,23 @@ Exercise every USE state affected by the change. Run supported upstream tests wi
 `FEATURES=test` and declared test dependencies. Verify installed files, modes, launchers,
 libraries, notices, and licenses against the current upstream release rather than relying
 only on a successful command.
+
+Use the package test driver when its generated matrix is supported and relevant:
+
+```bash
+gzh test '=category/package-version::gentoo-zh' -x \
+  [--use-combos <count>] [--use-preference default]
+```
+
+After a staged or real install, run `gzh image <image-root>`. For a prebuilt package,
+also run `gzh binary <installed-object-or-image>` before executing any trusted runtime
+smoke test. These static reports complement the merge and saved-elog gate; they do not
+replace it.
+
+When the local host cannot perform the required install and an authorized named executor
+exists, read [executors.md](executors.md) and run `gzh exec` with the exact atom, commit,
+USE state, and complete commit-owned path set. Keep the returned evidence digest in the
+work item. Do not reconstruct a remote shell procedure from prose.
 
 If the environment cannot perform a real merge, record `gzh merge` as skipped,
 state the exact limitation, and report the untested install and elog behavior as remaining
@@ -179,15 +242,21 @@ Before preparing the final pull request text:
    tick only checks that actually ran. Follow the live `AGENTS.md` for the description;
    do not turn broader checklist wording into routine passing-test or tested-architecture
    prose. Do not let an agent attest the human review box.
-5. Show the user the exact title, complete body, and file list. Obtain confirmation for
-   this specific pull request before running `gh pr create` or `gh pr edit`. A blanket
-   approval, batch approval, or draft status does not satisfy this gate.
-6. Push only the topic branch to the uniquely identified personal fork. Resolve the fork
+5. Write the complete body to a file and run
+   `gzh pr-plan --title '<pkgdev subject>' --body <body-file>`. Show the user its immutable
+   plan ID, exact title, complete body, and file list. Obtain confirmation for every
+   identified plan before running `gh pr create` or `gh pr edit`. One response may approve
+   several separately enumerated exact plan IDs. A request made before the plans were
+   rendered, a wildcard, or draft status does not satisfy this gate.
+6. Recompute every confirmed plan immediately before publication. Stop when its head SHA,
+   base SHA, base-sensitive file set, title, body, or live template changes.
+7. Push only the topic branch to the uniquely identified personal fork. Resolve the fork
    owner from `gh api user`; never push `master` or a canonical remote.
-7. Run `gh pr create` with the confirmed title and complete body, including the preserved
+8. Run `gh pr create` with the confirmed title and complete body, including the preserved
    template. Do not change either after confirmation.
-8. Watch all CI legs. For a failure, inspect the failing job log and apply the complete
-   post-commit repair loop above before pushing a replacement commit.
+9. Run `gzh ci <pr-number> --watch` to retain full check names, URLs, state counts, head
+   SHA, and final PR state. For a failure, inspect the failing job log and apply the
+   complete post-commit repair loop above before pushing a replacement commit.
 
 When live policy explicitly permits a local install skip because the environment cannot
 merge, publication may proceed only when the exact install and elog risk is included in

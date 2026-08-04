@@ -16,7 +16,7 @@ from pathlib import Path
 
 
 SCHEMA_VERSION = 1
-IMMUTABLE_REVISION_RE = re.compile(r"[0-9a-f]{40,64}")
+IMMUTABLE_REVISION_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 ALLOWED_EVENTS = {"schedule", "workflow_dispatch"}
 
 
@@ -197,6 +197,59 @@ def verify_provenance(manifest: dict, run: dict, job: dict, *, repository: str,
     }
 
 
+def restore_decision(*, restored: bool, prior_runs: int, event: str,
+                     reviewed_seed: str | None = None,
+                     stored_cursor: str | None = None) -> dict:
+    if not isinstance(prior_runs, int) or prior_runs < 0:
+        raise ValueError("prior workflow run count must be a nonnegative integer")
+    if event not in ALLOWED_EVENTS:
+        raise ValueError("state restoration event is not an allowed trigger")
+    seed = (reviewed_seed or "").strip()
+    cursor = (stored_cursor or "").strip()
+    if seed and (event != "workflow_dispatch"
+                 or not IMMUTABLE_REVISION_RE.fullmatch(seed)):
+        raise ValueError(
+            "an explicit reviewed seed must be a lowercase immutable commit ID "
+            "from workflow_dispatch")
+    if cursor and not IMMUTABLE_REVISION_RE.fullmatch(cursor):
+        raise ValueError("stored cursor is not an immutable commit ID")
+    if not restored and cursor:
+        raise ValueError("a cursor cannot be restored without authenticated state")
+    if restored and cursor:
+        if seed:
+            raise ValueError(
+                "an explicit seed cannot replace an established repository cursor")
+        return {
+            "schema": SCHEMA_VERSION,
+            "mode": "restored",
+            "initialize": False,
+            "cursor": cursor,
+        }
+    if seed:
+        if restored:
+            mode = "reviewed-cursor-recovery"
+        elif prior_runs:
+            mode = "reviewed-state-recovery"
+        else:
+            mode = "reviewed-initialization"
+        return {
+            "schema": SCHEMA_VERSION,
+            "mode": mode,
+            "initialize": not restored,
+            "cursor": seed,
+        }
+    if restored:
+        raise ValueError(
+            "authenticated state has no repository cursor; an explicit reviewed "
+            "seed is required")
+    if prior_runs:
+        raise ValueError(
+            "historical maintenance state is missing; automatic cursor seeding is "
+            "forbidden")
+    raise ValueError(
+        "first initialization requires an explicit reviewed cursor seed")
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     subparsers = result.add_subparsers(dest="command", required=True)
@@ -215,6 +268,12 @@ def parser() -> argparse.ArgumentParser:
     provenance.add_argument("--repository", required=True)
     provenance.add_argument("--workflow", required=True)
     provenance.add_argument("--branch", required=True)
+    decision = subparsers.add_parser("restore-decision")
+    decision.add_argument("--restored", action="store_true")
+    decision.add_argument("--prior-runs", required=True, type=int)
+    decision.add_argument("--event", required=True)
+    decision.add_argument("--reviewed-seed")
+    decision.add_argument("--stored-cursor")
     return result
 
 
@@ -233,13 +292,18 @@ def main() -> int:
         elif args.command == "verify":
             manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
             output = verify_manifest(args.database, manifest)
-        else:
+        elif args.command == "verify-provenance":
             manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
             run = json.loads(args.run_record.read_text(encoding="utf-8"))
             job = json.loads(args.job_record.read_text(encoding="utf-8"))
             output = verify_provenance(
                 manifest, run, job, repository=args.repository,
                 workflow=args.workflow, branch=args.branch)
+        else:
+            output = restore_decision(
+                restored=args.restored, prior_runs=args.prior_runs,
+                event=args.event, reviewed_seed=args.reviewed_seed,
+                stored_cursor=args.stored_cursor)
     except (OSError, ValueError, sqlite3.Error, json.JSONDecodeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

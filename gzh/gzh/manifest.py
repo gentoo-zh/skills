@@ -103,19 +103,28 @@ def verify_manifest_sizes(manifest_text: str, src_uri_map: dict,
     """Compare each large DIST entry's recorded size to the upstream URL's size. A
     mismatch (remote known and != local) means a truncated/rotated distfile that would
     pass local install but fail CI VERIFY. Small files and unresolved URLs are skipped."""
-    mismatches, checked = [], []
+    mismatches, checked, unresolved, inconclusive, skipped = [], [], [], [], []
     for d in parse_manifest_dist(manifest_text):
         if d["size"] < threshold:
+            skipped.append({**d, "reason": "below-advisory-threshold"})
             continue
         url = src_uri_map.get(d["name"])
         if not url:
+            unresolved.append({**d, "reason": "no-resolved-src-uri"})
             continue
         rsize = remote_size(url, runner=runner)
         checked.append({"name": d["name"], "local": d["size"], "remote": rsize})
-        if rsize is not None and rsize != d["size"]:
+        if rsize is None:
+            inconclusive.append({"name": d["name"], "url": url,
+                                 "reason": "remote-size-unavailable"})
+        elif rsize != d["size"]:
             mismatches.append({"name": d["name"], "local": d["size"],
                                "remote": rsize, "url": url})
-    return {"ok": not mismatches, "mismatches": mismatches, "checked": checked,
+    complete = not unresolved and not inconclusive
+    return {"ok": complete and not mismatches, "complete": complete,
+            "truncated": False, "mismatches": mismatches, "checked": checked,
+            "unresolved": unresolved, "inconclusive": inconclusive,
+            "skipped": skipped,
             "remediation": ("rm the distfile + its stale DIST line, "
                             "`curl -L -C - --retry 3 <url>`, then re-run `gzh manifest`")
             if mismatches else None}

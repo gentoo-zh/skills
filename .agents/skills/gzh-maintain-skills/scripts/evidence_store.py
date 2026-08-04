@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from contextlib import nullcontext
 import hashlib
+import html
 import json
 import re
 import sqlite3
@@ -20,6 +21,12 @@ SKILLS_REPOSITORY = "gentoo-zh/skills"
 MAX_OPEN_CANDIDATES = 512
 MAX_TOTAL_CANDIDATES = 4096
 MAX_STATE_BYTES = 96 * 1024 * 1024
+MAX_REVIEW_SUMMARY_CANDIDATES = 64
+MAX_REVIEW_SUMMARY_CHARACTERS = 240
+BIDI_CONTROL_CHARACTERS = {
+    "\u061c", "\u200e", "\u200f", "\u202a", "\u202b", "\u202c", "\u202d",
+    "\u202e", "\u2066", "\u2067", "\u2068", "\u2069",
+}
 PRIMARY_AUTHORITIES = {
     "overlay-policy",
     "gentoo-standard",
@@ -170,6 +177,41 @@ def normalized_topics(value: Any) -> list[str]:
     if any(topic is None for topic in topics):
         raise ValueError("source observation topics must contain nonempty strings")
     return sorted(set(topics))
+
+
+def markdown_cell(value: Any) -> str:
+    characters = []
+    for character in str(value or ""):
+        codepoint = ord(character)
+        if (codepoint < 0x20 or 0x7f <= codepoint <= 0x9f
+                or character in BIDI_CONTROL_CHARACTERS):
+            if character.isspace():
+                characters.append(" ")
+            continue
+        characters.append(character)
+    text = html.escape(" ".join("".join(characters).split()), quote=False)
+    replacements = {
+        "\\": "&#92;",
+        "|": "&#124;",
+        "@": "&#64;",
+        "`": "&#96;",
+        "[": "&#91;",
+        "]": "&#93;",
+        "(": "&#40;",
+        ")": "&#41;",
+        "*": "&#42;",
+        "_": "&#95;",
+        "#": "&#35;",
+        "!": "&#33;",
+    }
+    return "".join(replacements.get(character, character) for character in text)
+
+
+def bounded_summary(value: Any) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= MAX_REVIEW_SUMMARY_CHARACTERS:
+        return text
+    return text[:MAX_REVIEW_SUMMARY_CHARACTERS - 3] + "..."
 
 
 def validate_checklist(checklist: dict | None) -> str:
@@ -323,6 +365,7 @@ class EvidenceStore:
                 if cursor is None or cursor["revision"] != expected_revision:
                     raise ValueError(
                         "passed cursor report did not persist its repository cursor")
+        review = self.review_status()
         return {
             "run_id": run_id,
             "status": status,
@@ -330,6 +373,7 @@ class EvidenceStore:
             "observation_links_ingested": linked_observations,
             "candidates_ingested": inserted_candidates,
             "candidates_skipped": len(candidates) if status != "passed" else 0,
+            "review": review,
         }
 
     def _validate_cursor_advance(self, report: dict,
@@ -508,6 +552,51 @@ class EvidenceStore:
             parameters = (state,)
         query += " ORDER BY created_at, candidate_key"
         return [dict(row) for row in self.connection.execute(query, parameters)]
+
+    def review_status(self) -> dict:
+        counts = {state: 0 for state in TRANSITIONS}
+        unresolved = []
+        for row in self.connection.execute(
+                "SELECT * FROM candidates ORDER BY candidate_key"):
+            counts[row["state"]] += 1
+            if row["state"] not in {"candidate", "reviewed"}:
+                continue
+            payload = json.loads(row["payload_json"])
+            provenance = payload.get("provenance")
+            if not isinstance(provenance, dict):
+                provenance = {}
+            if len(unresolved) >= MAX_REVIEW_SUMMARY_CANDIDATES:
+                continue
+            unresolved.append({
+                "candidate_key": row["candidate_key"],
+                "state": row["state"],
+                "topic": row["topic"],
+                "scope": row["scope"],
+                "summary": bounded_summary(
+                    nonempty_text(payload.get("summary"))
+                    or nonempty_text(provenance.get("subject")) or ""),
+                "source_id": nonempty_text(payload.get("source_id")) or "",
+                "source_url": nonempty_text(payload.get("source_url")) or "",
+                "source_revision": nonempty_text(
+                    payload.get("source_revision")) or "",
+                "policy_status": nonempty_text(
+                    payload.get("policy_status")) or "",
+            })
+        open_count = counts["candidate"] + counts["reviewed"]
+        return {
+            "schema": SCHEMA_VERSION,
+            "status": "review-required" if open_count else "current",
+            "review_required": bool(open_count),
+            "counts": {
+                **counts,
+                "open": open_count,
+                "total": sum(counts.values()),
+            },
+            "summary_complete": open_count == len(unresolved),
+            "candidates_emitted": len(unresolved),
+            "candidates_omitted": open_count - len(unresolved),
+            "candidates": unresolved,
+        }
 
     def list_observations(self, source_id: str | None = None) -> list[dict]:
         query = "SELECT * FROM observations"
@@ -860,6 +949,34 @@ class EvidenceStore:
             (candidate_key,)).fetchone())
 
 
+def render_review_markdown(report: dict) -> str:
+    counts = report["counts"]
+    lines = [
+        "# Candidate evidence review",
+        "",
+        f"- Status: `{report['status']}`",
+        f"- Open: `{counts['open']}`",
+        f"- Candidate: `{counts['candidate']}`",
+        f"- Reviewed: `{counts['reviewed']}`",
+        f"- Summary complete: `{'yes' if report['summary_complete'] else 'no'}`",
+    ]
+    if report["candidates"]:
+        lines.extend([
+            "",
+            "| Candidate key | State | Topic | Scope | Source revision | Summary |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ])
+        for candidate in report["candidates"]:
+            lines.append(
+                f"| `{markdown_cell(candidate['candidate_key'])}` | "
+                f"`{markdown_cell(candidate['state'])}` | "
+                f"`{markdown_cell(candidate['topic'])}` | "
+                f"`{markdown_cell(candidate['scope'])}` | "
+                f"`{markdown_cell(candidate['source_revision'])}` | "
+                f"{markdown_cell(candidate['summary'])} |")
+    return "\n".join(lines) + "\n"
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--db", required=True, type=Path,
@@ -874,6 +991,10 @@ def parser() -> argparse.ArgumentParser:
     observations = subparsers.add_parser(
         "observations", help="list stored source observations")
     observations.add_argument("--source-id")
+    review = subparsers.add_parser(
+        "review-status", help="summarize candidates that require review")
+    review.add_argument("--format", choices=("json", "markdown"),
+                        default="json")
     cursor = subparsers.add_parser(
         "latest-cursor", help="show the latest complete repository cursor")
     cursor.add_argument("--adapter-id", required=True)
@@ -912,6 +1033,11 @@ def main() -> int:
                 output = store.list_candidates(args.state)
             elif args.command == "observations":
                 output = store.list_observations(args.source_id)
+            elif args.command == "review-status":
+                output = store.review_status()
+                if args.format == "markdown":
+                    print(render_review_markdown(output), end="")
+                    return 0
             elif args.command == "latest-cursor":
                 output = store.latest_cursor(
                     args.adapter_id, args.canonical_repository)

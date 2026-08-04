@@ -53,6 +53,9 @@ helper does not discover publication policy or replace a repository-required com
    access and warm-cache dependencies.
 3. Run supported upstream tests with declared test inputs. Verify that tests use the
    current build tree rather than an installed or unrelated copy.
+   Prefer the repository-approved package test driver when it can enumerate profiles and
+   USE combinations. Record the exact profile, USE state, test feature, command, and tool
+   version; a default build does not prove that the test phase ran.
 4. Keep the largest reliable subset when individual tests require unavailable resources.
    Record the exact skipped behavior and impact. Use a broad test restriction only after
    current evidence proves no reliable subset remains.
