@@ -65,15 +65,15 @@ def initialize_repository(path):
 
 def test_current_source_only_release_contract_is_consistent():
     report = release_check.release_report(
-        root=ROOT, tag="v0.3.0", mode="source-only")
+        root=ROOT, tag="v0.3.2", mode="source-only")
 
     assert report["ok"] is True
     assert report["version_declarations"] == {
-        "pyproject": "0.3.0",
-        "package": "0.3.0",
-        "cli": "0.3.0",
-        "codex_plugin": "0.3.0",
-        "claude_plugin": "0.3.0",
+        "pyproject": "0.3.2",
+        "package": "0.3.2",
+        "cli": "0.3.2",
+        "codex_plugin": "0.3.2",
+        "claude_plugin": "0.3.2",
     }
     assert report["rights"]["status"] == "undeclared"
     assert report["custom_package_artifacts_allowed"] is False
@@ -178,11 +178,11 @@ def test_release_contract_requires_annotated_tag_at_head(tmp_path):
 def test_release_check_cli_emits_structured_result():
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--mode", "source-only",
-         "--tag", "v0.3.0"],
+         "--tag", "v0.3.2"],
         cwd=ROOT, check=False, capture_output=True, text=True)
 
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
     assert report["ok"] is True
-    assert report["expected_tag"] == "v0.3.0"
+    assert report["expected_tag"] == "v0.3.2"
     assert result.stderr == ""

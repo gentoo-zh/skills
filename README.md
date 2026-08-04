@@ -318,7 +318,7 @@ gzh batch cleanup <report.json> --dry-run
 版本号必须在 `gzh/pyproject.toml`、`gzh.__version__`、`gzh --version` 和两个 plugin manifest 中保持一致，tag 使用 `v<version>`。发布前执行：
 
 ```bash
-python3 scripts/release_check.py --mode source-only --tag v0.3.0
+python3 scripts/release_check.py --mode source-only --tag v0.3.2
 ```
 
 本仓库当前没有根目录 license 文件，也没有 `project.license` metadata。发布过程不会推断或添加法律条款；在仓库所有者明确选择 license 前，只发布 tag 对应的源码快照，不上传 wheel、sdist、可执行文件或其他自定义产物。GitHub 自动生成的源码 archive 以 tag 指向的 commit 内容为准，但外层压缩字节不属于稳定身份。`--mode package` 当前始终失败；根目录 license 和 package metadata 只能作为前提，后续还须实现并复核确定性的 rights-decision contract。

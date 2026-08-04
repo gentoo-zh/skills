@@ -52,7 +52,7 @@ def test_current_plugin_package_contract_is_consistent():
     assert report["ok"] is True
     assert report["plugin"] == "gentoo-overlay-skills"
     assert report["marketplace"] == "gentoo-zh-skills"
-    assert report["versions"] == {"codex": "0.3.0", "claude": "0.3.0"}
+    assert report["versions"] == {"codex": "0.3.2", "claude": "0.3.2"}
     assert report["skills"] == [
         "gentoo-overlay-development",
         "gzh-bump-from-issues",

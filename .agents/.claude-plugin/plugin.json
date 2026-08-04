@@ -1,6 +1,6 @@
 {
   "name": "gentoo-overlay-skills",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "description": "Evidence-backed workflows for developing and maintaining Gentoo overlays.",
   "author": {
     "name": "gentoo-zh",
