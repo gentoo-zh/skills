@@ -904,10 +904,10 @@
     },
     {
       "id": "python-tarfile",
-      "title": "Python tarfile documentation",
+      "title": "CPython 3.11 tarfile documentation source",
       "authority": "upstream-primary",
       "kind": "http",
-      "url": "https://docs.python.org/3/library/tarfile.html",
+      "url": "https://raw.githubusercontent.com/python/cpython/3.11/Doc/library/tarfile.rst",
       "topics": [
         "python",
         "archive",
@@ -919,10 +919,10 @@
     },
     {
       "id": "python-zipfile",
-      "title": "Python zipfile documentation",
+      "title": "CPython 3.11 zipfile documentation source",
       "authority": "upstream-primary",
       "kind": "http",
-      "url": "https://docs.python.org/3/library/zipfile.html",
+      "url": "https://raw.githubusercontent.com/python/cpython/3.11/Doc/library/zipfile.rst",
       "topics": [
         "python",
         "archive",

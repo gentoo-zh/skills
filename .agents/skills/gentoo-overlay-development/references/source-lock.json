@@ -143,8 +143,8 @@
     },
     "gentoo-tree": {
       "kind": "git",
-      "revision": "af2d1b943fac15dacd6aa543bd488e9500d5701f",
-      "checked_at": "2026-08-04T05:43:53Z"
+      "revision": "47db476bbc1c8d3de80ede397393c2798242417a",
+      "checked_at": "2026-08-04T07:21:42Z"
     },
     "guru": {
       "kind": "git",
@@ -381,17 +381,17 @@
     },
     "python-tarfile": {
       "kind": "http",
-      "sha256": "30769edc6a30486f6f33942002f74f1ed3c1cd8dfac7909b0e151bcaf26717bc",
-      "bytes": 194933,
-      "final_url": "https://docs.python.org/3/library/tarfile.html",
-      "checked_at": "2026-08-04T02:30:49Z"
+      "sha256": "3df803a1d89f482404bed10f033b3f1bba2ce50aa53b477202650de3f8048b2a",
+      "bytes": 50243,
+      "final_url": "https://raw.githubusercontent.com/python/cpython/3.11/Doc/library/tarfile.rst",
+      "checked_at": "2026-08-04T06:51:01Z"
     },
     "python-zipfile": {
       "kind": "http",
-      "sha256": "1b5387c4b4cf1cf020f4dc52c70896590c01de0d7e8a23f881fe8ee5ef24959e",
-      "bytes": 139422,
-      "final_url": "https://docs.python.org/3/library/zipfile.html",
-      "checked_at": "2026-08-04T02:30:49Z"
+      "sha256": "064b13bf633489d22735672e728d0639a66930a492b37a6fdd6bed036f5d5e8b",
+      "bytes": 33144,
+      "final_url": "https://raw.githubusercontent.com/python/cpython/3.11/Doc/library/zipfile.rst",
+      "checked_at": "2026-08-04T06:51:01Z"
     },
     "github-release-management": {
       "kind": "http",
@@ -471,5 +471,5 @@
       "checked_at": "2026-08-04T04:05:49Z"
     }
   },
-  "updated_at": "2026-08-04T05:43:53Z"
+  "updated_at": "2026-08-04T07:21:42Z"
 }
