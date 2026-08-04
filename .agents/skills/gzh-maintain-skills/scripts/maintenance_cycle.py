@@ -402,7 +402,12 @@ def collect(args: argparse.Namespace) -> dict:
             report["ok"] = False
             return report
     if args.require_synced_master:
-        state_ok = (state["branch"] == "master" and not state["dirty"]
+        branch_ok = (
+            state["branch"] == "master"
+            or (getattr(args, "allow_detached_head", False)
+                and state["branch"] is None)
+        )
+        state_ok = (branch_ok and not state["dirty"]
                     and state["ahead"] == 0 and state["behind"] == 0)
         append_step(report, {
             "name": "repository-state",
@@ -472,6 +477,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--require-synced-master", action="store_true",
         help="fail unless HEAD is clean master with zero canonical ahead/behind counts")
+    parser.add_argument(
+        "--allow-detached-head", action="store_true",
+        help=("allow a detached HEAD only when --require-synced-master also "
+              "proves zero canonical ahead/behind counts"))
     parser.add_argument("--skip-network", action="store_true",
                         help="skip source and lesson network checks")
     parser.add_argument("--skip-tests", action="store_true",

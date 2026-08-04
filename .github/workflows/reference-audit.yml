@@ -317,7 +317,7 @@ jobs:
             printf '1\n' > maintenance-output/cycle.status
             exit 0
           fi
-          python .agents/skills/gzh-maintain-skills/scripts/maintenance_cycle.py --fetch --require-synced-master --output maintenance-output/maintenance-report.json --markdown-output maintenance-output/maintenance-report.md --evidence-db maintenance-output/maintenance-state.db
+          python .agents/skills/gzh-maintain-skills/scripts/maintenance_cycle.py --fetch --require-synced-master --allow-detached-head --output maintenance-output/maintenance-report.json --markdown-output maintenance-output/maintenance-report.md --evidence-db maintenance-output/maintenance-state.db
           status=$?
           printf '%s\n' "$status" > maintenance-output/cycle.status
           exit 0

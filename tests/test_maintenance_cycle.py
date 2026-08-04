@@ -78,6 +78,68 @@ def test_required_baseline_rejects_dirty_checkout(monkeypatch):
     assert gate["ok"] is False
 
 
+@pytest.mark.parametrize(("allow_detached", "expected"), [
+    (False, False),
+    (True, True),
+])
+def test_required_baseline_allows_only_explicit_synced_detached_head(
+        monkeypatch, allow_detached, expected):
+    monkeypatch.setattr(maintenance, "repository_state", lambda fetch: {
+        "head": "a" * 40,
+        "branch": None,
+        "dirty": False,
+        "canonical_remote": "origin",
+        "canonical_url": "git@github.com:gentoo-zh/skills.git",
+        "ahead": 0,
+        "behind": 0,
+        "fetch": None,
+    })
+    monkeypatch.setattr(maintenance, "run_command", lambda name, command,
+                        timeout=900: {
+        "name": name,
+        "command": command,
+        "ok": True,
+        "returncode": 0,
+        "duration_seconds": 0.0,
+        "stdout": "",
+        "stderr": "",
+        "timed_out": False,
+        "truncated": False,
+    })
+    args = SimpleNamespace(
+        fetch=False, require_synced_master=True,
+        allow_detached_head=allow_detached, skip_network=True,
+        skip_tests=True)
+
+    report = maintenance.collect(args)
+
+    gate = next(step for step in report["steps"]
+                if step["name"] == "repository-state")
+    assert gate["ok"] is expected
+
+
+def test_required_baseline_rejects_detached_head_behind_canonical(monkeypatch):
+    monkeypatch.setattr(maintenance, "repository_state", lambda fetch: {
+        "head": "a" * 40,
+        "branch": None,
+        "dirty": False,
+        "canonical_remote": "origin",
+        "canonical_url": "git@github.com:gentoo-zh/skills.git",
+        "ahead": 0,
+        "behind": 1,
+        "fetch": None,
+    })
+    args = SimpleNamespace(
+        fetch=False, require_synced_master=True, allow_detached_head=True,
+        skip_network=True, skip_tests=True)
+
+    report = maintenance.collect(args)
+
+    gate = next(step for step in report["steps"]
+                if step["name"] == "repository-state")
+    assert gate["ok"] is False
+
+
 def test_timeout_bytes_remain_serializable():
     result = maintenance.run_command(
         "slow",

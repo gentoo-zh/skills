@@ -34,6 +34,7 @@ def test_maintenance_workflow_pins_execution_to_trigger_identity(
     assert resolved_ref != branch_advance["advanced_master_sha"]
     assert "git rev-parse HEAD" in checkout
     assert '"$checked_out_sha" != "$GITHUB_SHA"' in checkout
+    assert "--require-synced-master --allow-detached-head" in text
 
 
 def test_maintenance_workflow_restores_authenticated_state_and_open_plan():
