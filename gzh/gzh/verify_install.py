@@ -532,6 +532,9 @@ def run_verify_install(
     baseline_arch_execution = run_evidence_command(
         ["portageq", "envvar", "ARCH"], timeout=min(timeout, 30),
         max_output_bytes=max_output_bytes, env=base_environment, runner=runner)
+    baseline_root_execution = run_evidence_command(
+        ["portageq", "envvar", "ROOT"], timeout=min(timeout, 30),
+        max_output_bytes=max_output_bytes, env=base_environment, runner=runner)
     config_root_execution = run_evidence_command(
         ["portageq", "envvar", "PORTAGE_CONFIGROOT"],
         timeout=min(timeout, 30), max_output_bytes=max_output_bytes,
@@ -541,6 +544,7 @@ def run_verify_install(
         max_output_bytes=max_output_bytes, env=base_environment, runner=runner)
     baseline_arch = _environment_value(
         baseline_arch_execution, pattern=_ARCH_RE)
+    baseline_root = _absolute_path_value(baseline_root_execution)
     baseline_config_root = _absolute_path_value(config_root_execution)
     baseline_keywords = _environment_value(
         baseline_keywords_execution, pattern=_KEYWORDS_RE)
@@ -558,7 +562,9 @@ def run_verify_install(
             "matches_worktree": False,
             "execution": {
                 "command": [
-                    "portageq", "get_repo_path", "/", _REPOSITORY_NAME],
+                    "portageq", "get_repo_path",
+                    str(baseline_root) if baseline_root is not None else "",
+                    _REPOSITORY_NAME],
                 "complete": False,
                 "truncated": False,
                 "returncode": None,
@@ -605,6 +611,11 @@ def run_verify_install(
         "complete": False, "truncated": False, "returncode": None,
         "stdout": "",
     }
+    root_execution = {
+        "command": ["portageq", "envvar", "ROOT"],
+        "complete": False, "truncated": False, "returncode": None,
+        "stdout": "",
+    }
     keywords_execution = {
         "command": ["portageq", "envvar", "ACCEPT_KEYWORDS"],
         "complete": False, "truncated": False, "returncode": None,
@@ -613,6 +624,7 @@ def run_verify_install(
     repository_path_execution = repository_binding["verification"]["execution"]
     profile = None
     arch = None
+    root = None
     keywords = None
     environment_complete = False
     target_elog = _pending_elog_inventory(elog_dir)
@@ -666,6 +678,9 @@ def run_verify_install(
         if baseline_arch is None:
             failed_step = "preflight"
             errors.append("baseline ARCH evidence is incomplete")
+        if baseline_root is None:
+            failed_step = "preflight"
+            errors.append("baseline ROOT evidence is incomplete")
         if baseline_config_root is None:
             failed_step = "preflight"
             errors.append("Portage configuration root evidence is incomplete")
@@ -675,6 +690,7 @@ def run_verify_install(
 
         if (repository_binding["configuration_complete"]
                 and baseline_arch is not None
+                and baseline_root is not None
                 and baseline_config_root is not None
                 and baseline_keywords is not None):
             try:
@@ -698,18 +714,24 @@ def run_verify_install(
             arch_execution = run_evidence_command(
                 ["portageq", "envvar", "ARCH"], timeout=min(timeout, 30),
                 max_output_bytes=max_output_bytes, env=env, runner=runner)
+            root_execution = run_evidence_command(
+                ["portageq", "envvar", "ROOT"], timeout=min(timeout, 30),
+                max_output_bytes=max_output_bytes, env=env, runner=runner)
             keywords_execution = run_evidence_command(
                 ["portageq", "envvar", "ACCEPT_KEYWORDS"],
                 timeout=min(timeout, 30), max_output_bytes=max_output_bytes,
                 env=env, runner=runner)
-            repository_path_execution = run_evidence_command(
-                ["portageq", "get_repo_path", "/", _REPOSITORY_NAME],
-                timeout=min(timeout, 30), max_output_bytes=max_output_bytes,
-                env=env, runner=runner)
             profile = _environment_value(profile_execution, pattern=_PROFILE_RE)
             arch = _environment_value(arch_execution, pattern=_ARCH_RE)
+            root = _absolute_path_value(root_execution)
             keywords = _environment_value(
                 keywords_execution, pattern=_KEYWORDS_RE)
+            repository_path_execution = run_evidence_command(
+                ["portageq", "get_repo_path",
+                 str(root) if root is not None else str(baseline_root),
+                 _REPOSITORY_NAME],
+                timeout=min(timeout, 30), max_output_bytes=max_output_bytes,
+                env=env, runner=runner)
             repository_path = _absolute_path_value(repository_path_execution)
             repository_matches = repository_path == overlay
             repository_binding["verification"] = {
@@ -724,6 +746,7 @@ def run_verify_install(
                 repository_binding["complete"] and keyword_configuration["complete"]
                 and emerge_version["complete"] and profile is not None
                 and arch is not None and arch == baseline_arch
+                and root is not None and root == baseline_root
                 and keywords is not None and keywords == baseline_keywords)
             if not emerge_version["complete"]:
                 errors.append("emerge version evidence is incomplete")
@@ -733,6 +756,10 @@ def run_verify_install(
                 errors.append("ARCH evidence is incomplete")
             elif arch != baseline_arch:
                 errors.append("private Portage configuration changed ARCH")
+            if root is None:
+                errors.append("ROOT evidence is incomplete")
+            elif root != baseline_root:
+                errors.append("private Portage configuration changed ROOT")
             if keywords is None:
                 errors.append("ACCEPT_KEYWORDS evidence is incomplete")
             elif keywords != baseline_keywords:
@@ -806,9 +833,9 @@ def run_verify_install(
 
     executions = [
         repository_execution, baseline_arch_execution, config_root_execution,
-        baseline_keywords_execution,
+        baseline_root_execution, baseline_keywords_execution,
         emerge_version["execution"], profile_execution, arch_execution,
-        keywords_execution, repository_path_execution,
+        root_execution, keywords_execution, repository_path_execution,
         *(dict(step) for step in steps),
     ]
     truncated = (
@@ -863,10 +890,12 @@ def run_verify_install(
     ]
     commands = [
         repository_execution["command"],
-        baseline_arch_execution["command"], config_root_execution["command"],
+        baseline_arch_execution["command"], baseline_root_execution["command"],
+        config_root_execution["command"],
         baseline_keywords_execution["command"],
         emerge_version["execution"]["command"],
         profile_execution["command"], arch_execution["command"],
+        root_execution["command"],
         keywords_execution["command"],
         repository_path_execution["command"],
         *(step["command"] for step in steps),
@@ -890,6 +919,13 @@ def run_verify_install(
         "environment": {
             "baseline_arch": {
                 "value": baseline_arch, "execution": baseline_arch_execution},
+            "root": {
+                "baseline": (
+                    str(baseline_root) if baseline_root is not None else None),
+                "value": str(root) if root is not None else None,
+                "baseline_execution": baseline_root_execution,
+                "execution": root_execution,
+            },
             "config_root": {
                 "value": (
                     str(baseline_config_root)

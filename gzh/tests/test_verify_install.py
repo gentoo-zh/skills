@@ -49,7 +49,7 @@ def _ebuild(tmp_path):
     return path
 
 
-def _runner(logdir, seen, *, fail=None):
+def _runner(logdir, seen, *, fail=None, active_root="/"):
     system_root = logdir.parent / "system-root"
     (system_root / "etc" / "portage").mkdir(parents=True, exist_ok=True)
 
@@ -61,10 +61,15 @@ def _runner(logdir, seen, *, fail=None):
         if args == ["portageq", "envvar", "PORTAGE_CONFIGROOT"]:
             return subprocess.CompletedProcess(
                 args, 0, stdout=f"{system_root}\n", stderr="")
+        if args == ["portageq", "envvar", "ROOT"]:
+            return subprocess.CompletedProcess(
+                args, 0, stdout=f"{active_root}\n", stderr="")
         if args == ["portageq", "envvar", "ACCEPT_KEYWORDS"]:
             return subprocess.CompletedProcess(
                 args, 0, stdout="amd64\n", stderr="")
-        if args == ["portageq", "get_repo_path", "/", "gentoo-zh"]:
+        if args == [
+                "portageq", "get_repo_path", str(Path(active_root).resolve()),
+                "gentoo-zh"]:
             return subprocess.CompletedProcess(
                 args, 0, stdout=f"{logdir.parent}\n", stderr="")
         if args == ["emerge", "--version"]:
@@ -141,6 +146,7 @@ def test_verify_install_records_bounded_environment_and_merge_evidence(tmp_path)
     assert res["tool"]["emerge"]["version"] == "Portage 3.0.test"
     assert res["environment"]["profile"]["value"] == PROFILE
     assert res["environment"]["arch"]["value"] == "amd64"
+    assert res["environment"]["root"]["value"] == "/"
     assert [step["name"] for step in res["steps"]] == ["pretend", "merge"]
     assert "--pretend" in res["steps"][0]["command"]
     for step in res["steps"]:
@@ -172,6 +178,25 @@ def test_verify_install_records_bounded_environment_and_merge_evidence(tmp_path)
     assert res["environment"]["accept_keywords"]["value"] == "amd64"
     assert res["plan"]["classified"]["target"][0]["source"] == "ebuild"
     assert res["plan"]["unauthorized"] == []
+
+
+def test_verify_install_uses_the_active_root_for_repository_evidence(tmp_path):
+    ebuild = _ebuild(tmp_path)
+    logdir = tmp_path / "logs"
+    target_root = tmp_path / "target-root"
+    target_root.mkdir()
+    seen = []
+
+    report = run_verify_install(
+        ebuild, logdir=logdir,
+        environment={"ROOT": str(target_root), "SYSROOT": str(target_root)},
+        runner=_runner(logdir, seen, active_root=str(target_root)))
+
+    assert report["ok"] is True
+    assert report["environment"]["root"]["baseline"] == str(target_root)
+    assert report["environment"]["root"]["value"] == str(target_root)
+    assert ["portageq", "get_repo_path", str(target_root), "gentoo-zh"] in [
+        args for args, _kwargs in seen]
 
 
 def test_verify_install_preserves_baseline_keyword_files(tmp_path):
