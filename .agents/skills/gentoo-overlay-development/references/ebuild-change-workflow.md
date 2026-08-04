@@ -13,7 +13,11 @@ repository capability contract before every Git or publication action.
    and license material affected by the request.
 4. Compare the current and target source for dependencies, toolchain floors, build
    options, installed paths, bundled components, tests, licenses, and patches.
-5. Define the owned file set and observable completion conditions. Preserve unrelated
+5. Before writing custom phase or eclass integration code, inspect the exact current
+   Gentoo package and a genuinely comparable package with the same source model, build
+   system, archive format, installed layout, and eclass contract. Prefer the simpler
+   established current pattern when it satisfies the verified requirement.
+6. Define the owned file set and observable completion conditions. Preserve unrelated
    changes.
 
 ## Edit from Evidence

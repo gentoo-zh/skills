@@ -35,6 +35,30 @@ The authority of a source depends on the claim. Upstream metadata is primary for
 package's release facts, but it does not override PMS semantics or overlay policy.
 Package history supplies precedent only and cannot override current policy or standards.
 
+Before adding custom phase code or QA exceptions, inspect the exact current Gentoo
+package when one exists, then the smallest sibling that matches its source or prebuilt
+model, archive format, build system, installed layout, runtime integration, and eclass
+contract. Prefer the simpler established pattern when it covers the verified need.
+Product family alone is insufficient: current `app-editors/vscode` and
+`www-client/google-chrome` are compact prebuilt precedents, while `www-client/chromium`
+is a large source-build precedent. Re-open the current files before use; these paths are
+search starting points, not frozen templates.
+
+Reviewed official history illustrates the boundary:
+
+- [`app-editors/vscode` 1.131.0](https://github.com/gentoo/gentoo/commit/e21cc671ab0dad4a91a266f4dc26d1863c161815)
+  retained its established prebuilt ebuild pattern.
+- [`www-client/google-chrome` 150.0.7871.181](https://github.com/gentoo/gentoo/commit/6653d348c0b6946355a5d7d4ab75666ee41fe0a4)
+  was an ebuild rename plus Manifest update.
+- [`www-client/chromium` 150.0.7871.181](https://github.com/gentoo/gentoo/commit/e710fadac8230667074ca702739c9fa505c911d3)
+  retained its source-build implementation; a later
+  [shared Node update](https://github.com/gentoo/gentoo/commit/a7997f3e7c1cc103cfb4bbb88d3567f8af9a4210)
+  changed several versions deliberately.
+
+These commits prove only those package changes. A copied ebuild is acceptable only after
+the new release's assets, dependencies, build inputs, layout, licenses, patches, and
+eclass assumptions have been reverified. It still receives every live style and QA gate.
+
 ## Primary Sources
 
 - [gentoo-zh `AGENTS.md`](https://github.com/gentoo-zh/overlay/blob/master/AGENTS.md)

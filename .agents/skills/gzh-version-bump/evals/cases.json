@@ -202,14 +202,56 @@
       ]
     },
     {
+      "id": "verified-source-copy-bump",
+      "prompt": "Bump an existing gentoo-zh source package from 1.2.3 to 1.2.4. Exact upstream and package comparison proves its dependencies, build system, USE behavior, patches, licenses, and installed layout are unchanged; only the routine versioned source archive changes. Run every analyzer anyway because the version is new.",
+      "should_trigger": true,
+      "expected": [
+        "derive the copy-only route from exact upstream and package evidence rather than the minor version or ebuild diff",
+        "retain manual Gentoo semantic and clean package-local style review",
+        "run every live hard gate including lint Manifest package QA build clean merge saved elog diff and network URL review",
+        "verify the exact upstream archive and review the Manifest without requiring high-risk artifact inventory for a routine versioned source archive",
+        "do not load dependency prebuilt binary image or test-matrix checks for package surfaces proved unchanged",
+        "load executor guidance only when a required local gate is unavailable and an authorized named executor exists"
+      ]
+    },
+    {
       "id": "conditional-qa-surfaces",
-      "prompt": "This source bump changes dependencies and one distfile but contains no prebuilt objects. Run every available QA tool anyway.",
+      "prompt": "This source bump changes dependencies and one generated vendor distfile but contains no prebuilt objects. Run every available QA tool anyway.",
       "should_trigger": true,
       "expected": [
         "retain every live repository hard gate",
+        "retain direct current Gentoo ebuild style and review dependencies under the active EAPI and eclass contracts",
         "run dependency and artifact evidence for the changed surfaces",
+        "exercise every affected USE state and verify current providers",
         "do not run prebuilt binary QA without a prebuilt object",
         "run supported tests and image review only when their required inputs exist"
+      ]
+    },
+    {
+      "id": "prebuilt-artifact-layout-change",
+      "prompt": "Bump an existing gentoo-zh prebuilt application. The new release changes per-architecture archive names, archive roots, and launcher paths, but dependencies and USE behavior are unchanged.",
+      "should_trigger": true,
+      "expected": [
+        "classify the package from the installed upstream-built payload",
+        "verify every exact architecture artifact and installed path",
+        "inspect a genuinely comparable current Gentoo prebuilt package before adding custom phase code",
+        "prefer current eclasses helpers and direct minimal phase logic over copied source-build complexity",
+        "run every live hard gate plus artifact static binary and strict installed-image evidence",
+        "skip dependency analysis only after dependency and USE surfaces are proved unchanged"
+      ]
+    },
+    {
+      "id": "qa-only-fix-exclusion",
+      "prompt": "Fix a pkgcheck and ebuild-style defect in an existing gentoo-zh package without changing its version, fetch inputs, dependencies, or installed behavior.",
+      "should_trigger": false,
+      "expected_skills": [
+        "gentoo-overlay-development"
+      ],
+      "expected": [
+        "route to the generic existing-package QA correction workflow",
+        "reproduce and fix the exact defect without inventing a release workflow or revision",
+        "retain manual Gentoo style review and every live repository hard gate",
+        "run only the specialist checks invalidated by the fix"
       ]
     },
     {

@@ -77,6 +77,41 @@ def test_chinese_commit_and_pr_guidance_is_meaning_first():
         assert "verified causal rationale" in expectations
 
 
+def test_change_surface_routing_keeps_gentoo_hard_gates():
+    version_root = ROOT / ".agents/skills/gzh-version-bump"
+    version_skill = " ".join((version_root / "SKILL.md").read_text().split())
+    finish = " ".join((
+        version_root / "references/finish-pipeline.md").read_text().split())
+    version_cases = {
+        case["id"]: case for case in json.loads((
+            version_root / "evals/cases.json"
+        ).read_text())["cases"]
+    }
+    generic_cases = {
+        case["id"]: case for case in json.loads((
+            ROOT / ".agents/skills/gentoo-overlay-development/evals/cases.json"
+        ).read_text())["cases"]
+    }
+
+    copy_bump = " ".join(version_cases["verified-source-copy-bump"]["expected"])
+    prebuilt = " ".join(
+        version_cases["prebuilt-artifact-layout-change"]["expected"])
+    qa_exclusion = version_cases["qa-only-fix-exclusion"]
+    qa_route = " ".join(generic_cases["gentoo-zh-qa-fix-route"]["expected"])
+
+    assert "manual Gentoo semantic" in copy_bump
+    assert "every live hard gate" in copy_bump
+    assert "do not load dependency prebuilt binary image or test-matrix" in copy_bump
+    assert "authorized named executor exists" in copy_bump
+    assert "artifact static binary and strict installed-image" in prebuilt
+    assert qa_exclusion["should_trigger"] is False
+    assert qa_exclusion["expected_skills"] == ["gentoo-overlay-development"]
+    assert "every live hard gate" in qa_route
+    assert "artifact selection and topology" in version_skill
+    assert "Executor guidance remains conditional on the environment" in version_skill
+    assert "authorized named executor" in finish
+
+
 def test_source_authorities_are_limited_to_reviewed_scopes():
     registry = json.loads((
         ROOT / ".agents/skills/gentoo-overlay-development/references/sources.json"

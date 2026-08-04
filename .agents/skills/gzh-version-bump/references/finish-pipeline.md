@@ -16,6 +16,27 @@ Run every applicable gate after the version-specific edit. Treat the live overla
 - [Failure Limit](#failure-limit)
 - [Delivery Report](#delivery-report)
 
+## Route Baseline and Specialist Checks
+
+Every gentoo-zh ebuild change retains the live hard gates, manual Gentoo semantic and
+style review, a clean install, and saved-elog review. A verified copy-only bump changes
+reference loading and specialist checks only; it never weakens that baseline. Never
+classify a release from version size or an unchanged ebuild body alone.
+
+Load and run specialist work only for a surface it can prove:
+
+- dependency or USE semantics: dependency analysis and affected-state testing;
+- prebuilt payload: artifact inventory, static binary QA, and strict image inventory;
+- generated, multi-architecture, manually fetched, mutable-name, archive-topology, or
+  unclear-provenance distfiles: artifact inventory;
+- installed layout or runtime integration: installed-image and supported runtime checks;
+- supported test behavior affected by the release: the relevant test matrix;
+- unavailable local capability with an authorized named executor: executor guidance.
+
+Routine versioned source archives still require exact upstream release evidence, the
+live Manifest gate, build, merge, and elog review. They do not require every specialist
+analyzer when the related surfaces are proved unchanged.
+
 ## 1. Confirm Scope
 
 List every changed ebuild and every referenced `files/`, license, metadata, profile, or
@@ -44,7 +65,7 @@ manual semantic review.
 
 ## 3. Regenerate and Review the Manifest
 
-Run the wrapper whenever distfiles or an ebuild's fetch inputs changed:
+The live gentoo-zh policy requires this wrapper before every package commit:
 
 ```bash
 gzh manifest <changed-ebuild>
@@ -57,7 +78,8 @@ current command instead of bypassing the wrapper:
 gzh manifest <changed-ebuild> --distdir <writable-directory>
 ```
 
-Stop on a fetch or manifest failure. For `RESTRICT=fetch`, follow the package's
+Manifest content is expected to change only when fetch inputs, distfiles, or referenced
+auxiliary files change. Stop on a fetch or manifest failure. For `RESTRICT=fetch`, follow the package's
 `pkg_nofetch` instructions. Never place credentials, acceptance tokens, or expiring URLs
 in `SRC_URI`.
 
@@ -66,8 +88,10 @@ entries for retained versions, reused distfile names with different content, mis
 per-architecture artifacts, and unexpected files. Do not use an arbitrary file-size
 threshold as proof of integrity or provenance.
 
-When the release changes one or more distfiles, prepare a reviewed JSON record for every
-`DIST` entry and run:
+Use the artifact inventory for prebuilt payloads, generated bundles, per-architecture
+sets, manual downloads, mutable or reused filenames, archive-topology changes, unclear
+provenance, or another risk named by live policy. Prepare a reviewed JSON record for
+every affected `DIST` entry and run:
 
 ```bash
 gzh artifacts <Manifest> --evidence <reviewed-artifacts.json> \
@@ -105,7 +129,7 @@ proves ABI compatibility or replaces dependency resolution, build, or install ev
 
 ## 5. Build, Test, and Verify Installation
 
-Use the phase runner for focused build diagnosis:
+Run the phase runner as the live local build gate:
 
 ```bash
 gzh build <changed-ebuild> [--logdir <evidence-directory>]
@@ -148,16 +172,18 @@ Exercise every USE state affected by the change. Run supported upstream tests wi
 libraries, notices, and licenses against the current upstream release rather than relying
 only on a successful command.
 
-Use the package test driver when its generated matrix is supported and relevant:
+Use the package test driver only when its generated matrix is supported and relevant to
+the release or affected USE behavior:
 
 ```bash
 gzh test '=category/package-version::gentoo-zh' -x \
   [--use-combos <count>] [--use-preference default]
 ```
 
-After a staged or real install, run `gzh image <image-root>`. For every prebuilt installed
-image, use strict mode and write the complete inventory to a new relative path outside the
-image root:
+Run `gzh image <image-root>` after a staged or real install when installed content,
+layout, modes, symlinks, launchers, services, desktop files, notices, or runtime
+integration is under review. For every new prebuilt release payload, use strict mode and
+write the complete inventory to a new relative path outside the image root:
 
 ```bash
 gzh image <image-root> \

@@ -366,6 +366,12 @@ python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py \
 
 仓库采用渐进加载：客户端的初始列表包含四个 skill 的 `name`、`description` 和 `SKILL.md` 路径。客户端只在触发后加载对应 `SKILL.md`，再按任务读取一层 references 或直接执行 scripts。验证器限制 `SKILL.md` 不超过 500 行，并要求每个 reference 从所属 `SKILL.md` 直接可发现。客户端专用的 OpenAI UI metadata 位于 `agents/openai.yaml`；共同的 `SKILL.md` 只保留 `name` 和 `description`，避免加入其他客户端无法稳定解释的 frontmatter。
 
+常规 bump 先根据实际改动面选择 reference 和专项工具。小版本号、较短的 diff 或内容相同的 ebuild，都不能直接证明改动只涉及版本复制。处理新版本 archive 时，必须核实确切文件，并确认 artifact 的选择方式和 archive 结构没有变化。依赖、构建输入、USE 行为、patch、license 和安装布局也必须保持不变，才能按仅复制版本的 bump 处理。
+
+该分类只会跳过无关的 dependency、binary、image 或 test-matrix 检查。目标仓库规定的 lint、Manifest、package QA、构建、干净安装、elog、diff 和联网检查不受该路由影响。
+
+编写自定义 phase 或 QA 例外前，应先检查当前 Gentoo tree 中的同名包，再选择 source model、archive 格式、构建系统、安装布局和 eclass contract 相同的最小可比实现。`app-editors/vscode` 和 `www-client/google-chrome` 可作为预编译包的检索起点；`www-client/chromium` 是源码构建实现，不能因产品同属浏览器而直接套用。具体 ebuild 和历史必须在使用时重新读取，README 中的包名不是固定模板。
+
 常规 bump 和 batch 默认只加载本地提交所需流程；两者的发布步骤位于条件 reference，只有明确请求发布时才加载。Codex 和 Claude Code plugin 共用 `.agents/skills`，各自保留独立 manifest 和 marketplace schema。`scripts/plugin_check.py` 检查版本、路径、skill 成员、symlink、特殊文件和 license 边界。OpenCode 继续使用共享 skill 格式，不声明不兼容的 plugin 能力。
 
 ## 验证
@@ -397,7 +403,7 @@ Git bootstrap 明确禁用 binary package，避免 rolling binary host 的 build
 
 workflow 执行两个 EAPI 8 source-merge fixture。正常 fixture 必须产生 VDB、预期 artifact 且没有保存的 elog；边界 fixture 必须在 emerge 成功后因 `qa` elog 被拒绝。workflow 还在隔离 Git 副本中直接执行正式 `run_verify_install`，并要求两个 fixture 得出相同的接受或拒绝结果。该验证不代表 overlay、profile 或 architecture matrix；真实 package 仍须按目标 repository 的实时政策执行 `pkgcheck`、构建、安装和 CI。
 
-静态 eval 当前覆盖 81 个 activation、exclusion 和行为案例。外部 runner 通过显式 JSON protocol 接入，不会把预期答案写入待测 prompt。安装测试只写入临时目录。
+静态 eval 当前覆盖 85 个 activation、exclusion 和行为案例。外部 runner 通过显式 JSON protocol 接入，不会把预期答案写入待测 prompt。安装测试只写入临时目录。
 
 ## 目录
 

@@ -4,8 +4,17 @@ Run the exact commands and profiles in the live repository capability contract. 
 official tools below to understand behavior; do not replace repository-required gates
 with guessed equivalents.
 
+## Contents
+
+- [Style and Structural Review](#style-and-structural-review)
+- [Manifest and Package QA](#manifest-and-package-qa)
+- [Build and Tests](#build-and-tests)
+- [Install and Elog](#install-and-elog)
+- [Completion Rule](#completion-rule)
+
 ## Style and Structural Review
 
+- Apply this review to every changed ebuild, including a copy-only bump or QA-only fix.
 - Preserve clear package-local style where it does not conflict with current Gentoo
   semantics or repository policy.
 - Keep ebuild code direct and phase-appropriate. Avoid global-scope side effects,
@@ -40,11 +49,10 @@ python3 scripts/qa_runner.py \
   --output /tmp/pkgcheck-report.json
 ```
 
-The runner requires a clean Git worktree, keeps its cache outside the overlay, bounds
-time and output, and records the exact command, tool version, revision, findings, and
-reviewed tool source lock. Add `--net` only when current policy requests network checks.
-The supplied adapter and repository identities remain configured but unverified; this
-helper does not discover publication policy or replace a repository-required command.
+The runner requires a clean Git worktree, keeps its cache outside the overlay, bounds time
+and output, and records the command, tool version, revision, findings, and source lock.
+Add `--net` only when current policy requests it. Supplied identities remain unverified;
+this helper does not discover policy or replace a repository-required command.
 
 When the repository-approved wrapper is `gzh qa`, repeat `--profile` and `--arch` to pass
 an explicit pkgcheck scope without constructing a comma expression manually:
@@ -57,6 +65,8 @@ These selectors constrain pkgcheck only. They do not establish a build, install,
 or architecture test result.
 
 ## Build and Tests
+
+Apply live build gates to every covered surface. Add USE matrices and upstream tests only when relevant:
 
 1. Exercise every USE state and profile affected by the change.
 2. Build with the repository-required toolchain and features. Reject undeclared network
@@ -77,8 +87,8 @@ or architecture test result.
 2. Save `qa`, `warn`, and `error` elog classes to an isolated location when the live
    contract requires this gate. Inspect the saved files rather than relying on console
    output.
-3. Verify the final image: files, modes, ownership expectations, symlinks, launchers,
-   libraries, services, desktop metadata, notices, and licenses.
+3. When installed content or layout is under review, verify files, modes, ownership,
+   symlinks, launchers, libraries, services, desktop metadata, notices, and licenses.
 4. Investigate every relevant elog entry. Compare an unchanged package under the same
    environment before classifying a warning as environmental.
 5. Run a trusted minimal runtime check when supported. Record unavailable hardware,

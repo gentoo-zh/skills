@@ -19,9 +19,11 @@
       "should_trigger": true,
       "expected": [
         "classify direct dependencies under the active EAPI",
-        "verify provider atoms and slot relationships",
-        "exercise affected USE states",
-        "decide a revision from current evidence"
+        "verify current eclass contracts provider atoms and slot relationships",
+        "keep the ebuild direct and consistent with current Gentoo style",
+        "exercise affected USE states and decide a revision from current evidence",
+        "run every live lint package QA build clean install and saved elog gate",
+        "do not load prebuilt or artifact checks without those changed surfaces"
       ]
     },
     {
@@ -129,6 +131,21 @@
       ]
     },
     {
+      "id": "gentoo-zh-qa-fix-route",
+      "prompt": "Fix a confirmed pkgcheck and style defect in an existing gentoo-zh ebuild without changing its upstream release or fetch inputs.",
+      "should_trigger": true,
+      "expected_skills": [
+        "gentoo-overlay-development"
+      ],
+      "expected": [
+        "load the complete live gentoo-zh capability contract",
+        "reproduce the exact finding and fix its root cause",
+        "preserve concise current Gentoo and package-local style",
+        "rerun every live hard gate and every specialist check invalidated by the edit",
+        "do not add a revision unless installed output or runtime dependency behavior changes"
+      ]
+    },
+    {
       "id": "elog-required",
       "prompt": "The repository requires a clean install and saved elog review, but only compilation has completed.",
       "should_trigger": true,
@@ -145,9 +162,11 @@
       "should_trigger": true,
       "expected": [
         "verify the project is not already present under another identity",
+        "search current gentoo.git for exact former and genuinely comparable source-model build-system and installed-layout precedents",
         "establish exact upstream artifact dependency and license evidence",
+        "prefer established current eclasses helpers and direct phase code with clean Gentoo style",
         "add ebuild metadata Manifest and referenced files atomically",
-        "apply the live repository's new-package and keyword gates"
+        "apply every resolved structural lint Manifest package QA build install image elog new-package and keyword gate"
       ]
     },
     {

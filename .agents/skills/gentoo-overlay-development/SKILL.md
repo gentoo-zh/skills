@@ -41,33 +41,38 @@ directory layout or another overlay.
 
 ## Select One Supported Operation
 
-1. Read [ebuild-change-workflow.md](references/ebuild-change-workflow.md) for a change to
-   an existing package and its direct support files.
-2. Read [package-lifecycle.md](references/package-lifecycle.md) for a new package,
+1. Read [change-surface-routing.md](references/change-surface-routing.md), classify the
+   affected surfaces from evidence, and load only the references required by that route.
+   Apparent change size never weakens the live capability contract or Gentoo review.
+2. Read [ebuild-change-workflow.md](references/ebuild-change-workflow.md) for a change to
+   an existing package and its direct support files, including a QA-only correction.
+3. Read [package-lifecycle.md](references/package-lifecycle.md) for a new package,
    keyword change, move, rename, version or package removal.
-3. Read [repository-development.md](references/repository-development.md) for an eclass,
+4. Read [repository-development.md](references/repository-development.md) for an eclass,
    profile, repository metadata, category, license, or policy-owned file.
-4. Inspect every ebuild in the package, `metadata.xml`, `Manifest`, referenced `files/`,
+5. Inspect every ebuild in the package, `metadata.xml`, `Manifest`, referenced `files/`,
    relevant history, inherited eclass documentation, and exact upstream material.
-5. Define one coherent change and its complete owned file set. Preserve unrelated work.
-6. For dependency or USE changes, follow
+6. Define one coherent change and its complete owned file set. Preserve unrelated work.
+7. For dependency or USE changes, follow
    [dependency-review.md](references/dependency-review.md).
-7. For source archives, prebuilt artifacts, patches, licenses, redistribution, or
-   Manifest changes, follow
+8. For changed source topology, prebuilt artifacts, patches, licenses, redistribution,
+   generated bundles, or high-risk distfiles, follow
    [artifacts-and-licensing.md](references/artifacts-and-licensing.md).
-8. Make the smallest evidence-backed edit. Keep global scope metadata-safe, keep USE
+9. Make the smallest evidence-backed edit. Keep global scope metadata-safe, keep USE
    branches consistent, and keep every referenced file in the same change.
-9. Stop instead of guessing a version, dependency, slot, artifact, checksum, license,
+10. Stop instead of guessing a version, dependency, slot, artifact, checksum, license,
    restriction, keyword, patch status, or installed layout.
 
 ## Verify the Result
 
 Read [qa-verification.md](references/qa-verification.md) and run every gate required by
-the resolved capability contract. At minimum, verify structure, regenerate and inspect
-the Manifest when fetch inputs change, run package QA, exercise affected USE states,
-build, run supported tests, inspect the installed image, perform a clean install, and
-review saved `qa`, `warn`, and `error` elog records when the environment and repository
-contract provide those operations.
+the resolved capability contract. Every ebuild change requires manual Gentoo semantic
+and style review, structural validation, package QA, and complete diff and status review.
+Run Manifest, build, clean-install, saved-elog, and network gates whenever live policy
+requires them for the authorized operation, regardless of apparent change size. Treat
+commit and publication as separate capabilities. Exercise affected USE states, supported
+tests, artifact or dependency analysis, installed-image inspection, binary QA, and
+runtime checks only for the surfaces and inputs they can prove.
 
 Use `scripts/qa_runner.py` only for a bounded, read-only package-scoped `pkgcheck` result
 when the live capability contract supplies the repository identity and permits that
