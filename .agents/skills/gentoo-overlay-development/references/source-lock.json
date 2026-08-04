@@ -143,8 +143,8 @@
     },
     "gentoo-tree": {
       "kind": "git",
-      "revision": "be86282032430a9bafa65e55e37ed3c2f188a531",
-      "checked_at": "2026-08-04T09:28:56Z"
+      "revision": "79054c10fcd4b09c1bd4e33f5514ee9af6eededd",
+      "checked_at": "2026-08-04T12:01:12Z"
     },
     "guru": {
       "kind": "git",
@@ -227,10 +227,10 @@
     },
     "nvchecker-usage": {
       "kind": "http",
-      "sha256": "ab60222eb54e67ac76705a47a0c98d8d3483e900928c497dac4f7f04aff2eca7",
-      "bytes": 40254,
+      "sha256": "944525b8abbf2bb4f877bfe5f1194dafc78e9e46309a6fceeae057f3be77e962",
+      "bytes": 40894,
       "final_url": "https://raw.githubusercontent.com/lilydjwg/nvchecker/master/docs/usage.rst",
-      "checked_at": "2026-08-04T05:43:53Z"
+      "checked_at": "2026-08-04T12:01:12Z"
     },
     "github-graphql-pagination": {
       "kind": "http",
@@ -255,10 +255,10 @@
     },
     "overlay-license-groups": {
       "kind": "http",
-      "sha256": "33cb0faca5f364d6a6f5fb6e1723a1a015933a7480944cc18bc9869dfcd48f96",
-      "bytes": 1068,
+      "sha256": "3b7a961ddaf668d691ad824177263a0ee599214bc76296cbd265ec0fe18dfa26",
+      "bytes": 1063,
       "final_url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/profiles/license_groups",
-      "checked_at": "2026-08-04T00:10:58Z"
+      "checked_at": "2026-08-04T12:01:12Z"
     },
     "devmanual-licenses": {
       "kind": "http",
@@ -497,5 +497,5 @@
       "checked_at": "2026-08-04T08:59:16Z"
     }
   },
-  "updated_at": "2026-08-04T09:28:56Z"
+  "updated_at": "2026-08-04T12:01:12Z"
 }
