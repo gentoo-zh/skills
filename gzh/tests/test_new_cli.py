@@ -37,6 +37,106 @@ def test_check_cli_runs_only_read_only_gates(monkeypatch, tmp_path):
     assert [gate["name"] for gate in report["gates"]] == ["doctor", "lint", "qa"]
 
 
+def test_check_cli_passes_profile_and_arch_scope(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(cli_mod, "find_overlay_root", lambda _start=None: tmp_path)
+    monkeypatch.setattr(cli_mod, "load_bundled_adapter", lambda _identifier: object())
+    monkeypatch.setattr(cli_mod, "inspect_repository", lambda *args, **kwargs: {
+        "complete": True, "ok": True, "truncated": False})
+
+    def fake_pkgcheck(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"complete": True, "ok": True, "truncated": False}
+
+    monkeypatch.setattr(cli_mod, "run_pkgcheck", fake_pkgcheck)
+    result = CliRunner().invoke(cli_mod.cli, [
+        "check", str(tmp_path), "--profile", "stable", "--arch", "amd64",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert calls[0][1]["profiles"] == ("stable",)
+    assert calls[0][1]["arches"] == ("amd64",)
+
+
+def test_qa_cli_passes_repeatable_profile_and_arch_scope(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_pkgcheck(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"complete": True, "ok": True, "truncated": False}
+
+    monkeypatch.setattr(cli_mod, "run_pkgcheck", fake_pkgcheck)
+    result = CliRunner().invoke(cli_mod.cli, [
+        "qa", str(tmp_path),
+        "--profile", "stable", "--profile", "-exp",
+        "--arch", "amd64", "--arch", "-x86",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert calls == [((tmp_path,), {
+        "min_severity": "warning",
+        "net": False,
+        "profiles": ("stable", "-exp"),
+        "arches": ("amd64", "-x86"),
+    })]
+
+
+def test_qa_cli_accepts_pkgcheck_option_spelling_and_comma_syntax(
+        monkeypatch, tmp_path):
+    calls = []
+
+    def fake_pkgcheck(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"complete": True, "ok": True, "truncated": False}
+
+    monkeypatch.setattr(cli_mod, "run_pkgcheck", fake_pkgcheck)
+    result = CliRunner().invoke(cli_mod.cli, [
+        "qa", str(tmp_path), "--exit", "error",
+        "--profiles=stable,-exp", "--arches=amd64,-x86",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert calls[0][1] == {
+        "min_severity": "error",
+        "net": False,
+        "profiles": ("stable", "-exp"),
+        "arches": ("amd64", "-x86"),
+    }
+
+
+def test_qa_cli_accepts_pkgcheck_short_scope_options(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        cli_mod, "run_pkgcheck",
+        lambda *args, **kwargs: calls.append(kwargs) or {
+            "complete": True, "ok": True, "truncated": False})
+
+    result = CliRunner().invoke(cli_mod.cli, [
+        "qa", str(tmp_path), "-p", "stable", "-a", "amd64",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert calls[0]["profiles"] == ("stable",)
+    assert calls[0]["arches"] == ("amd64",)
+
+
+def test_legacy_pkgcheck_command_accepts_scan_verb(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_pkgcheck(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"complete": True, "ok": True, "truncated": False}
+
+    monkeypatch.setattr(cli_mod, "run_pkgcheck", fake_pkgcheck)
+    result = CliRunner().invoke(cli_mod.cli, [
+        "pkgcheck", "scan", "--profiles=stable,-exp", str(tmp_path),
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert calls[0][0] == (tmp_path,)
+    assert calls[0][1]["profiles"] == ("stable", "-exp")
+
+
 def test_plan_cli_does_not_write(monkeypatch, tmp_path):
     monkeypatch.setattr(cli_mod, "find_overlay_root", lambda: tmp_path)
     monkeypatch.setattr(cli_mod, "build_bump_plan", lambda *args: {
@@ -59,7 +159,138 @@ def test_binary_and_image_help_are_available():
     assert runner.invoke(cli_mod.cli, ["binary", "--help"]).exit_code == 0
     assert runner.invoke(cli_mod.cli, ["image", "--help"]).exit_code == 0
     assert runner.invoke(cli_mod.cli, ["deps", "--help"]).exit_code == 0
+    assert runner.invoke(cli_mod.cli, ["deps", "inspect", "--help"]).exit_code == 0
+    assert runner.invoke(cli_mod.cli, ["deps", "diff", "--help"]).exit_code == 0
+    assert runner.invoke(cli_mod.cli, ["deps", "reverse", "--help"]).exit_code == 0
     assert runner.invoke(cli_mod.cli, ["test", "--help"]).exit_code == 0
+
+
+def test_deps_inspect_cli_passes_use_and_provider_scope(monkeypatch, tmp_path):
+    ebuild = tmp_path / "demo-1.ebuild"
+    ebuild.write_text("EAPI=8\n", encoding="utf-8")
+    calls = []
+
+    def fake_analyze(path, **options):
+        calls.append((path, options))
+        return {"ok": True, "complete": True, "selection": "reduced"}
+
+    monkeypatch.setattr(cli_mod, "analyze_ebuild_dependencies", fake_analyze)
+    result = CliRunner().invoke(cli_mod.cli, [
+        "deps", "inspect", str(ebuild), "--use", "+ssl", "--use", "-test",
+        "--resolve-providers",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert calls == [(ebuild, {
+        "use": ["+ssl", "-test"],
+        "resolve_providers": True,
+    })]
+
+
+def test_legacy_flat_deps_syntax_forwards_without_polluting_json(
+        monkeypatch, tmp_path):
+    ebuild = tmp_path / "demo-1.ebuild"
+    ebuild.write_text("EAPI=8\n", encoding="utf-8")
+    calls = []
+
+    def fake_analyze(path, **options):
+        calls.append((path, options))
+        return {"ok": True, "complete": True, "selection": "potential"}
+
+    monkeypatch.setattr(cli_mod, "analyze_ebuild_dependencies", fake_analyze)
+    result = CliRunner().invoke(cli_mod.cli, ["deps", str(ebuild)])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["selection"] == "potential"
+    assert calls == [(ebuild, {"use": None, "resolve_providers": False})]
+
+
+def test_legacy_flat_deps_syntax_accepts_options_before_ebuild(
+        monkeypatch, tmp_path):
+    ebuild = tmp_path / "demo-1.ebuild"
+    ebuild.write_text("EAPI=8\n", encoding="utf-8")
+    calls = []
+
+    def fake_analyze(path, **options):
+        calls.append((path, options))
+        return {"ok": True, "complete": True, "selection": "reduced"}
+
+    monkeypatch.setattr(cli_mod, "analyze_ebuild_dependencies", fake_analyze)
+    result = CliRunner().invoke(cli_mod.cli, [
+        "deps", "--use", "+ssl", "--resolve-providers", str(ebuild),
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["selection"] == "reduced"
+    assert calls == [(ebuild, {
+        "use": ["+ssl"], "resolve_providers": True,
+    })]
+
+
+def test_deps_diff_cli_uses_old_new_order_and_allows_changes(monkeypatch, tmp_path):
+    old = tmp_path / "demo-1.ebuild"
+    new = tmp_path / "demo-2.ebuild"
+    old.write_text("EAPI=8\n", encoding="utf-8")
+    new.write_text("EAPI=8\n", encoding="utf-8")
+    calls = []
+
+    def fake_compare(before, after, **options):
+        calls.append((before, after, options))
+        return {"ok": True, "complete": True, "changed": True}
+
+    monkeypatch.setattr(cli_mod, "compare_ebuild_dependencies", fake_compare)
+    result = CliRunner().invoke(cli_mod.cli, [
+        "deps", "diff", str(old), str(new), "--use", "+feature",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["changed"] is True
+    assert calls == [(old, new, {"use": ["+feature"]})]
+
+
+def test_deps_diff_cli_fails_on_incomplete_evidence(monkeypatch, tmp_path):
+    old = tmp_path / "demo-1.ebuild"
+    new = tmp_path / "demo-2.ebuild"
+    old.write_text("EAPI=8\n", encoding="utf-8")
+    new.write_text("EAPI=8\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cli_mod, "compare_ebuild_dependencies",
+        lambda *_args, **_kwargs: {
+            "ok": False, "complete": False, "changed": None,
+        })
+
+    result = CliRunner().invoke(
+        cli_mod.cli, ["deps", "diff", str(old), str(new)])
+
+    assert result.exit_code == 1
+    assert json.loads(result.output)["complete"] is False
+
+
+def test_deps_reverse_cli_preserves_empty_complete_result(monkeypatch):
+    calls = []
+
+    def fake_query(atom):
+        calls.append(atom)
+        return {"ok": True, "complete": True, "state": "complete", "results": []}
+
+    monkeypatch.setattr(cli_mod, "query_reverse_dependencies", fake_query)
+    result = CliRunner().invoke(
+        cli_mod.cli, ["deps", "reverse", "dev-libs/target"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.output)["results"] == []
+    assert calls == ["dev-libs/target"]
+
+
+def test_deps_reverse_cli_fails_on_incomplete_evidence(monkeypatch):
+    monkeypatch.setattr(
+        cli_mod, "query_reverse_dependencies",
+        lambda _atom: {"ok": False, "complete": False, "errors": []})
+
+    result = CliRunner().invoke(
+        cli_mod.cli, ["deps", "reverse", "dev-libs/target"])
+
+    assert result.exit_code == 1
 
 
 def test_package_test_cli_requires_explicit_execution():

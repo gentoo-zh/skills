@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "image": "gentoo/stage3",
+  "tag": "amd64-openrc",
+  "digest": "sha256:2c37233c9a552b019192530e6f48dde39ca5e46b9e4ce482f3e9517e45c6e639",
+  "reference": "gentoo/stage3:amd64-openrc@sha256:2c37233c9a552b019192530e6f48dde39ca5e46b9e4ce482f3e9517e45c6e639",
+  "platform": "linux/amd64",
+  "resolved_at": "2026-08-04T04:53:22Z",
+  "official_project": "https://gitweb.gentoo.org/proj/docker-images.git/",
+  "project_revision": "68f600e08024a9064ff7708344997456436529a7",
+  "registry": "https://hub.docker.com/u/gentoo/"
+}

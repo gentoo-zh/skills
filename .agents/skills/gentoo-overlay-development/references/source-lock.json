@@ -143,8 +143,8 @@
     },
     "gentoo-tree": {
       "kind": "git",
-      "revision": "ba36cc771be0fd46d5fbdc9c546f1029154d8857",
-      "checked_at": "2026-08-04T03:36:01Z"
+      "revision": "af2d1b943fac15dacd6aa543bd488e9500d5701f",
+      "checked_at": "2026-08-04T05:43:53Z"
     },
     "guru": {
       "kind": "git",
@@ -206,10 +206,10 @@
     },
     "ebuild-manual": {
       "kind": "http",
-      "sha256": "3c15abaa9903b344e8faf0de8142afd3f4de5fb0ddf7f90bd409163d004e78ff",
-      "bytes": 75228,
-      "final_url": "https://devmanual.gentoo.org/eclass-reference/ebuild/index.html",
-      "checked_at": "2026-08-03T15:51:50Z"
+      "sha256": "4bf41a46f9a5850a3f46097ba7cf5fac69cbcb6c48419c4c6e96f5916183a84c",
+      "bytes": 62413,
+      "final_url": "https://raw.githubusercontent.com/gentoo/portage/master/man/ebuild.5",
+      "checked_at": "2026-08-04T05:43:53Z"
     },
     "gentoo-qa-policy": {
       "kind": "http",
@@ -227,10 +227,10 @@
     },
     "nvchecker-usage": {
       "kind": "http",
-      "sha256": "17298bcc651da97a4f5033ff3e07a4181648f169e1272c4f2d65ce6b65ef1775",
-      "bytes": 118154,
-      "final_url": "https://nvchecker.readthedocs.io/en/latest/usage.html",
-      "checked_at": "2026-08-03T15:51:50Z"
+      "sha256": "ab60222eb54e67ac76705a47a0c98d8d3483e900928c497dac4f7f04aff2eca7",
+      "bytes": 40254,
+      "final_url": "https://raw.githubusercontent.com/lilydjwg/nvchecker/master/docs/usage.rst",
+      "checked_at": "2026-08-04T05:43:53Z"
     },
     "github-graphql-pagination": {
       "kind": "http",
@@ -471,5 +471,5 @@
       "checked_at": "2026-08-04T04:05:49Z"
     }
   },
-  "updated_at": "2026-08-04T04:05:49Z"
+  "updated_at": "2026-08-04T05:43:53Z"
 }

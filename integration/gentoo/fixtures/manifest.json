@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "scope": "One isolated amd64 EAPI 8 source-merge fixture profile; not an overlay or architecture matrix",
+  "cases": [
+    {
+      "id": "good-install",
+      "atom": "test-fixture/gzh-integration-good-1.0",
+      "ebuild": "overlay/test-fixture/gzh-integration-good/gzh-integration-good-1.0.ebuild",
+      "installed_path": "usr/bin/gzh-integration-good",
+      "artifact_sha256": "4d28d819d7fcc72cdd766591c86c8b1a3f98c137713d9756e0eaddb684f45e65",
+      "expected_gate": "accept",
+      "expected_elog_pattern": null
+    },
+    {
+      "id": "qa-elog",
+      "atom": "test-fixture/gzh-integration-qa-elog-1.0",
+      "ebuild": "overlay/test-fixture/gzh-integration-qa-elog/gzh-integration-qa-elog-1.0.ebuild",
+      "installed_path": "usr/bin/gzh-integration-qa-elog",
+      "artifact_sha256": "81040606fbaa994a979c792fe90367dcbf59cf0bc8113e13d3e91fbe08c15aa9",
+      "expected_gate": "reject",
+      "expected_elog_pattern": "intentional gzh integration QA boundary"
+    }
+  ]
+}

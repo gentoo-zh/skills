@@ -333,7 +333,7 @@
       "title": "Gentoo ebuild manual",
       "authority": "gentoo-standard",
       "kind": "http",
-      "url": "https://devmanual.gentoo.org/eclass-reference/ebuild/index.html",
+      "url": "https://raw.githubusercontent.com/gentoo/portage/master/man/ebuild.5",
       "topics": [
         "ebuild",
         "variables",
@@ -716,7 +716,7 @@
       "title": "nvchecker usage documentation",
       "authority": "upstream-primary",
       "kind": "http",
-      "url": "https://nvchecker.readthedocs.io/en/latest/usage.html",
+      "url": "https://raw.githubusercontent.com/lilydjwg/nvchecker/master/docs/usage.rst",
       "topics": [
         "nvchecker",
         "upstream",

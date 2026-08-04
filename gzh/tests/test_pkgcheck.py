@@ -1,4 +1,6 @@
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 from gzh.pkgcheck import SEVERITIES, run_pkgcheck
@@ -151,3 +153,16 @@ def test_command_evidence_preserves_complete_nonzero_result(tmp_path):
     assert evidence["returncode"] == 2
     assert evidence["stdout"] == "diagnostic\n"
     assert evidence["stderr"] == "failure\n"
+
+
+def test_command_evidence_passes_environment_to_bounded_process():
+    environment = {**os.environ, "GZH_EVIDENCE_TEST": "explicit-value"}
+    evidence = run_evidence_command(
+        [sys.executable, "-c",
+         "import os; print(os.environ['GZH_EVIDENCE_TEST'])"],
+        env=environment,
+    )
+
+    assert evidence["complete"] is True
+    assert evidence["returncode"] == 0
+    assert evidence["stdout"] == "explicit-value\n"

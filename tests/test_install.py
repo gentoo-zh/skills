@@ -476,10 +476,16 @@ def test_unowned_destination_is_never_replaced(tmp_path):
 
 def test_gzh_install_status_and_uninstall(tmp_path):
     env = environment(tmp_path)
-    invoke(INSTALLER, ["--gzh-only"], env)
+    install = invoke(INSTALLER, ["--gzh-only"], env)
     executable = tmp_path / "bin" / "gzh"
     assert executable.is_symlink()
-    invoke(INSTALLER, ["--gzh-only", "--status"], env)
+    expected_warning = (
+        f"warning: {executable.parent} is not in PATH; "
+        "add it before invoking gzh"
+    )
+    assert expected_warning in install.stderr
+    status = invoke(INSTALLER, ["--gzh-only", "--status"], env)
+    assert expected_warning in status.stderr
     help_result = subprocess.run(
         [str(executable), "--help"], env=env, capture_output=True, text=True)
     assert help_result.returncode == 0
@@ -487,6 +493,17 @@ def test_gzh_install_status_and_uninstall(tmp_path):
     invoke(INSTALLER, ["--gzh-only", "--uninstall"], env)
     assert not executable.exists()
     assert not (tmp_path / "gzh-install").exists()
+
+
+def test_gzh_install_has_no_path_warning_when_launcher_is_discoverable(tmp_path):
+    env = environment(tmp_path)
+    env["PATH"] = os.pathsep.join((str(tmp_path / "bin"), env["PATH"]))
+
+    install = invoke(INSTALLER, ["--gzh-only"], env)
+    status = invoke(INSTALLER, ["--gzh-only", "--status"], env)
+
+    assert "not in PATH" not in install.stderr
+    assert "not in PATH" not in status.stderr
 
 
 def test_gzh_install_refuses_dangling_unowned_root_symlink(tmp_path):

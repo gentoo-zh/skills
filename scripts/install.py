@@ -130,6 +130,24 @@ def gzh_paths() -> tuple[Path, Path]:
     return install_root, bin_dir / "gzh"
 
 
+def directory_on_path(directory: Path) -> bool:
+    target = absolute_path(directory)
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        candidate = Path(entry) if entry else Path.cwd()
+        if absolute_path(candidate) == target:
+            return True
+    return False
+
+
+def warn_if_gzh_not_on_path(executable: Path) -> None:
+    if not directory_on_path(executable.parent):
+        print(
+            f"warning: {executable.parent} is not in PATH; "
+            "add it before invoking gzh",
+            file=sys.stderr,
+        )
+
+
 def absolute_path(path: Path) -> Path:
     return Path(os.path.abspath(path.expanduser()))
 
@@ -752,7 +770,9 @@ def run_install(clients: list[str], mode: str, include_skills: bool,
                 failed = True
     if include_gzh:
         try:
-            print(f"{'gzh':<18} {'CLI':<23} installed ({install_gzh()})")
+            executable = Path(install_gzh())
+            print(f"{'gzh':<18} {'CLI':<23} installed ({executable})")
+            warn_if_gzh_not_on_path(executable)
         except (InstallError, OSError, subprocess.CalledProcessError) as exc:
             print(f"{'gzh':<18} {'CLI':<23} {exc}", file=sys.stderr)
             failed = True
@@ -815,6 +835,8 @@ def run_status(clients: list[str], include_skills: bool,
         state, current = gzh_status()
         print(f"{'gzh':<18} {'CLI':<23} {state}")
         failed = failed or not current
+        if current:
+            warn_if_gzh_not_on_path(gzh_paths()[1])
     return int(failed)
 
 

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
+import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import tomllib
@@ -19,6 +23,7 @@ from portage.dep import Atom, InvalidAtom
 from gzh.executor_evidence import (
     MAX_ELOG_BYTES,
     MAX_ELOG_FILES,
+    MAX_ELOG_TOTAL_BYTES,
     MAX_FINAL_LOG_BYTES,
     command_record,
     create_evidence,
@@ -29,6 +34,7 @@ from gzh.repo import github_slug
 CONFIG_VERSION = 1
 MAX_PATCH_BYTES = 16 * 1024 * 1024
 MAX_COMMAND_OUTPUT_BYTES = 2 * 1024 * 1024
+MAX_COLLECTION_ERROR_PREVIEW_BYTES = 4096
 CANONICAL_REPOSITORY = "gentoo-zh/overlay"
 PORTAGE_ENVIRONMENT = {
     "PORTAGE_ELOG_CLASSES": "qa warn error",
@@ -41,6 +47,86 @@ _NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 _HOST_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.:-]{0,252}\Z")
 _USER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,63}\Z")
 _COMMIT_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})\Z")
+_ARCH_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,31}\Z")
+_PROFILE_RE = re.compile(r"[A-Za-z0-9/][A-Za-z0-9_+./:-]{0,511}\Z")
+MAX_REMOTE_ELOG_TOTAL_BYTES = 1024 * 1024
+_REMOTE_ELOG_COLLECTOR = r"""
+import base64
+import json
+import os
+import stat
+import sys
+
+path, file_limit, byte_limit, total_limit = sys.argv[1:]
+file_limit = int(file_limit)
+byte_limit = int(byte_limit)
+total_limit = int(total_limit)
+flags = os.O_RDONLY
+for flag_name in ("O_CLOEXEC", "O_DIRECTORY", "O_NOFOLLOW"):
+    flags |= getattr(os, flag_name, 0)
+directory_fd = os.open(path, flags)
+try:
+    directory_before = os.fstat(directory_fd)
+    if not stat.S_ISDIR(directory_before.st_mode):
+        raise RuntimeError("elog path is not a directory")
+    names = sorted(os.listdir(directory_fd))
+    if len(names) > file_limit:
+        raise RuntimeError("saved elog evidence exceeds the bounded inventory")
+    result = {}
+    total = 0
+    for name in names:
+        if not name or "/" in name or name in {".", ".."}:
+            raise RuntimeError("remote elog inventory contains an unsafe name")
+        expected = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if not stat.S_ISREG(expected.st_mode):
+            raise RuntimeError("remote elog inventory contains a non-regular entry")
+        if expected.st_size > byte_limit or total + expected.st_size > total_limit:
+            raise RuntimeError("saved elog evidence exceeds the bounded inventory")
+        file_flags = os.O_RDONLY
+        for flag_name in ("O_CLOEXEC", "O_NOFOLLOW", "O_NONBLOCK"):
+            file_flags |= getattr(os, flag_name, 0)
+        descriptor = os.open(name, file_flags, dir_fd=directory_fd)
+        try:
+            opened = os.fstat(descriptor)
+            expected_identity = (
+                expected.st_dev, expected.st_ino, expected.st_size,
+                expected.st_mtime_ns, expected.st_ctime_ns,
+            )
+            opened_identity = (
+                opened.st_dev, opened.st_ino, opened.st_size,
+                opened.st_mtime_ns, opened.st_ctime_ns,
+            )
+            if not stat.S_ISREG(opened.st_mode) or opened_identity != expected_identity:
+                raise RuntimeError("remote elog changed before it was opened")
+            chunks = []
+            remaining = byte_limit + 1
+            while remaining > 0:
+                chunk = os.read(descriptor, min(65536, remaining))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            content = b"".join(chunks)
+            observed = os.fstat(descriptor)
+            observed_identity = (
+                observed.st_dev, observed.st_ino, observed.st_size,
+                observed.st_mtime_ns, observed.st_ctime_ns,
+            )
+            if observed_identity != opened_identity or len(content) != opened.st_size:
+                raise RuntimeError("remote elog changed while evidence was collected")
+        finally:
+            os.close(descriptor)
+        total += len(content)
+        result[name] = base64.b64encode(content).decode("ascii")
+    directory_after = os.fstat(directory_fd)
+    if (sorted(os.listdir(directory_fd)) != names
+            or directory_after.st_mtime_ns != directory_before.st_mtime_ns
+            or directory_after.st_ctime_ns != directory_before.st_ctime_ns):
+        raise RuntimeError("remote elog directory changed during collection")
+    print(json.dumps({"files": result}, sort_keys=True, separators=(",", ":")))
+finally:
+    os.close(directory_fd)
+""".strip()
 
 
 class ExecutorError(RuntimeError):
@@ -225,7 +311,7 @@ def validate_exact_atom(value: str) -> str:
 
 def merge_argv(atom: str, *, onlydeps: bool) -> list[str]:
     atom = validate_exact_atom(atom)
-    argv = ["emerge", "--usepkg=n", "--usepkgonly=n"]
+    argv = ["emerge", "--usepkg=n"]
     if onlydeps:
         return [*argv, "--onlydeps", atom]
     return [*argv, "--oneshot", "--selective=n", atom]
@@ -563,20 +649,90 @@ class Executor:
     def _make_run_dir(self) -> Path:
         return Path(tempfile.mkdtemp(prefix="gzh-executor-")).resolve()
 
-    def _clear_elogs(self, elog_dir: Path) -> None:
-        for path in sorted(elog_dir.iterdir() if elog_dir.is_dir() else []):
-            if path.is_file() and not path.is_symlink():
-                path.unlink()
-
     def _collect_elogs(self, elog_dir: Path) -> dict[str, bytes]:
-        result: dict[str, bytes] = {}
-        for path in sorted(elog_dir.iterdir() if elog_dir.is_dir() else []):
-            if not path.is_file() or path.is_symlink():
-                continue
-            if len(result) >= MAX_ELOG_FILES or path.stat().st_size > MAX_ELOG_BYTES:
-                raise ExecutorError("saved elog evidence exceeds the bounded inventory")
-            result[path.name] = path.read_bytes()
-        return result
+        directory_fd: int | None = None
+        try:
+            expected_directory = elog_dir.lstat()
+            if not stat.S_ISDIR(expected_directory.st_mode):
+                raise ExecutorError("saved elog path is not a regular directory")
+            flags = os.O_RDONLY
+            for flag_name in ("O_CLOEXEC", "O_DIRECTORY", "O_NOFOLLOW"):
+                flags |= getattr(os, flag_name, 0)
+            directory_fd = os.open(elog_dir, flags)
+            opened_directory = os.fstat(directory_fd)
+            if ((opened_directory.st_dev, opened_directory.st_ino)
+                    != (expected_directory.st_dev, expected_directory.st_ino)):
+                raise ExecutorError("saved elog directory changed before collection")
+            names = sorted(os.listdir(directory_fd))
+            if len(names) > MAX_ELOG_FILES:
+                raise ExecutorError(
+                    "saved elog evidence exceeds the bounded inventory")
+            result: dict[str, bytes] = {}
+            total = 0
+            for name in names:
+                expected = os.stat(
+                    name, dir_fd=directory_fd, follow_symlinks=False)
+                if not stat.S_ISREG(expected.st_mode):
+                    raise ExecutorError(
+                        "saved elog inventory contains a non-regular entry")
+                if expected.st_size > MAX_ELOG_BYTES:
+                    raise ExecutorError(
+                        "saved elog evidence exceeds the per-file limit")
+                total += expected.st_size
+                if total > MAX_ELOG_TOTAL_BYTES:
+                    raise ExecutorError(
+                        "saved elog evidence exceeds the aggregate limit")
+                file_flags = os.O_RDONLY
+                for flag_name in ("O_CLOEXEC", "O_NOFOLLOW", "O_NONBLOCK"):
+                    file_flags |= getattr(os, flag_name, 0)
+                descriptor = os.open(name, file_flags, dir_fd=directory_fd)
+                try:
+                    opened = os.fstat(descriptor)
+                    expected_identity = (
+                        expected.st_dev, expected.st_ino, expected.st_size,
+                        expected.st_mtime_ns, expected.st_ctime_ns,
+                    )
+                    opened_identity = (
+                        opened.st_dev, opened.st_ino, opened.st_size,
+                        opened.st_mtime_ns, opened.st_ctime_ns,
+                    )
+                    if (not stat.S_ISREG(opened.st_mode)
+                            or opened_identity != expected_identity):
+                        raise ExecutorError(
+                            "saved elog changed before it was opened")
+                    chunks: list[bytes] = []
+                    remaining = MAX_ELOG_BYTES + 1
+                    while remaining > 0:
+                        chunk = os.read(descriptor, min(65536, remaining))
+                        if not chunk:
+                            break
+                        chunks.append(chunk)
+                        remaining -= len(chunk)
+                    content = b"".join(chunks)
+                    observed = os.fstat(descriptor)
+                    observed_identity = (
+                        observed.st_dev, observed.st_ino, observed.st_size,
+                        observed.st_mtime_ns, observed.st_ctime_ns,
+                    )
+                    if (observed_identity != opened_identity
+                            or len(content) != opened.st_size):
+                        raise ExecutorError(
+                            "saved elog changed while evidence was collected")
+                finally:
+                    os.close(descriptor)
+                result[name] = content
+            final_directory = os.fstat(directory_fd)
+            if (sorted(os.listdir(directory_fd)) != names
+                    or final_directory.st_mtime_ns != opened_directory.st_mtime_ns
+                    or final_directory.st_ctime_ns != opened_directory.st_ctime_ns):
+                raise ExecutorError(
+                    "saved elog directory changed during collection")
+            return result
+        except OSError as exc:
+            raise ExecutorError(f"cannot collect saved elog evidence: {exc}") from exc
+        finally:
+            if directory_fd is not None:
+                os.close(directory_fd)
 
     def execute(self, request: InstallRequest) -> dict[str, Any]:
         return _execute_install(self, request)
@@ -654,46 +810,37 @@ class SSHExecutor(Executor):
         self._patch_applied = True
         return run_dir
 
-    def _clear_elogs(self, elog_dir: PurePosixPath) -> None:
-        proc = self.transport.run([
-            "find", str(elog_dir), "-mindepth", "1", "-maxdepth", "1",
-            "-type", "f", "-delete",
-        ])
-        _checked_result(proc, "remote dependency elog cleanup")
-
     def _collect_elogs(self, elog_dir: PurePosixPath) -> dict[str, bytes]:
-        inventory = _checked_result(
-            self.transport.run([
-                "find", str(elog_dir), "-mindepth", "1", "-maxdepth", "1",
-                "-type", "f", "-printf", "%f\\n",
-            ]),
-            "remote elog inventory",
-        )
-        names = _lines(inventory)
-        if len(names) > MAX_ELOG_FILES:
+        command = [
+            "python3", "-c", _REMOTE_ELOG_COLLECTOR, str(elog_dir),
+            str(MAX_ELOG_FILES), str(MAX_ELOG_BYTES),
+            str(MAX_REMOTE_ELOG_TOTAL_BYTES),
+        ]
+        collected = _checked_result(
+            self.transport.run(command), "remote elog collection")
+        try:
+            payload = json.loads(_output(collected, "stdout"))
+        except json.JSONDecodeError as exc:
+            raise ExecutorError("remote elog evidence is not valid JSON") from exc
+        if not isinstance(payload, dict) or set(payload) != {"files"} \
+                or not isinstance(payload["files"], dict):
+            raise ExecutorError("remote elog evidence schema is invalid")
+        if len(payload["files"]) > MAX_ELOG_FILES:
             raise ExecutorError("saved elog evidence exceeds the bounded inventory")
         result: dict[str, bytes] = {}
-        for name in names:
-            if PurePosixPath(name).name != name or name in {".", ".."}:
-                raise ExecutorError("remote elog inventory contains an unsafe name")
-            path = elog_dir / name
-            size_proc = _checked_result(
-                self.transport.run(["stat", "-c", "%s", "--", str(path)]),
-                "remote elog size lookup",
-            )
+        total = 0
+        for name, encoded in payload["files"].items():
+            if (not isinstance(name, str) or PurePosixPath(name).name != name
+                    or name in {".", ".."} or not isinstance(encoded, str)):
+                raise ExecutorError("remote elog evidence schema is invalid")
             try:
-                size = int(_output(size_proc, "stdout").strip())
-            except ValueError as exc:
-                raise ExecutorError("remote elog size is invalid") from exc
-            if not 0 <= size <= MAX_ELOG_BYTES:
-                raise ExecutorError("saved elog evidence exceeds the per-file limit")
-            content_proc = _checked_result(
-                self.transport.run(["head", "-c", str(size + 1), "--", str(path)]),
-                "remote elog download",
-            )
-            content = _output(content_proc, "stdout").encode()
-            if len(content) != size:
-                raise ExecutorError("remote elog changed while evidence was collected")
+                content = base64.b64decode(encoded, validate=True)
+            except (ValueError, binascii.Error) as exc:
+                raise ExecutorError("remote elog content encoding is invalid") from exc
+            total += len(content)
+            if (len(content) > MAX_ELOG_BYTES
+                    or total > MAX_REMOTE_ELOG_TOTAL_BYTES):
+                raise ExecutorError("saved elog evidence exceeds the bounded inventory")
             result[name] = content
         return result
 
@@ -765,6 +912,29 @@ def _final_log(
     return bounded.decode(errors="replace"), True
 
 
+def _collection_error(exc: ExecutorError) -> dict[str, Any]:
+    content = str(exc).encode()
+    preview = content[:MAX_COLLECTION_ERROR_PREVIEW_BYTES]
+    return {
+        "type": type(exc).__name__,
+        "message": preview.decode(errors="replace"),
+        "message_bytes": len(content),
+        "message_sha256": hashlib.sha256(content).hexdigest(),
+        "truncated": len(content) > len(preview),
+    }
+
+
+def _environment_value(
+        proc: subprocess.CompletedProcess, pattern: re.Pattern[str],
+) -> str | None:
+    if proc.returncode != 0:
+        return None
+    value = _output(proc, "stdout").strip()
+    if not value or "\n" in value or "\r" in value or not pattern.fullmatch(value):
+        return None
+    return value
+
+
 def _execute_install(executor: Executor, request: InstallRequest) -> dict[str, Any]:
     atom = validate_exact_atom(request.atom)
     if not _COMMIT_RE.fullmatch(request.commit):
@@ -790,6 +960,7 @@ def _execute_install(executor: Executor, request: InstallRequest) -> dict[str, A
     arch = "unknown"
     profile = "unknown"
     failed_step: str | None = None
+    collection_errors: list[dict[str, Any]] = []
     cleanup: dict[str, Any] = {"ok": True, "errors": [], "removed_paths": []}
     try:
         run_dir = executor._make_run_dir()
@@ -804,17 +975,19 @@ def _execute_install(executor: Executor, request: InstallRequest) -> dict[str, A
 
         environment = _execution_environment(logdir)
         arch_command = ["portageq", "envvar", "ARCH"]
-        profile_command = ["eselect", "profile", "show"]
+        profile_command = ["eselect", "--brief", "profile", "show"]
         inventory_command = ["qlist", "-IC"]
         for command in (arch_command, profile_command, inventory_command):
             commands.append(command_record(command))
         arch_proc = executor._run(arch_command)
         profile_proc = executor._run(profile_command)
         before_proc = executor._run(inventory_command)
-        if arch_proc.returncode == 0 and _output(arch_proc, "stdout").strip():
-            arch = _output(arch_proc, "stdout").strip()
-        if profile_proc.returncode == 0 and _output(profile_proc, "stdout").strip():
-            profile = _output(profile_proc, "stdout").strip()
+        arch_value = _environment_value(arch_proc, _ARCH_RE)
+        profile_value = _environment_value(profile_proc, _PROFILE_RE)
+        if arch_value is not None:
+            arch = arch_value
+        if profile_value is not None:
+            profile = profile_value
         before = _lines(before_proc) if before_proc.returncode == 0 else []
 
         if (arch == "unknown" or profile == "unknown"
@@ -832,13 +1005,21 @@ def _execute_install(executor: Executor, request: InstallRequest) -> dict[str, A
                 if after_proc.returncode != 0:
                     failed_step = "evidence"
                 else:
-                    executor._clear_elogs(elog_dir)
+                    try:
+                        elogs = executor._collect_elogs(elog_dir)
+                    except ExecutorError as exc:
+                        collection_errors.append(_collection_error(exc))
+                        failed_step = "evidence"
+                    if failed_step is None and elogs:
+                        failed_step = "elog"
+                if failed_step is None:
                     merge_command = merge_argv(atom, onlydeps=False)
                     commands.append(command_record(merge_command, environment=environment))
                     merge = executor._run(merge_command, environment=environment)
                     try:
                         elogs = executor._collect_elogs(elog_dir)
-                    except ExecutorError:
+                    except ExecutorError as exc:
+                        collection_errors.append(_collection_error(exc))
                         failed_step = "evidence"
                     if failed_step is None and merge.returncode != 0:
                         failed_step = "merge"
@@ -874,6 +1055,20 @@ def _execute_install(executor: Executor, request: InstallRequest) -> dict[str, A
         failed_step = "evidence"
     retained = sorted(set(after_dependencies) - set(before))
     ended_at = _utc_now()
+    provenance: dict[str, Any] = {}
+    if request.transfer is not None:
+        provenance.update({
+            "remote_repository": getattr(executor, "_remote_validation", None),
+            "owned_transfer": {
+                "commit": request.transfer.commit,
+                "parent": request.transfer.parent,
+                "paths": list(request.transfer.paths),
+                "sha256": request.transfer.sha256,
+                "size": request.transfer.size,
+            },
+        })
+    if collection_errors:
+        provenance["collection_errors"] = collection_errors
     record = create_evidence(
         evidence_directory,
         executor_type=executor.type,
@@ -892,19 +1087,7 @@ def _execute_install(executor: Executor, request: InstallRequest) -> dict[str, A
         installed_inventory=installed,
         cleanup=cleanup,
         retained_dependencies=retained,
-        provenance=(
-            {
-                "remote_repository": getattr(executor, "_remote_validation", None),
-                "owned_transfer": {
-                    "commit": request.transfer.commit,
-                    "parent": request.transfer.parent,
-                    "paths": list(request.transfer.paths),
-                    "sha256": request.transfer.sha256,
-                    "size": request.transfer.size,
-                },
-            }
-            if request.transfer is not None else {}
-        ),
+        provenance=provenance,
     )
     record["ok"] = failed_step is None
     record["failed_step"] = failed_step

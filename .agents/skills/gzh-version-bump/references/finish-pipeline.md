@@ -89,14 +89,18 @@ package scan is offline and does not replace the networked commit scan before a 
 request.
 
 For a dependency or USE change, analyze the matching Portage cache entry without sourcing
-the ebuild:
+the ebuild and compare the retained old version with the target:
 
 ```bash
-gzh deps <changed-ebuild> --use +flag --use -other
+gzh deps inspect <changed-ebuild> --use +flag --use -other
+gzh deps diff <old-ebuild> <changed-ebuild> --use +flag --use -other
 ```
 
 List every referenced USE state explicitly. Add `--resolve-providers` only when the
-active Portage repository set is the intended provider evidence.
+active Portage repository set is the intended provider evidence. Before removing or
+narrowing a provider, run `gzh deps reverse <atom>` as a raw potential-consumer index,
+then verify each relevant consumer under the required profile. None of these reports
+proves ABI compatibility or replaces dependency resolution, build, or install evidence.
 
 ## 5. Build, Test, and Verify Installation
 
@@ -113,12 +117,13 @@ gzh merge <changed-ebuild> [--logdir <evidence-directory>]
 ```
 
 `gzh merge` derives an exact repository-qualified atom, disables binary package
-selection so the changed ebuild is built from source, emerges its dependencies, clears
-dependency elog files from an isolated `PORTAGE_LOGDIR`, requests the target with
-`PORTAGE_ELOG_CLASSES="qa warn error"`, and fails when the merge fails or the target
-produces an elog file. It passes `--oneshot --selective=n` so an installed exact version
-is remerged without adding it to the world set. Inspect the saved elog file; do not
-substitute console output for the file gate.
+selection so the changed ebuild is built from source, and emerges its dependencies before
+the target. It saves `qa`, `warn`, and `error` classes in one isolated
+`PORTAGE_LOGDIR` and fails when either emerge fails or either step produces an elog file.
+Dependency elog evidence is retained and blocks the target merge. The target command uses
+`--oneshot --selective=n` so an installed exact version is remerged without adding it to
+the world set. Inspect every saved elog file; do not substitute console output for the
+file gate.
 
 The live emerge workflow remains authoritative. It currently tests every selected target
 on the amd64 desktop OpenRC and systemd profiles, and also tests arm64-keyworded targets

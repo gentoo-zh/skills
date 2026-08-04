@@ -25,7 +25,9 @@ from gzh.check import Gate, run_read_only_checks
 from gzh.commit import run_commit, run_recommit
 from gzh.drop_old import run_drop_old
 from gzh.ebuild_parser import parse_ebuild
-from gzh.deps import DependencyMetadataError, analyze_ebuild_dependencies
+from gzh.deps import (DependencyMetadataError, analyze_ebuild_dependencies,
+                      compare_ebuild_dependencies)
+from gzh.dependency_query import query_reverse_dependencies
 from gzh.executor import (ExecutorError, InstallRequest, create_commit_patch,
                           create_executor, load_executor_config)
 from gzh.executor_evidence import verify_evidence
@@ -79,6 +81,36 @@ class GzhGroup(click.Group):
         legacy_names = set(PREFERRED_COMMAND_ALIASES.values())
         preferred = [name for name in commands if name not in legacy_names]
         return sorted([*preferred, *PREFERRED_COMMAND_ALIASES])
+
+
+class DependencyGroup(click.Group):
+    """Keep the pre-group ebuild form working during the CLI transition."""
+
+    def parse_args(self, ctx, args):
+        if args and args[0] not in self.commands:
+            candidates = [
+                Path(value).expanduser() for value in args
+                if not value.startswith("-") and value.endswith(".ebuild")
+            ]
+            if len(candidates) == 1 and candidates[0].is_file():
+                args = ["inspect", *args]
+        return super().parse_args(ctx, args)
+
+
+class PkgcheckCompatCommand(click.Command):
+    """Accept pkgcheck's explicit scan verb on the legacy command name."""
+
+    def parse_args(self, ctx, args):
+        if ctx.info_name == "pkgcheck" and args[:1] == ["scan"]:
+            args = args[1:]
+        return super().parse_args(ctx, args)
+
+
+def _pkgcheck_cli_selectors(values):
+    selectors = []
+    for value in values:
+        selectors.extend(value.split(","))
+    return tuple(selectors)
 
 
 @click.group(cls=GzhGroup)
@@ -291,11 +323,15 @@ def doctor_cmd(repository, adapter_id, operation):
 @cli.command("check")
 @click.argument("target", type=click.Path(exists=True, path_type=Path))
 @click.option("--adapter", "adapter_id", default="gentoo-zh", show_default=True)
-@click.option("--min-severity", default="warning",
+@click.option("--min-severity", "--exit", "min_severity", default="warning",
               type=click.Choice(["error", "warning", "info", "style"]))
 @click.option("--net", is_flag=True, default=False,
               help="enable pkgcheck network checks for the selected target")
-def check_cmd(target, adapter_id, min_severity, net):
+@click.option("-p", "--profile", "--profiles", "profiles", multiple=True,
+              help="pkgcheck profile selector; repeat to define the QA scope")
+@click.option("-a", "--arch", "--arches", "arches", multiple=True,
+              help="pkgcheck architecture selector; repeat to define the QA scope")
+def check_cmd(target, adapter_id, min_severity, net, profiles, arches):
     """Run the side-effect-free adapter, lint, and pkgcheck gates."""
     target = Path(target).resolve()
     try:
@@ -324,7 +360,9 @@ def check_cmd(target, adapter_id, min_severity, net):
             skip_reason="target is not an ebuild"))
     gates.append(Gate(
         "qa", lambda _root: run_pkgcheck(
-            target, min_severity=min_severity, net=net)))
+            target, min_severity=min_severity, net=net,
+            profiles=_pkgcheck_cli_selectors(profiles),
+            arches=_pkgcheck_cli_selectors(arches))))
     report = run_read_only_checks(root, gates)
     click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
     if not report["ok"] or not report["complete"]:
@@ -438,7 +476,7 @@ def nvchecker_config_set_cmd(cat_pkg, json_entry):
 
 @cli.command("manifest")
 @click.argument("ebuild", type=click.Path(exists=True, path_type=Path))
-@click.option("--distdir", type=click.Path(file_okay=False, path_type=Path),
+@click.option("-d", "--distdir", type=click.Path(file_okay=False, path_type=Path),
               default=None, help="writable distfiles directory passed to pkgdev")
 def manifest_cmd(ebuild, distdir):
     """Regenerate the Manifest for an ebuild via pkgdev."""
@@ -449,15 +487,25 @@ def manifest_cmd(ebuild, distdir):
         raise SystemExit(1)
 
 
-@cli.command("pkgcheck")
+@cli.command("pkgcheck", cls=PkgcheckCompatCommand)
 @click.argument("path", type=click.Path(exists=True, path_type=Path))
-@click.option("--min-severity", default="warning",
+@click.option("--min-severity", "--exit", "min_severity", default="warning",
               type=click.Choice(["error", "warning", "info", "style"]))
 @click.option("--net", is_flag=True, default=False,
               help="enable network keychecks (DeadUrl/RedirectedUrl)")
-def pkgcheck_cmd(path, min_severity, net):
+@click.option("-p", "--profile", "--profiles", "profiles", multiple=True,
+              help="pkgcheck profile selector; repeat to define the QA scope")
+@click.option("-a", "--arch", "--arches", "arches", multiple=True,
+              help="pkgcheck architecture selector; repeat to define the QA scope")
+def pkgcheck_cmd(path, min_severity, net, profiles, arches):
     """Run pkgcheck scan and print structured results filtered by severity."""
-    res = run_pkgcheck(path, min_severity=min_severity, net=net)
+    try:
+        res = run_pkgcheck(
+            path, min_severity=min_severity, net=net,
+            profiles=_pkgcheck_cli_selectors(profiles),
+            arches=_pkgcheck_cli_selectors(arches))
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     click.echo(_json.dumps(res, indent=2, ensure_ascii=False))
     if not res["ok"] or not res["complete"]:
         raise SystemExit(1)
@@ -536,14 +584,19 @@ def artifacts_cmd(manifest, evidence, distdir):
         raise SystemExit(1)
 
 
-@cli.command("deps")
+@cli.group("deps", cls=DependencyGroup)
+def deps_group():
+    """Inspect and compare verified Portage dependency metadata."""
+
+
+@deps_group.command("inspect")
 @click.argument("ebuild", type=click.Path(exists=True, dir_okay=False,
                                            path_type=Path))
 @click.option("--use", "use_flags", multiple=True,
               help="explicit +FLAG or -FLAG state; repeat for every referenced flag")
 @click.option("--resolve-providers", is_flag=True, default=False,
               help="query the active Portage repository set for matching providers")
-def deps_cmd(ebuild, use_flags, resolve_providers):
+def deps_inspect_cmd(ebuild, use_flags, resolve_providers):
     """Analyze verified Portage cache metadata without sourcing an ebuild."""
     try:
         report = analyze_ebuild_dependencies(
@@ -553,6 +606,38 @@ def deps_cmd(ebuild, use_flags, resolve_providers):
         )
     except (DependencyMetadataError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
+    click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
+    if not report["ok"] or not report["complete"]:
+        raise SystemExit(1)
+
+
+@deps_group.command("diff")
+@click.argument("old_ebuild", type=click.Path(exists=True, dir_okay=False,
+                                               path_type=Path))
+@click.argument("new_ebuild", type=click.Path(exists=True, dir_okay=False,
+                                               path_type=Path))
+@click.option("--use", "use_flags", multiple=True,
+              help="shared explicit +FLAG or -FLAG state; repeat for every flag")
+def deps_diff_cmd(old_ebuild, new_ebuild, use_flags):
+    """Compare old and new verified dependency declarations."""
+    try:
+        report = compare_ebuild_dependencies(
+            old_ebuild,
+            new_ebuild,
+            use=list(use_flags) if use_flags else None,
+        )
+    except (DependencyMetadataError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
+    if not report["ok"] or not report["complete"]:
+        raise SystemExit(1)
+
+
+@deps_group.command("reverse")
+@click.argument("atom")
+def deps_reverse_cmd(atom):
+    """List raw potential direct reverse dependencies from ebuild repos."""
+    report = query_reverse_dependencies(atom)
     click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
     if not report["ok"] or not report["complete"]:
         raise SystemExit(1)

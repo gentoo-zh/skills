@@ -1,0 +1,7 @@
+#!/bin/sh
+
+if [ "${1-}" = "--self-test" ]; then
+	exit 0
+fi
+
+printf '%s\n' 'gzh integration fixture: qa-elog'

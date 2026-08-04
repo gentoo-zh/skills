@@ -34,6 +34,22 @@ sources an ebuild, and records the input byte count and SHA-256. Treat reduced a
 blockers, and slot operators as syntax evidence only; upstream behavior and repository
 resolution still establish whether a dependency is correct.
 
+When `gzh` is installed and each input has a matching reviewed md5-cache entry, use its
+bounded wrappers for repository ebuilds:
+
+```bash
+gzh deps inspect /absolute/path/to/package-2.ebuild [--use +flag --use -other]
+gzh deps diff /absolute/path/to/package-1.ebuild /absolute/path/to/package-2.ebuild
+gzh deps reverse dev-libs/provider
+```
+
+`inspect` and `diff` reject non-regular or over-1-MiB ebuild and cache inputs. The diff
+always compares potential declarations and adds a reduced delta only for one explicit,
+complete USE state shared by both versions. The reverse query uses pquery's raw ebuild
+repository view, so it reports potential direct consumers rather than active-profile,
+transitive, or ABI relationships. Treat all three reports as review indexes, not proof
+that a dependency is behaviorally required or compatible.
+
 ## Declare the Relationship
 
 - Select `BDEPEND`, `DEPEND`, `RDEPEND`, `IDEPEND`, or `PDEPEND` from the active EAPI's

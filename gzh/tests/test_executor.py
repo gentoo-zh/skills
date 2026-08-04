@@ -1,7 +1,10 @@
+import base64
 import hashlib
+import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -9,6 +12,7 @@ import pytest
 from gzh.executor import (
     ExecutorAuthorizationError,
     ExecutorConfigError,
+    ExecutorError,
     ExecutorSpec,
     ExecutorValidationError,
     InstallRequest,
@@ -21,6 +25,7 @@ from gzh.executor import (
     load_executor_config,
     merge_argv,
     validate_remote_repository,
+    _REMOTE_ELOG_COLLECTOR,
 )
 from gzh.executor_evidence import verify_evidence
 
@@ -44,7 +49,7 @@ class LocalRunner:
         self.calls.append((list(args), kwargs))
         if args == ["portageq", "envvar", "ARCH"]:
             return _proc(args, stdout="amd64\n")
-        if args == ["eselect", "profile", "show"]:
+        if args == ["eselect", "--brief", "profile", "show"]:
             return _proc(args, stdout="default/linux/amd64/23.0/desktop\n")
         if args == ["qlist", "-IC"]:
             self.inventory_calls += 1
@@ -57,8 +62,14 @@ class LocalRunner:
         if "--onlydeps" in args:
             if self.failure == "onlydeps":
                 return _proc(args, returncode=1, stderr="dependency failure")
-            elog = Path(kwargs["env"]["PORTAGE_LOGDIR"]) / "elog"
-            (elog / "dependency.log").write_text("ignored dependency warning\n")
+            if self.failure == "dependency-elog":
+                elog = Path(kwargs["env"]["PORTAGE_LOGDIR"]) / "elog"
+                (elog / "dependency.log").write_text("dependency warning\n")
+            if self.failure == "dependency-elog-overflow":
+                elog = Path(kwargs["env"]["PORTAGE_LOGDIR"]) / "elog"
+                for index in range(9):
+                    (elog / f"dependency-{index}.log").write_bytes(
+                        b"x" * (240 * 1024))
             return _proc(args, stdout="dependencies installed\n")
         if args and args[0] == "emerge":
             if self.failure == "elog":
@@ -91,8 +102,8 @@ def test_local_executor_preserves_merge_contract_and_console_warning_is_evidence
 
     emerges = [args for args, _kwargs in runner.calls if args[0] == "emerge"]
     assert emerges == [
-        ["emerge", "--usepkg=n", "--usepkgonly=n", "--onlydeps", ATOM],
-        ["emerge", "--usepkg=n", "--usepkgonly=n", "--oneshot", "--selective=n", ATOM],
+        ["emerge", "--usepkg=n", "--onlydeps", ATOM],
+        ["emerge", "--usepkg=n", "--oneshot", "--selective=n", ATOM],
     ]
     assert result["ok"] is True
     assert result["elog_inventory"] == []
@@ -105,7 +116,12 @@ def test_local_executor_preserves_merge_contract_and_console_warning_is_evidence
 
 @pytest.mark.parametrize(
     ("failure", "failed_step", "merge_count"),
-    [("onlydeps", "onlydeps", 1), ("merge", "merge", 2), ("elog", "elog", 2)],
+    [
+        ("onlydeps", "onlydeps", 1),
+        ("dependency-elog", "elog", 1),
+        ("merge", "merge", 2),
+        ("elog", "elog", 2),
+    ],
 )
 def test_local_executor_dependency_merge_and_saved_elog_failures(
     tmp_path, failure, failed_step, merge_count,
@@ -118,7 +134,8 @@ def test_local_executor_dependency_merge_and_saved_elog_failures(
     assert result["ok"] is False
     assert result["failed_step"] == failed_step
     assert len([args for args, _kwargs in runner.calls if args[0] == "emerge"]) == merge_count
-    assert bool(result["elog_inventory"]) is (failure == "elog")
+    assert bool(result["elog_inventory"]) is (
+        failure in {"dependency-elog", "elog"})
 
 
 def test_dependency_install_requires_explicit_executor_authorization(tmp_path):
@@ -128,6 +145,28 @@ def test_dependency_install_requires_explicit_executor_authorization(tmp_path):
             atom=ATOM, commit=COMMIT, evidence_dir=tmp_path / "evidence",
         ))
     assert runner.calls == []
+
+
+def test_local_executor_records_aggregate_elog_overflow_before_cleanup(tmp_path):
+    runner = LocalRunner("dependency-elog-overflow")
+    evidence = tmp_path / "overflow"
+
+    result = LocalExecutor(_local_spec(), runner=runner).execute(InstallRequest(
+        atom=ATOM, commit=COMMIT, evidence_dir=evidence,
+    ))
+
+    assert result["ok"] is False
+    assert result["failed_step"] == "evidence"
+    assert result["elog_inventory"] == []
+    error = result["provenance"]["collection_errors"][0]
+    assert error["type"] == "ExecutorError"
+    assert error["message"] == "saved elog evidence exceeds the aggregate limit"
+    assert error["message_bytes"] == len(error["message"].encode())
+    assert len(error["message_sha256"]) == 64
+    assert error["truncated"] is False
+    assert len([args for args, _kwargs in runner.calls if args[0] == "emerge"]) == 1
+    assert verify_evidence(evidence)["ok"] is True
+    assert not Path(result["cleanup"]["removed_paths"][0]).exists()
 
 
 def test_existing_evidence_path_stops_before_executor_side_effects(tmp_path):
@@ -254,6 +293,7 @@ class FakeTransport:
         self.dirty = dirty
         self.events = []
         self.inventory_calls = 0
+        self.target_merge_seen = False
         self.patch_sha256 = ""
 
     def upload_file(self, source, destination):
@@ -283,7 +323,7 @@ class FakeTransport:
             return _proc(argv, stdout=f"{self.patch_sha256}  {argv[-1]}\n")
         if argv == ["portageq", "envvar", "ARCH"]:
             return _proc(argv, stdout="amd64\n")
-        if argv == ["eselect", "profile", "show"]:
+        if argv == ["eselect", "--brief", "profile", "show"]:
             return _proc(argv, stdout="default/linux/amd64/23.0/desktop\n")
         if argv == ["qlist", "-IC"]:
             self.inventory_calls += 1
@@ -299,20 +339,157 @@ class FakeTransport:
                 stderr="deps failed" if self.failure == "onlydeps" else "",
             )
         if argv and argv[0] == "emerge":
+            self.target_merge_seen = True
             return _proc(
                 argv, returncode=1 if self.failure == "merge" else 0,
                 stdout="warning: phase output\n",
             )
+        if argv[:2] == ["python3", "-c"]:
+            if self.failure == "remote-elog-race":
+                return _proc(
+                    argv, returncode=2,
+                    stderr="remote elog changed while evidence was collected\n")
+            if self.failure == "remote-elog-large-error":
+                return _proc(argv, returncode=2, stderr="x" * (600 * 1024))
+            has_elog = (
+                self.failure == "dependency-elog" and not self.target_merge_seen
+            ) or (self.failure == "elog" and self.target_merge_seen)
+            files = ({"app-misc:foo-1.2.3:0.log": base64.b64encode(
+                b"QA Notice\n").decode("ascii")} if has_elog else {})
+            return _proc(argv, stdout=json.dumps({"files": files}))
         if argv[0] == "find" and "-delete" in argv:
             return _proc(argv)
         if argv[0] == "find" and "-printf" in argv:
-            output = "app-misc:foo-1.2.3:0.log\n" if self.failure == "elog" else ""
+            has_elog = (
+                self.failure == "dependency-elog" and not self.target_merge_seen
+            ) or (self.failure == "elog" and self.target_merge_seen)
+            output = "app-misc:foo-1.2.3:0.log\n" if has_elog else ""
             return _proc(argv, stdout=output)
         if argv[0] == "stat":
             return _proc(argv, stdout="10\n")
         if argv[0] == "head":
             return _proc(argv, stdout="QA Notice\n")
         raise AssertionError(f"unexpected remote command: {argv}")
+
+
+def test_local_elog_collection_rejects_path_replacement(tmp_path, monkeypatch):
+    elog_dir = tmp_path / "elog"
+    elog_dir.mkdir()
+    entry = elog_dir / "entry.log"
+    outside = tmp_path / "outside.log"
+    entry.write_text("expected\n")
+    outside.write_text("substituted\n")
+    real_open = os.open
+    replaced = False
+
+    def replacing_open(path, flags, *args, dir_fd=None, **kwargs):
+        nonlocal replaced
+        if path == "entry.log" and dir_fd is not None and not replaced:
+            entry.unlink()
+            entry.symlink_to(outside)
+            replaced = True
+        return real_open(path, flags, *args, dir_fd=dir_fd, **kwargs)
+
+    monkeypatch.setattr(os, "open", replacing_open)
+
+    with pytest.raises(ExecutorError, match="cannot collect saved elog evidence"):
+        LocalExecutor(_local_spec())._collect_elogs(elog_dir)
+
+
+def test_local_elog_collection_rejects_growth_while_reading(tmp_path, monkeypatch):
+    elog_dir = tmp_path / "elog"
+    elog_dir.mkdir()
+    entry = elog_dir / "entry.log"
+    entry.write_text("initial\n")
+    real_read = os.read
+    changed = False
+
+    def growing_read(descriptor, maximum):
+        nonlocal changed
+        content = real_read(descriptor, maximum)
+        if content and not changed:
+            with entry.open("ab") as handle:
+                handle.write(b"growth\n")
+            changed = True
+        return content
+
+    monkeypatch.setattr(os, "read", growing_read)
+
+    with pytest.raises(ExecutorError, match="changed while evidence was collected"):
+        LocalExecutor(_local_spec())._collect_elogs(elog_dir)
+
+
+def test_remote_elog_collection_is_one_descriptor_bound_command():
+    transport = FakeTransport(failure="elog")
+    transport.target_merge_seen = True
+
+    result = SSHExecutor(
+        _ssh_spec(), transport=transport)._collect_elogs(
+            PurePosixPath("/tmp/gzh-run/logs/elog"))
+
+    assert result == {"app-misc:foo-1.2.3:0.log": b"QA Notice\n"}
+    commands = [event[1] for event in transport.events if event[0] == "run"]
+    assert len(commands) == 1
+    assert commands[0][:2] == ["python3", "-c"]
+    assert not any(command[0] in {"find", "stat", "head"} for command in commands)
+
+
+def test_remote_elog_collection_fails_closed_on_collector_race():
+    transport = FakeTransport(failure="remote-elog-race")
+
+    with pytest.raises(ExecutorError, match="changed while evidence was collected"):
+        SSHExecutor(
+            _ssh_spec(), transport=transport)._collect_elogs(
+                PurePosixPath("/tmp/gzh-run/logs/elog"))
+
+
+def test_ssh_executor_bounds_collector_error_before_cleanup(tmp_path):
+    transport = FakeTransport(failure="remote-elog-large-error")
+    evidence = tmp_path / "evidence"
+
+    result = SSHExecutor(
+        _ssh_spec(), transport=transport).execute(InstallRequest(
+            atom=ATOM,
+            commit=COMMIT,
+            evidence_dir=evidence,
+            transfer=_transfer(tmp_path),
+        ))
+
+    assert result["ok"] is False
+    assert result["failed_step"] == "evidence"
+    error = result["provenance"]["collection_errors"][0]
+    assert error["type"] == "ExecutorValidationError"
+    assert error["message_bytes"] > 600 * 1024
+    assert len(error["message"].encode()) <= 4096
+    assert len(error["message_sha256"]) == 64
+    assert error["truncated"] is True
+    assert result["cleanup"]["ok"] is True
+    assert verify_evidence(evidence)["ok"] is True
+
+
+def test_remote_elog_collector_script_reads_regular_files_and_rejects_symlinks(
+        tmp_path):
+    elog_dir = tmp_path / "elog"
+    elog_dir.mkdir()
+    (elog_dir / "entry.log").write_bytes(b"QA Notice\n")
+    command = [
+        sys.executable, "-c", _REMOTE_ELOG_COLLECTOR, str(elog_dir),
+        "64", str(256 * 1024), str(1024 * 1024),
+    ]
+
+    accepted = subprocess.run(command, capture_output=True, text=True)
+
+    assert accepted.returncode == 0, accepted.stderr
+    payload = json.loads(accepted.stdout)
+    assert base64.b64decode(
+        payload["files"]["entry.log"], validate=True) == b"QA Notice\n"
+
+    (elog_dir / "entry.log").unlink()
+    (elog_dir / "entry.log").symlink_to(tmp_path / "outside.log")
+    rejected = subprocess.run(command, capture_output=True, text=True)
+
+    assert rejected.returncode != 0
+    assert "non-regular" in rejected.stderr
 
 
 def _ssh_spec():
@@ -338,7 +515,13 @@ def _transfer(tmp_path):
 
 @pytest.mark.parametrize(
     ("failure", "failed_step"),
-    [(None, None), ("onlydeps", "onlydeps"), ("merge", "merge"), ("elog", "elog")],
+    [
+        (None, None),
+        ("onlydeps", "onlydeps"),
+        ("dependency-elog", "elog"),
+        ("merge", "merge"),
+        ("elog", "elog"),
+    ],
 )
 def test_ssh_executor_validates_transfers_persists_and_cleans_exact_paths(
     tmp_path, failure, failed_step,

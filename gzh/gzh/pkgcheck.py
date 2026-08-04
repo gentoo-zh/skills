@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 from gzh.qa_evidence import (DEFAULT_MAX_OUTPUT_BYTES, DEFAULT_TIMEOUT,
@@ -24,6 +25,33 @@ _URL_RE = re.compile(r"https?://[^\s\"'<>]+")
 # HTTP codes that mean the file is genuinely gone (vs 401/403/429/000 = auth-gated or
 # rate-limited, which are inconclusive and go to a human, not marked dead).
 _TRULY_DEAD = {"404", "410"}
+_ARCH_SELECTOR_RE = re.compile(r"-?[A-Za-z0-9][A-Za-z0-9_-]*\Z")
+_PROFILE_SELECTOR_RE = re.compile(
+    r"-?[A-Za-z0-9][A-Za-z0-9+_.-]*(?:/[A-Za-z0-9][A-Za-z0-9+_.-]*)*\Z")
+
+
+def _validate_scope_selectors(
+        name: str, values: Sequence[str] | None,
+        pattern: re.Pattern[str]) -> tuple[str, ...]:
+    """Validate one selector per API value before invoking pkgcheck."""
+    if values is None:
+        return ()
+    if isinstance(values, (str, bytes)):
+        raise ValueError(f"{name} selectors must be a sequence, not a string")
+    try:
+        selectors = tuple(values)
+    except TypeError as exc:
+        raise ValueError(f"{name} selectors must be a sequence") from exc
+    for index, selector in enumerate(selectors):
+        if not isinstance(selector, str):
+            raise ValueError(f"invalid {name} selector at index {index}: {selector!r}")
+        if "," in selector:
+            raise ValueError(
+                f"invalid {name} selector at index {index}: pass comma-separated "
+                "values as separate selectors")
+        if pattern.fullmatch(selector) is None:
+            raise ValueError(f"invalid {name} selector at index {index}: {selector!r}")
+    return selectors
 
 
 def _reject_json_constant(value: str) -> None:
@@ -144,20 +172,35 @@ def _scan_report(command: list[str], cwd: Path | None, input_path: Path,
 def run_pkgcheck(path: Path, min_severity: str = "warning",
                  net: bool = False, runner=subprocess.run,
                  timeout: int = DEFAULT_TIMEOUT,
-                 max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES) -> dict:
+                 max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
+                 profiles: Sequence[str] | None = None,
+                 arches: Sequence[str] | None = None) -> dict:
     """Scan a path and retain pkgcheck's verdict plus bounded execution evidence.
 
     For a complete JsonStream, `ok` follows pkgcheck's own `--exit` status. Malformed,
     timed-out, or truncated evidence is incomplete and cannot report success.
     """
+    requested_profiles = _validate_scope_selectors(
+        "profiles", profiles, _PROFILE_SELECTOR_RE)
+    requested_arches = _validate_scope_selectors(
+        "arches", arches, _ARCH_SELECTOR_RE)
     level = min_severity if min_severity in SEVERITIES else "warning"
     args = ["pkgcheck", "scan", "-R", "JsonStream", "--exit", level]
+    if requested_arches:
+        args.append(f"--arches={','.join(requested_arches)}")
+    if requested_profiles:
+        args.append(f"--profiles={','.join(requested_profiles)}")
     if net:  # enables the DeadUrl/RedirectedUrl network keychecks
         args.append("--net")
     args.append(str(path))
-    return _scan_report(
+    report = _scan_report(
         args, path if path.is_dir() else None, path, runner, timeout,
         max_output_bytes)
+    report["requested_scope"] = {
+        "arches": list(requested_arches),
+        "profiles": list(requested_profiles),
+    }
+    return report
 
 
 def run_pkgcheck_commits(cwd: Path, net: bool = True, remote: str | None = None,

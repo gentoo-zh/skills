@@ -29,6 +29,7 @@ USE_PREFERENCES = {
 }
 _JOB_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 _ARCH_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,31}\Z")
+_PROFILE_RE = re.compile(r"[A-Za-z0-9/][A-Za-z0-9_+./:-]{0,511}\Z")
 
 
 def _validate_atom(value: str) -> str:
@@ -201,11 +202,11 @@ def _execution_ok(report: dict) -> bool:
             and report.get("returncode") == 0)
 
 
-def _environment_value(report: dict, *, arch: bool = False) -> str | None:
+def _environment_value(report: dict, *, pattern: re.Pattern[str]) -> str | None:
     if not _execution_ok(report):
         return None
     value = report["stdout"].strip()
-    if not value or (arch and not _ARCH_RE.fullmatch(value)):
+    if not value or "\n" in value or "\r" in value or not pattern.fullmatch(value):
         return None
     return value
 
@@ -340,13 +341,13 @@ def run_package_test(
         ["pkgdev", "--version"], timeout=min(timeout, 30),
         max_output_bytes=min(max_output_bytes, 4096), runner=runner)
     profile_execution = run_evidence_command(
-        ["eselect", "profile", "show"], timeout=min(timeout, 30),
+        ["eselect", "--brief", "profile", "show"], timeout=min(timeout, 30),
         max_output_bytes=max_output_bytes, runner=runner)
     arch_execution = run_evidence_command(
         ["portageq", "envvar", "ARCH"], timeout=min(timeout, 30),
         max_output_bytes=max_output_bytes, runner=runner)
-    profile = _environment_value(profile_execution)
-    arch = _environment_value(arch_execution, arch=True)
+    profile = _environment_value(profile_execution, pattern=_PROFILE_RE)
+    arch = _environment_value(arch_execution, pattern=_ARCH_RE)
 
     generation_command = [
         "pkgdev", "tatt", "--config", "false", "--color", "false",

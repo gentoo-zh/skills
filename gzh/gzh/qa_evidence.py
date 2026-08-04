@@ -7,7 +7,7 @@ import signal
 import subprocess
 import time
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
 
 
 DEFAULT_TIMEOUT = 300
@@ -45,12 +45,14 @@ class OutputLimitExceeded(OverflowError):
 
 def _bounded_process(
         command: Sequence[str], cwd: Path | None, timeout: int, maximum: int,
+        env: Mapping[str, str] | None = None,
         popen: Callable[..., subprocess.Popen] = subprocess.Popen,
 ) -> tuple[subprocess.CompletedProcess, float, int, int]:
     started = time.monotonic()
     proc = popen(
         list(command), cwd=str(cwd) if cwd else None,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env=dict(env) if env is not None else None,
         start_new_session=True)
     if proc.stdout is None or proc.stderr is None:
         _stop_process_group(proc)
@@ -104,6 +106,7 @@ def _bounded_prefix(stdout: bytes, stderr: bytes, maximum: int) -> tuple[bytes, 
 
 def run_evidence_command(
         command: Sequence[str], *, cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
         timeout: int = DEFAULT_TIMEOUT,
         max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
         runner: Callable[..., subprocess.CompletedProcess] | None = None,
@@ -147,11 +150,17 @@ def run_evidence_command(
     try:
         if runner is None or runner is subprocess.run:
             proc, duration, stdout_bytes, stderr_bytes = _bounded_process(
-                args, cwd, timeout, max_output_bytes)
+                args, cwd, timeout, max_output_bytes, env=env)
         else:
-            proc = runner(
-                args, cwd=str(cwd) if cwd else None,
-                capture_output=True, text=True, timeout=timeout)
+            kwargs = {
+                "cwd": str(cwd) if cwd else None,
+                "capture_output": True,
+                "text": True,
+                "timeout": timeout,
+            }
+            if env is not None:
+                kwargs["env"] = dict(env)
+            proc = runner(args, **kwargs)
             duration = round(time.monotonic() - started, 3)
             stdout_bytes = len(output_text(proc.stdout).encode())
             stderr_bytes = len(output_text(proc.stderr).encode())
@@ -210,11 +219,12 @@ def run_evidence_command(
 def read_tool_version(
         command: Sequence[str], *, timeout: int = 30,
         max_output_bytes: int = 1024,
+        env: Mapping[str, str] | None = None,
         runner: Callable[..., subprocess.CompletedProcess] | None = None,
 ) -> dict:
     evidence = run_evidence_command(
         command, timeout=timeout, max_output_bytes=max_output_bytes,
-        runner=runner)
+        env=env, runner=runner)
     version = evidence["stdout"].strip()
     if (not evidence["complete"] or evidence["returncode"] != 0
             or not version or len(version.encode()) > max_output_bytes):

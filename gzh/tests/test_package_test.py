@@ -27,7 +27,7 @@ class TattRunner:
         self.calls.append((args, kwargs))
         if args == ["pkgdev", "--version"]:
             return subprocess.CompletedProcess(args, 0, "pkgdev 0.2.15\n", "")
-        if args == ["eselect", "profile", "show"]:
+        if args == ["eselect", "--brief", "profile", "show"]:
             return subprocess.CompletedProcess(
                 args, 0, "default/linux/amd64/23.0/desktop\n", "")
         if args == ["portageq", "envvar", "ARCH"]:

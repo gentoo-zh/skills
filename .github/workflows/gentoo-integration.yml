@@ -1,0 +1,52 @@
+name: Gentoo integration fixtures
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/gentoo-integration.yml
+      - integration/gentoo/**
+      - scripts/gentoo_integration.py
+      - tests/test_gentoo_integration.py
+      - gzh/gzh/qa_evidence.py
+      - gzh/gzh/verify_install.py
+      - gzh/tests/test_verify_install.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gentoo-integration-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fixture-boundaries:
+    name: EAPI 8 fixture boundaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: gentoo/stage3:amd64-openrc@sha256:2c37233c9a552b019192530e6f48dde39ca5e46b9e4ce482f3e9517e45c6e639
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          ref: ${{ github.sha }}
+      - name: Run isolated Gentoo fixtures
+        env:
+          GZH_GENTOO_IMAGE: gentoo/stage3:amd64-openrc@sha256:2c37233c9a552b019192530e6f48dde39ca5e46b9e4ce482f3e9517e45c6e639
+        run: >-
+          python3 scripts/gentoo_integration.py
+          --execute
+          --output gentoo-integration-output
+      - name: Preserve integration evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: gentoo-integration-${{ github.sha }}
+          path: gentoo-integration-output/
+          if-no-files-found: error
+          retention-days: 14

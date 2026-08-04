@@ -46,6 +46,16 @@ reviewed tool source lock. Add `--net` only when current policy requests network
 The supplied adapter and repository identities remain configured but unverified; this
 helper does not discover publication policy or replace a repository-required command.
 
+When the repository-approved wrapper is `gzh qa`, repeat `--profile` and `--arch` to pass
+an explicit pkgcheck scope without constructing a comma expression manually:
+
+```bash
+gzh qa category/package --profile stable --arch amd64
+```
+
+These selectors constrain pkgcheck only. They do not establish a build, install, runtime,
+or architecture test result.
+
 ## Build and Tests
 
 1. Exercise every USE state and profile affected by the change.

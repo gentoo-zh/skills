@@ -61,6 +61,8 @@ CODEX_HOME="$HOME/.codex" ./install.sh codex claude opencode
 - OpenCode：只安装该目标时使用 `${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills`，与其他目标共同安装时复用兼容目录；
 - `gzh`：环境位于 `${GZH_INSTALL_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/gentoo-zh-skills/gzh}`，启动器位于 `${GZH_BIN_DIR:-$HOME/.local/bin}/gzh`。
 
+安装或状态检查发现启动器目录不在 `PATH` 时，会输出非致命警告；安装器不会修改 shell 配置。把警告中的目录加入 `PATH` 后，即可直接运行 `gzh`，否则仍可使用启动器的完整路径。
+
 安装器会检查所有已知发现目录和已经记录的安装。同名路径不归本项目管理、多个目录会导致重复加载或目标路径无法安全更新时，安装会在写入前停止。OpenCode 运行时应使用与安装时相同的 skill 发现设置；否则实际扫描范围可能扩大，安装器的重复检查不能代表运行时状态。`gzh` venv 继承系统 site-packages，以便读取 Gentoo 安装的 Portage 模块。
 
 安装器把每个目标的客户端、模式、来源目录和 skill 成员写入 `${XDG_DATA_HOME:-$HOME/.local/share}/gentoo-zh-skills/skill-installations.json`。更新时依据该记录增加新 skill，并删除已从当前 bundle 移除但仍由本项目管理的 skill。路径所有权或状态文件不符合记录时，操作停止；单个目标的文件切换或状态写入失败时，原文件和原记录一并恢复。
@@ -173,6 +175,10 @@ gzh bump category/package 1.2.3
 gzh lint category/package/package-1.2.3.ebuild
 gzh manifest category/package/package-1.2.3.ebuild --distdir /writable/distfiles
 gzh qa category/package --min-severity error
+gzh qa category/package --profile stable --arch amd64
+gzh deps inspect category/package/package-1.2.3.ebuild
+gzh deps diff category/package/package-1.2.2.ebuild category/package/package-1.2.3.ebuild
+gzh deps reverse dev-libs/example
 gzh build category/package/package-1.2.3.ebuild
 gzh merge category/package/package-1.2.3.ebuild
 gzh diff category/package/package-1.2.2.ebuild category/package/package-1.2.3.ebuild
@@ -186,13 +192,22 @@ gzh urls
 
 | 改动面 | 命令 | 结果 |
 | --- | --- | --- |
-| 依赖或 USE | `gzh deps <ebuild> --use +flag` | 从匹配的 Portage cache 解析依赖，不执行 ebuild |
+| 单个 ebuild 的依赖或 USE | `gzh deps inspect <ebuild> --use +flag` | 从匹配的 Portage cache 解析依赖，不执行 ebuild |
+| 两个版本的依赖差异 | `gzh deps diff <old-ebuild> <new-ebuild>` | 比较 potential declaration；指定完整 USE 状态时另给 reduced delta |
+| 直接反向依赖候选 | `gzh deps reverse <atom>` | 通过 `pquery` 查询已配置 ebuild repository 的 raw potential 关系 |
+| profile 或 architecture QA 范围 | `gzh qa <target> --profile stable --arch amd64` | 使用 `pkgcheck` 官方 selector 缩限静态 QA 范围 |
 | distfile 或架构产物 | `gzh artifacts <Manifest> --evidence <json>` | 核对每个 `DIST` 条目、来源记录和可选本地 digest |
 | release archive 的 license 材料 | `gzh license <archive>` | 不解压 archive，记录 license-like 文件的路径、大小和 SHA-256 |
 | 预编译 ELF | `gzh binary <path>` | 使用 `file` 和 `readelf` 静态检查，不执行目标文件 |
 | 安装结果 | `gzh image <image-root>` | 检查 symlink、mode、desktop、systemd 和 ELF metadata |
 | 支持的测试矩阵 | `gzh test =category/package-version::gentoo-zh -x` | 通过 `pkgdev tatt` 保存有界测试证据 |
 | 本地或 SSH 安装 | `gzh exec =category/package-version::gentoo-zh --executor <name> -x` | 运行同一 exact-atom 和隔离 elog 合同，并保存可校验记录 |
+
+`gzh deps inspect` 和 `gzh deps diff` 只读取不超过 1 MiB 的一般 ebuild 文件与匹配的 `metadata/md5-cache` 快照，并核对 cache 内的 `_md5_`。`diff` 始终保留 disabled USE branch 的 potential declaration 差异；只有调用方提供两个版本共同且完整的 USE 状态时，才增加 reduced delta。slot、blocker 和条件变化只是复核候选，不能证明 provider 兼容性、ABI 或 revbump 需求。
+
+`gzh deps reverse` 调用 `pquery --raw --ebuild-repos --restrict-revdep`，结果只表示已配置 ebuild repository 中可能存在直接依赖的版本。它不解析 active profile，不计算 transitive graph，也不判断 ABI。`gzh qa` 的 `--profile` 和 `--arch` 可重复使用；未指定时保留 `pkgcheck` 的默认范围。selector 只影响静态 QA，不代表对应 profile 或 architecture 已完成构建和安装。
+
+`gzh merge` 和 `gzh exec` 通过 `--usepkg=n` 请求 exact atom 的 source merge，并在同一个隔离目录中保存 `qa`、`warn` 和 `error` elog。依赖安装或目标安装只要产生受监控的 elog，命令就会保留证据并失败；不会清除依赖阶段的 elog 后继续安装目标。active profile 使用 `eselect --brief profile show` 记录，`ARCH` 使用 `portageq envvar ARCH` 记录，多行或不完整的环境输出会在安装前失败。
 
 `gzh license` 支持未压缩、gzip、bzip2 或 xz 压缩的 tar，以及不含 ZIP64 metadata 的 ZIP archive。命令会在创建 archive parser 前限制 ZIP central directory 和 tar extended header，再限制成员数量、声明大小和 license-like 文件读取量。Zstandard tar 和 ZIP64 metadata 尚无等价的有界预检，因此命令会明确拒绝。报告只提供文件名 inventory 与 hash，不判断适用条款、license 兼容性、镜像权限或二进制再发布权限。相关结论仍须依据当前 release 的原始条款和 Gentoo 官方 license 文档人工复核。
 
@@ -239,6 +254,22 @@ gzh batch cleanup <report.json> --dry-run
 | `urls` | `pkgcheck-commits` |
 | `build` | `build-test` |
 | `merge` | `verify-install` |
+
+依赖命令在 `0.x` 期间采用相同的迁移规则：文档使用 `gzh deps inspect <ebuild>`，原有的 `gzh deps <ebuild>` 仍会静默转发到 `inspect`。转发不会向 stdout 写入提示，因此现有 JSON consumer 不需要立即修改。
+
+### 从 pkgcheck 和 pkgdev 迁移
+
+`gzh` 调用官方工具并增加有界 JSON 证据、仓库约束和失败关闭检查，不取代官方工具。语义相同的常用参数保留原拼写；涉及 staging、安装或测试副作用时，`gzh` 要求更明确的输入。
+
+| 现有命令习惯 | `gzh` 命令 | 差异 |
+| --- | --- | --- |
+| `pkgcheck scan -p stable -a amd64 --exit error <target>` | `gzh qa -p stable -a amd64 --exit error <target>` | `gzh pkgcheck scan ...` 也可作为过渡；两者固定使用 JsonStream 并输出完整性、版本、timeout 和 truncation 证据 |
+| `pkgcheck scan --profiles=stable,-exp --arches=amd64,-x86 <target>` | `gzh qa --profiles=stable,-exp --arches=amd64,-x86 <target>` | 保留官方逗号 selector，也接受可重复的 `--profile` 和 `--arch` |
+| `pkgdev manifest -d <distdir> <ebuild>` | `gzh manifest -d <distdir> <ebuild>` | 固定强制重建目标 Manifest，并返回结构化结果 |
+| `pkgdev commit -m <message> <path>` | `gzh commit -m <message> <path>` | 固定独立 QA、signoff 和 gentoo-zh subject 检查；必须明确列出 path |
+| `pkgdev tatt -p <atom>` | `gzh test <exact-atom> -x` | `-x` 明确授权 Portage 配置改动和 package merge，证据写入新的有界目录 |
+
+`gzh commit` 不接受 `pkgdev commit -a/-u` 的隐式全范围 staging，因为该映射会扩大调用方指定的文件范围。需要 pkgdev 尚未封装的高级参数时，继续直接使用 pkgdev，并按目标 repository 的实时政策补齐相同验证门。
 
 队列快照、批次报告、PR plan、executor 证据和 triage 记录位于 `${GZH_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/gentoo-zh-skills}`。自定义路径必须是绝对路径，且不能位于 overlay 工作树内。队列结果只有在整体和每个项目的截断字段均为 `false` 时才完整。
 
@@ -331,6 +362,7 @@ python3 -m venv --system-site-packages .venv
 .venv/bin/python scripts/release_check.py --mode source-only
 .venv/bin/python -m pytest -q gzh/tests tests
 .venv/bin/python scripts/eval_runner.py static
+.venv/bin/python scripts/gentoo_integration.py --validate-only
 .venv/bin/python .agents/skills/gentoo-overlay-development/scripts/source_manager.py \
   audit --all-scopes --fail-on-drift
 ```
@@ -338,6 +370,8 @@ python3 -m venv --system-site-packages .venv
 验证器检查 skill frontmatter、metadata、activation eval、禁止的非 Latin script，以及来源 schema 和 lock。它也检查局部链接、reference 可发现性、可执行脚本和 plugin package。英文政策仍须人工复核，因为验证器不能把 Latin 字符文本自动判定为英语。
 
 验证器还把每个 skill 的 `name`、`description` 和解析后的 `SKILL.md` 路径序列化为确定性的初始列表估算值，并以官方文档给出的 8,000 字符上限作为硬上界。该值用于保守检测，不声称复制客户端内部的序列化格式。客户端仍可因实际 context budget 提前缩短 description。
+
+`.github/workflows/gentoo-integration.yml` 在相关验证文件 push 或人工 dispatch 时，使用固定 digest 的官方 Gentoo amd64 stage3 执行两个 EAPI 8 source-merge fixture。正常 fixture 必须产生 VDB、预期 artifact 且没有保存的 elog；边界 fixture 必须在 emerge 成功后因 `qa` elog 被拒绝。workflow 还在隔离 Git 副本中直接执行正式 `run_verify_install`，并要求两个 fixture 得出相同的接受或拒绝结果。该验证不代表 overlay、profile 或 architecture matrix；真实 package 仍须按目标 repository 的实时政策执行 `pkgcheck`、构建、安装和 CI。
 
 静态 eval 当前覆盖 73 个 activation、exclusion 和行为案例。外部 runner 通过显式 JSON protocol 接入，不会把预期答案写入待测 prompt。安装测试只写入临时目录。
 
