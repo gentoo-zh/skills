@@ -44,6 +44,27 @@
       ]
     },
     {
+      "id": "changed-local-license-archive",
+      "prompt": "Bump app-misc/example after downloading its exact new source ZIP and verify the shipped license evidence.",
+      "should_trigger": true,
+      "expected": [
+        "run gzh license on the local ZIP archive",
+        "retain archive and license-like member hashes",
+        "read the exact matched evidence and upstream terms",
+        "do not treat the inventory as a legal conclusion"
+      ]
+    },
+    {
+      "id": "license-directory-not-archive",
+      "prompt": "The bump uses a live source checkout with no archive. Review its license files before editing LICENSE.",
+      "should_trigger": true,
+      "expected": [
+        "do not pass the source directory to gzh license",
+        "read the exact checkout license files and upstream evidence",
+        "stop when redistribution terms remain unclear"
+      ]
+    },
+    {
       "id": "authority-conflict",
       "prompt": "A derived maintenance lesson conflicts with the live overlay AGENTS.md. Use the lesson for this bump.",
       "should_trigger": true,

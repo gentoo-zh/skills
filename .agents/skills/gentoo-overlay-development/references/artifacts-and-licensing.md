@@ -86,6 +86,16 @@ components, and `RESTRICT` values. It must not infer permission, compatibility, 
 conclusion. A human review still decides which terms apply to each distributed work and
 artifact.
 
+For a local tar or ZIP release archive, run `gzh license <archive>` before reading the
+matched files. The command accepts plain, gzip, bzip2, or xz tar streams and non-ZIP64 ZIP
+metadata. It rejects Zstandard tar and ZIP64 metadata because their bounded parser
+preflight is not implemented. It does not extract or execute members. It records the
+archive digest and the path, size, and digest of every bounded license-like member, and
+fails on unsafe paths, ambiguous names, unsupported members, parser metadata limits,
+truncation, decompressor errors, or input changes. Treat an empty or successful inventory
+as filename evidence only; it does not prove that every applicable term was found or
+establish a redistribution decision.
+
 ## Prebuilt Package Review
 
 - Select only architectures with verified published artifacts and map each to the exact

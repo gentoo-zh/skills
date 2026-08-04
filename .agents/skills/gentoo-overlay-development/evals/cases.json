@@ -47,6 +47,27 @@
       ]
     },
     {
+      "id": "local-license-archive-inventory",
+      "prompt": "Review the license evidence shipped in this exact local source tar archive before changing the ebuild.",
+      "should_trigger": true,
+      "expected": [
+        "run gzh license on the local tar archive",
+        "retain archive and license-like member hashes",
+        "read the matched evidence before deciding LICENSE",
+        "make no legal conclusion from filename matching"
+      ]
+    },
+    {
+      "id": "non-archive-license-boundary",
+      "prompt": "Review license headers and policy in this checked-out upstream source directory; there is no release archive.",
+      "should_trigger": true,
+      "expected": [
+        "do not pass a directory to gzh license",
+        "inspect the exact source files and upstream primary evidence",
+        "separate factual collection from license conclusions"
+      ]
+    },
+    {
       "id": "patch-refresh",
       "prompt": "Refresh a local patch for the next release of an existing overlay package and update its Manifest.",
       "should_trigger": true,

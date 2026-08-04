@@ -33,6 +33,8 @@ from gzh.github_observation import (GitHubPublicationProvider,
                                     GitHubReadError, read_ci)
 from gzh.image_qa import inspect_image
 from gzh.lint import lint_ebuild
+from gzh.license_inventory import (LicenseInventoryError,
+                                   inspect_license_archive)
 from gzh.manifest import (run_manifest, verify_manifest_sizes,
                           extract_src_uri_map, _pv_subs)
 from gzh.notify import send_telegram
@@ -350,6 +352,18 @@ def lint_cmd(ebuild):
     click.echo(_json.dumps(issues, indent=2, ensure_ascii=False))
     if any(i["severity"] == "error" for i in issues):
         raise SystemExit(1)
+
+
+@cli.command("license")
+@click.argument("archive", type=click.Path(exists=True, dir_okay=False,
+                                            path_type=Path))
+def license_cmd(archive):
+    """Inventory license-like files in a local tar or ZIP archive."""
+    try:
+        report = inspect_license_archive(archive)
+    except LicenseInventoryError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
 
 
 @cli.command("upstream-version")
