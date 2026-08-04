@@ -6,7 +6,8 @@ refreshing managed installations. A release tag does not pin an existing install
 
 ## Identity
 
-- Keep `project.version` in `gzh/pyproject.toml`, `gzh.__version__`, and `gzh --version`
+- Keep `project.version` in `gzh/pyproject.toml`, `gzh.__version__`, `gzh --version`,
+  `.agents/.codex-plugin/plugin.json`, and `.agents/.claude-plugin/plugin.json`
   identical.
 - Tag a release as `v<version>` with an annotated tag on the exact verified commit.
 - Never move or replace a published tag. Publish a new version for a changed snapshot.
@@ -18,6 +19,11 @@ refreshing managed installations. A release tag does not pin an existing install
 The repository currently has no root license file and no `project.license` metadata.
 Do not infer or add legal terms. Until the owner makes an explicit license decision, do
 not upload a wheel, sdist, executable, or other custom distribution artifact.
+
+The repository-local Codex and Claude Code marketplace files are part of the reviewed
+source snapshot. They do not authorize a public-directory submission or a separately
+uploaded plugin archive. Keep `license` absent from both plugin manifests while repository
+rights remain undeclared.
 
 A GitHub release still exposes GitHub-generated source archives for its tag. Treat their
 extracted contents as the snapshot identity; GitHub does not promise stable compression
@@ -39,8 +45,19 @@ contract exists, clean-build, content inspection, empty-venv installation, and
 3. Push the final commit and require every Python CI job to pass on that exact SHA.
 4. Run the authenticated reference-audit workflow on that SHA. Review every candidate
    from separately established evidence and require the workflow to finish successfully.
-5. Refresh managed Codex, Claude Code, and OpenCode installations from the final checkout,
-   then verify installation status.
+5. Run `python scripts/plugin_check.py`. When Claude Code is available, run
+   `claude plugin validate .agents --strict` and
+   `claude plugin validate .claude-plugin/marketplace.json --strict`. Codex has no
+   standalone plugin validator; in an isolated `CODEX_HOME`, prove marketplace discovery,
+   qualified install, version reporting, qualified uninstall, and marketplace removal.
+   Treat a same-version `plugin add` only as an idempotency check. Prove Codex update
+   behavior with a changed manifest version or cachebuster before reinstalling. In an
+   isolated `CLAUDE_CONFIG_DIR`, prove the equivalent Claude Code lifecycle including
+   marketplace and plugin update. Record an unavailable client instead of claiming runtime
+   compatibility.
+6. Refresh managed Codex, Claude Code, and OpenCode skill installations from the final
+   checkout, then verify installation status. Do not install a native plugin beside the
+   same client's standalone skills.
 
 ## Publish
 
@@ -64,8 +81,9 @@ SHA are identical. Record the release URL and any skipped check or remaining lim
 ## Deferred Backlog
 
 The registered official source audit tracks Python archive behavior and GitHub release,
-source archive, and repository licensing guidance. Source drift creates a review item; it
-does not rewrite this contract automatically.
+source archive, repository licensing guidance, and Codex, Claude Code, and OpenCode plugin
+contracts. Source drift creates a review item; it does not rewrite this contract
+automatically.
 
 This section is a version-controlled backlog, not durable maintenance queue state. Keep
 these deferred items evidence-gated:
@@ -73,6 +91,9 @@ these deferred items evidence-gated:
 - Add a project license and package metadata only after an explicit owner decision.
 - Add wheel or sdist publication only after the deterministic rights-decision contract
   and clean-build verification.
-- Evaluate plugin packaging in a separate iteration after reviewing current official
-  client documentation and proving install, update, collision, uninstall, and rollback
-  behavior. The existing shared skill layout remains the compatibility baseline.
+- Submit a public plugin or upload a plugin archive only after the repository rights
+  decision and the applicable platform review gates are complete.
+- Automate native plugin installation only after a separate ownership journal can prove
+  collisions, partial-command rollback, qualified uninstall, shared-marketplace
+  preservation, immutable downgrade, and Codex's versioned reinstall path. The current
+  installer continues to own standalone skills and `gzh`; native client CLIs own plugins.

@@ -43,6 +43,20 @@ def load_eval_validator():
 validate_case_data = load_eval_validator()
 
 
+def load_plugin_validator():
+    path = ROOT / "scripts" / "plugin_check.py"
+    spec = importlib.util.spec_from_file_location(
+        "gentoo_skill_plugin_check", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load plugin package validator")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.plugin_report
+
+
+plugin_report = load_plugin_validator()
+
+
 def load_json(path: Path, errors: list[str]) -> dict:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -287,7 +301,8 @@ def validate_english_code(errors: list[str]) -> None:
 
 def validate_executables(errors: list[str]) -> None:
     paths = [ROOT / "install.sh", ROOT / "update.sh",
-             ROOT / "scripts" / "eval_runner.py"]
+             ROOT / "scripts" / "eval_runner.py",
+             ROOT / "scripts" / "plugin_check.py"]
     paths.extend(SKILLS_ROOT.glob("*/scripts/*.py"))
     paths.extend([ROOT / "scripts" / "install.py", ROOT / "scripts" / "update.py"])
     for path in paths:
@@ -302,6 +317,12 @@ def validate_tracked_files(errors: list[str]) -> None:
                 if "__pycache__" in path or path.endswith((".pyc", ".pyo"))]
     if unwanted:
         errors.append(f"generated Python files are tracked: {', '.join(unwanted)}")
+
+
+def validate_plugin_packaging(errors: list[str]) -> None:
+    report = plugin_report(ROOT)
+    errors.extend(
+        f"plugin package: {error}" for error in report.get("errors", []))
 
 
 def main() -> int:
@@ -321,6 +342,7 @@ def main() -> int:
     validate_english_code(errors)
     validate_executables(errors)
     validate_tracked_files(errors)
+    validate_plugin_packaging(errors)
     if errors:
         print("repository validation failed:", file=sys.stderr)
         for error in errors:

@@ -143,8 +143,8 @@
     },
     "gentoo-tree": {
       "kind": "git",
-      "revision": "863ca6e2c486c8bda14c96fb6244385745b1e0df",
-      "checked_at": "2026-08-04T03:19:26Z"
+      "revision": "ba36cc771be0fd46d5fbdc9c546f1029154d8857",
+      "checked_at": "2026-08-04T03:36:01Z"
     },
     "guru": {
       "kind": "git",
@@ -413,7 +413,63 @@
       "bytes": 235783,
       "final_url": "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository",
       "checked_at": "2026-08-04T02:30:49Z"
+    },
+    "codex-plugin-packaging": {
+      "kind": "http",
+      "sha256": "2e89138d8c01b9b4dc92f449e6fdf626732937d0125988901405d1793700c38c",
+      "bytes": 23083,
+      "final_url": "https://developers.openai.com/plugins/build/plugins.md",
+      "checked_at": "2026-08-04T03:53:23Z"
+    },
+    "claude-plugin-reference": {
+      "kind": "http",
+      "sha256": "3303b0f05c827280cdda9f0b8a1db9d4823aa259ad27924ecb5fb84ffe99d372",
+      "bytes": 90774,
+      "final_url": "https://code.claude.com/docs/en/plugins-reference.md",
+      "checked_at": "2026-08-04T03:53:23Z"
+    },
+    "codex-plugin-submission-errors": {
+      "kind": "http",
+      "sha256": "c46d6f1ba367ce135d9acb6910527d918fb577202b5320759a5a9f677742f900",
+      "bytes": 68012,
+      "final_url": "https://developers.openai.com/plugins/deploy/submission-errors.md",
+      "checked_at": "2026-08-04T03:53:23Z"
+    },
+    "claude-plugin-marketplaces": {
+      "kind": "http",
+      "sha256": "f3b67408fe9c1baac520e0a03c904ddc489db95c938f0b561d562f7b7f639dd6",
+      "bytes": 75526,
+      "final_url": "https://code.claude.com/docs/en/plugin-marketplaces.md",
+      "checked_at": "2026-08-04T03:53:23Z"
+    },
+    "opencode-plugins": {
+      "kind": "http",
+      "sha256": "4cc0d8db8645a036d1398a9e3be65c386ab75d003a2699c14bc06c267ea1354f",
+      "bytes": 9473,
+      "final_url": "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/web/src/content/docs/plugins.mdx",
+      "checked_at": "2026-08-04T03:53:23Z"
+    },
+    "codex-developer-commands": {
+      "kind": "http",
+      "sha256": "943d2180c3763d51bdc4460db5e06381bb25be30ad1cf7b65347bb66a0f179e0",
+      "bytes": 48867,
+      "final_url": "https://learn.chatgpt.com/docs/developer-commands.md?surface=cli",
+      "checked_at": "2026-08-04T04:05:49Z"
+    },
+    "openai-plugins": {
+      "kind": "http",
+      "sha256": "4f49d3c7b74acdb4403e5df51e262c9b3af5b4e12930ca2b146aa6950a23eda6",
+      "bytes": 10918,
+      "final_url": "https://learn.chatgpt.com/docs/plugins.md",
+      "checked_at": "2026-08-04T04:05:49Z"
+    },
+    "claude-discover-plugins": {
+      "kind": "http",
+      "sha256": "c9a4283cf4bd30b160c283bc8f16dc74bd40130d8e2cb031bdc4d0faac928248",
+      "bytes": 28411,
+      "final_url": "https://code.claude.com/docs/en/discover-plugins.md",
+      "checked_at": "2026-08-04T04:05:49Z"
     }
   },
-  "updated_at": "2026-08-04T03:19:26Z"
+  "updated_at": "2026-08-04T04:05:49Z"
 }

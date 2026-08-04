@@ -15,6 +15,8 @@
 
 ## 安装
 
+### 直接安装 skill 和 gzh
+
 从仓库根目录执行：
 
 ```bash
@@ -59,7 +61,7 @@ CODEX_HOME="$HOME/.codex" ./install.sh codex claude opencode
 - OpenCode：只安装该目标时使用 `${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills`，与其他目标共同安装时复用兼容目录；
 - `gzh`：环境位于 `${GZH_INSTALL_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/gentoo-zh-skills/gzh}`，启动器位于 `${GZH_BIN_DIR:-$HOME/.local/bin}/gzh`。
 
-安装器会检查所有已知发现目录和已经记录的安装。环境变量 `OPENCODE_DISABLE_EXTERNAL_SKILLS=1` 或 `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1` 会缩小 OpenCode 的发现范围，但只有 OpenCode 运行时也使用相同设置，该范围才保持一致。同名路径不归本项目管理、多个目录会导致重复加载或目标路径无法安全更新时，安装会在写入前停止。`gzh` venv 继承系统 site-packages，以便读取 Gentoo 安装的 Portage 模块。
+安装器会检查所有已知发现目录和已经记录的安装。同名路径不归本项目管理、多个目录会导致重复加载或目标路径无法安全更新时，安装会在写入前停止。OpenCode 运行时应使用与安装时相同的 skill 发现设置；否则实际扫描范围可能扩大，安装器的重复检查不能代表运行时状态。`gzh` venv 继承系统 site-packages，以便读取 Gentoo 安装的 Portage 模块。
 
 安装器把每个目标的客户端、模式、来源目录和 skill 成员写入 `${XDG_DATA_HOME:-$HOME/.local/share}/gentoo-zh-skills/skill-installations.json`。更新时依据该记录增加新 skill，并删除已从当前 bundle 移除但仍由本项目管理的 skill。路径所有权或状态文件不符合记录时，操作停止；单个目标的文件切换或状态写入失败时，原文件和原记录一并恢复。
 
@@ -71,6 +73,56 @@ CODEX_HOME="$HOME/.codex" ./install.sh codex claude opencode
 ```
 
 状态检查验证受管理文件、符号链接和 `gzh` 启动器，不代替客户端内的发现测试。客户端已运行但未发现新 skill 时，按该客户端的当前官方文档重新加载或重启。
+
+### 使用 Codex 和 Claude Code 插件
+
+`gentoo-overlay-skills` 插件复用同一套四个 skill，不复制源码。插件只安装说明和辅助脚本，不安装 `gzh`。先从当前 checkout 安装 `gzh`：
+
+```bash
+./install.sh --gzh-only
+```
+
+不要在同一个客户端中同时安装本插件和同名的独立 skill。迁移现有受管理安装时，先删除原有 skill；OpenCode 需要继续使用其原生 skill 目录：
+
+```bash
+./install.sh --uninstall --skills-only
+./install.sh opencode --skills-only
+```
+
+从仓库根目录注册本地 marketplace，再安装插件：
+
+```bash
+codex plugin marketplace add ./
+codex plugin add gentoo-overlay-skills@gentoo-zh-skills
+
+claude plugin marketplace add ./
+claude plugin install gentoo-overlay-skills@gentoo-zh-skills
+```
+
+安装后应启动新的 Codex CLI session。Claude Code 的当前 session 应执行 `/reload-plugins`，不支持该命令时重启客户端。
+
+插件更新依赖新的 manifest 版本。更新 checkout 后，Codex 重新执行安装命令；Claude Code 先刷新 marketplace，再更新插件：
+
+```bash
+./update.sh
+codex plugin add gentoo-overlay-skills@gentoo-zh-skills
+claude plugin marketplace update gentoo-zh-skills
+claude plugin update gentoo-overlay-skills@gentoo-zh-skills
+```
+
+更新后同样需要启动新的 Codex CLI session，并在 Claude Code 中执行 `/reload-plugins` 或重启客户端。
+
+Codex 当前没有独立的 plugin update 或 rollback 命令。升级前记录 checkout 的准确 commit；需要降级时先停止，不要直接修改客户端 cache，也不要把未验证的 remove-and-add 当作回退。删除插件时使用客户端命令：
+
+```bash
+codex plugin remove gentoo-overlay-skills@gentoo-zh-skills
+codex plugin marketplace remove gentoo-zh-skills
+
+claude plugin uninstall gentoo-overlay-skills@gentoo-zh-skills
+claude plugin marketplace remove gentoo-zh-skills
+```
+
+OpenCode 的 plugin 是 JavaScript、TypeScript 或 npm 扩展，不是 skill bundle。因为 OpenCode 直接发现 Agent Skills，所以继续使用 `./install.sh opencode`，不要把 Codex 或 Claude Code 的 plugin cache 当作 OpenCode 安装源。
 
 ## 选择工作流
 
@@ -214,15 +266,15 @@ gzh batch cleanup <report.json> --dry-run
 
 ## 发布
 
-版本号必须在 `gzh/pyproject.toml`、`gzh.__version__` 和 `gzh --version` 中保持一致，tag 使用 `v<version>`。发布前执行：
+版本号必须在 `gzh/pyproject.toml`、`gzh.__version__`、`gzh --version` 和两个 plugin manifest 中保持一致，tag 使用 `v<version>`。发布前执行：
 
 ```bash
-python3 scripts/release_check.py --mode source-only --tag v0.1.0
+python3 scripts/release_check.py --mode source-only --tag v0.2.0
 ```
 
 本仓库当前没有根目录 license 文件，也没有 `project.license` metadata。发布过程不会推断或添加法律条款；在仓库所有者明确选择 license 前，只发布 tag 对应的源码快照，不上传 wheel、sdist、可执行文件或其他自定义产物。GitHub 自动生成的源码 archive 以 tag 指向的 commit 内容为准，但外层压缩字节不属于稳定身份。`--mode package` 当前始终失败；根目录 license 和 package metadata 只能作为前提，后续还须实现并复核确定性的 rights-decision contract。
 
-release tag 不会固定已有安装的版本。`install.sh` 安装当前 checkout，`update.sh` 仍从 canonical `master` 执行 fast-forward 后刷新受管理安装。完整发布门、验证顺序和后续 license 决策见 [`RELEASING.md`](RELEASING.md)。
+release tag 不会固定已有安装的版本。`install.sh` 安装当前 checkout，`update.sh` 仍从 canonical `master` 执行 fast-forward 后刷新受管理安装。插件 manifest 使用 release 版本，但本地 marketplace 仍指向当前 checkout。完整发布门、验证顺序和后续 license 决策见 [`RELEASING.md`](RELEASING.md)。
 
 ## 证据和持续维护
 
@@ -236,7 +288,7 @@ release tag 不会固定已有安装的版本。`install.sh` 安装当前 checko
 
 相似目录结构不能证明两个 overlay 使用相同的 remote、branch、keyword、CI、review 或发布规则。只约束 Gentoo ebuild repository 的 GLEP 也不会自动成为通用 overlay 规则。`gentoo-tree-lessons` 只提供候选 commit 和测试样本，任何硬规则都需要当前官方资料或目标仓库政策支持。
 
-机器可读来源位于 [`sources.json`](.agents/skills/gentoo-overlay-development/references/sources.json)，当前登记 63 个官方或明确标注的次级来源。人工复核后的 revision 或 SHA-256 位于 [`source-lock.json`](.agents/skills/gentoo-overlay-development/references/source-lock.json)。查询时必须指定 `--scope`、`--all-scopes` 或 `--id`：
+机器可读来源位于 [`sources.json`](.agents/skills/gentoo-overlay-development/references/sources.json)，当前登记 71 个官方或明确标注的次级来源。人工复核后的 revision 或 SHA-256 位于 [`source-lock.json`](.agents/skills/gentoo-overlay-development/references/source-lock.json)。查询时必须指定 `--scope`、`--all-scopes` 或 `--id`：
 
 ```bash
 python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py \
@@ -254,13 +306,18 @@ python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py \
 维护合同见 [`gzh-maintain-skills`](.agents/skills/gzh-maintain-skills/SKILL.md)，分层设计见 [`overlay-architecture.md`](.agents/skills/gzh-maintain-skills/references/overlay-architecture.md)。安装目标和 skill 格式以各项目当前官方文档为准：
 
 - [OpenAI Build skills](https://learn.chatgpt.com/docs/build-skills)；
+- [OpenAI plugin packaging](https://developers.openai.com/plugins/build/plugins)；
+- [OpenAI Plugins](https://learn.chatgpt.com/docs/plugins)；
 - [Claude Code skills](https://code.claude.com/docs/en/skills)；
+- [Claude Code plugin reference](https://code.claude.com/docs/en/plugins-reference)；
+- [Claude Code plugin discovery](https://code.claude.com/docs/en/discover-plugins)；
 - [OpenCode skills](https://opencode.ai/docs/skills)；
+- [OpenCode plugins](https://opencode.ai/docs/plugins)；
 - [Agent Skills specification](https://agentskills.io/specification)。
 
 仓库采用渐进加载：客户端的初始列表包含四个 skill 的 `name`、`description` 和 `SKILL.md` 路径。客户端只在触发后加载对应 `SKILL.md`，再按任务读取一层 references 或直接执行 scripts。验证器限制 `SKILL.md` 不超过 500 行，并要求每个 reference 从所属 `SKILL.md` 直接可发现。客户端专用的 OpenAI UI metadata 位于 `agents/openai.yaml`；共同的 `SKILL.md` 只保留 `name` 和 `description`，避免加入其他客户端无法稳定解释的 frontmatter。
 
-常规 bump 和 batch 默认只加载本地提交所需流程；两者的发布步骤位于条件 reference，只有明确请求发布时才加载。插件封装不会减少 description 或 `SKILL.md` 的加载成本，因此列为版本控制的后续事项，不属于持久化维护队列。该事项必须先复核各客户端的当前官方资料，再证明安装、更新、同名冲突、卸载和回滚；当前共享 skill 目录仍是兼容基线。
+常规 bump 和 batch 默认只加载本地提交所需流程；两者的发布步骤位于条件 reference，只有明确请求发布时才加载。Codex 和 Claude Code plugin 共用 `.agents/skills`，各自保留独立 manifest 和 marketplace schema。`scripts/plugin_check.py` 检查版本、路径、skill 成员、symlink、特殊文件和 license 边界。OpenCode 继续使用共享 skill 格式，不声明不兼容的 plugin 能力。
 
 ## 验证
 
@@ -270,6 +327,7 @@ python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py \
 python3 -m venv --system-site-packages .venv
 .venv/bin/python -m pip install -e './gzh[test]'
 .venv/bin/python scripts/validate_repository.py
+.venv/bin/python scripts/plugin_check.py
 .venv/bin/python scripts/release_check.py --mode source-only
 .venv/bin/python -m pytest -q gzh/tests tests
 .venv/bin/python scripts/eval_runner.py static
@@ -277,7 +335,7 @@ python3 -m venv --system-site-packages .venv
   audit --all-scopes --fail-on-drift
 ```
 
-验证器检查 skill frontmatter、metadata、activation eval、禁止的非 Latin script，以及来源 schema 和 lock。它也检查局部链接、reference 可发现性和可执行脚本。英文政策仍须人工复核，因为验证器不能把 Latin 字符文本自动判定为英语。
+验证器检查 skill frontmatter、metadata、activation eval、禁止的非 Latin script，以及来源 schema 和 lock。它也检查局部链接、reference 可发现性、可执行脚本和 plugin package。英文政策仍须人工复核，因为验证器不能把 Latin 字符文本自动判定为英语。
 
 验证器还把每个 skill 的 `name`、`description` 和解析后的 `SKILL.md` 路径序列化为确定性的初始列表估算值，并以官方文档给出的 8,000 字符上限作为硬上界。该值用于保守检测，不声称复制客户端内部的序列化格式。客户端仍可因实际 context budget 提前缩短 description。
 
@@ -286,6 +344,8 @@ python3 -m venv --system-site-packages .venv
 ## 目录
 
 - [`.agents/skills`](.agents/skills)：可安装 skill；
+- [`.agents/.codex-plugin`](.agents/.codex-plugin)：Codex plugin manifest；
+- [`.claude-plugin`](.claude-plugin)：Claude Code marketplace；
 - [`gzh`](gzh)：Python CLI 与单元测试；
 - [`scripts`](scripts)：安装、更新和仓库验证；
 - [`docs/devmanual.md`](docs/devmanual.md)：本项目使用的 Gentoo 官方文档索引；

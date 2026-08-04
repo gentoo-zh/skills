@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import shutil
+import subprocess
 import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 
 def load_module():
-    from pathlib import Path
-
     root = Path(__file__).resolve().parent.parent
     path = (root / ".agents" / "skills" / "gzh-maintain-skills"
             / "scripts" / "maintenance_cycle.py")
@@ -23,6 +25,87 @@ def load_module():
 
 
 maintenance = load_module()
+
+
+def load_repository_context():
+    path = maintenance.SCRIPT_ROOT / "repository_context.py"
+    spec = importlib.util.spec_from_file_location(
+        "maintenance_repository_context_test", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+repository_context = load_repository_context()
+
+
+def make_skills_checkout(path: Path, *, complete: bool = True,
+                         remotes: tuple[str, ...] = ("origin",)) -> Path:
+    path.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    for remote in remotes:
+        subprocess.run(
+            ["git", "remote", "add", remote,
+             "git@github.com:gentoo-zh/skills.git"], cwd=path, check=True)
+    if complete:
+        for relative in repository_context.REQUIRED_PATHS:
+            target = path / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("fixture\n", encoding="utf-8")
+    return path
+
+
+def test_installed_copy_uses_the_working_checkout(tmp_path):
+    root = make_skills_checkout(tmp_path / "checkout")
+    installed = tmp_path / "plugin/gzh-maintain-skills/scripts"
+    installed.mkdir(parents=True)
+    source = (maintenance.SCRIPT_ROOT / "repository_context.py")
+    shutil.copy2(source, installed / source.name)
+    code = (
+        "import importlib.util; "
+        f"p={str(installed / 'repository_context.py')!r}; "
+        "s=importlib.util.spec_from_file_location('context', p); "
+        "m=importlib.util.module_from_spec(s); s.loader.exec_module(m); "
+        "print(m.repository_root())"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-c", code], cwd=root,
+        env={**os.environ}, check=False, capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+    assert Path(result.stdout.strip()) == root.resolve()
+
+
+def test_repository_context_rejects_non_git_directory(tmp_path):
+    with pytest.raises(RuntimeError, match="cannot resolve skills repository"):
+        repository_context.repository_root(tmp_path)
+
+
+def test_repository_context_rejects_incomplete_checkout(tmp_path):
+    root = make_skills_checkout(tmp_path / "checkout", complete=False)
+
+    with pytest.raises(RuntimeError, match="not a complete gentoo-zh/skills"):
+        repository_context.repository_root(root)
+
+
+def test_repository_context_rejects_missing_canonical_remote(tmp_path):
+    root = make_skills_checkout(tmp_path / "checkout", remotes=())
+
+    with pytest.raises(
+            RuntimeError, match="expected one canonical gentoo-zh/skills remote; found none"):
+        repository_context.repository_root(root)
+
+
+def test_repository_context_rejects_duplicate_canonical_remotes(tmp_path):
+    root = make_skills_checkout(
+        tmp_path / "checkout", remotes=("origin", "upstream"))
+
+    with pytest.raises(
+            RuntimeError,
+            match="expected one canonical gentoo-zh/skills remote; found origin, upstream"):
+        repository_context.repository_root(root)
 
 
 def test_github_slug_accepts_canonical_forms():

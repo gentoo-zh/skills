@@ -1,0 +1,15 @@
+{
+  "name": "gentoo-zh-skills",
+  "description": "Evidence-backed Gentoo overlay development skills.",
+  "owner": {
+    "name": "gentoo-zh",
+    "url": "https://github.com/gentoo-zh"
+  },
+  "plugins": [
+    {
+      "name": "gentoo-overlay-skills",
+      "source": "./.agents",
+      "description": "Evidence-backed workflows for developing and maintaining Gentoo overlays."
+    }
+  ]
+}

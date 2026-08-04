@@ -89,6 +89,16 @@
       "github-release-management",
       "github-repository-licensing",
       "github-source-archives"
+    ],
+    "client-plugin-packaging": [
+      "codex-plugin-packaging",
+      "codex-plugin-submission-errors",
+      "codex-developer-commands",
+      "openai-plugins",
+      "claude-plugin-reference",
+      "claude-plugin-marketplaces",
+      "claude-discover-plugins",
+      "opencode-plugins"
     ]
   },
   "sources": [
@@ -1057,6 +1067,136 @@
         "pip"
       ],
       "use": "Official minimum-supported-version CLI and pip behavior used by the gzh installer.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "codex-plugin-packaging",
+      "title": "OpenAI plugin packaging documentation",
+      "authority": "skill-architecture",
+      "kind": "http",
+      "url": "https://developers.openai.com/plugins/build/plugins.md",
+      "topics": [
+        "codex",
+        "plugin",
+        "marketplace",
+        "install",
+        "update"
+      ],
+      "use": "Official Codex plugin manifest, marketplace schema, and package path contract.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "claude-plugin-reference",
+      "title": "Claude Code plugin reference",
+      "authority": "skill-architecture",
+      "kind": "http",
+      "url": "https://code.claude.com/docs/en/plugins-reference.md",
+      "topics": [
+        "claude",
+        "plugin",
+        "manifest",
+        "validation"
+      ],
+      "use": "Official Claude Code plugin structure, manifest, cache, and validation contract.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "codex-developer-commands",
+      "title": "OpenAI Codex developer commands reference",
+      "authority": "skill-architecture",
+      "kind": "http",
+      "url": "https://learn.chatgpt.com/docs/developer-commands.md?surface=cli",
+      "topics": [
+        "codex",
+        "plugin",
+        "marketplace",
+        "cli",
+        "install",
+        "update",
+        "uninstall"
+      ],
+      "use": "Official Codex CLI plugin and marketplace command lifecycle.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "codex-plugin-submission-errors",
+      "title": "OpenAI plugin submission error reference",
+      "authority": "skill-architecture",
+      "kind": "http",
+      "url": "https://developers.openai.com/plugins/deploy/submission-errors.md",
+      "topics": [
+        "codex",
+        "plugin",
+        "submission",
+        "validation",
+        "metadata"
+      ],
+      "use": "Official Codex plugin payload and interface metadata validation limits.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "claude-plugin-marketplaces",
+      "title": "Claude Code plugin marketplace documentation",
+      "authority": "skill-architecture",
+      "kind": "http",
+      "url": "https://code.claude.com/docs/en/plugin-marketplaces.md",
+      "topics": [
+        "claude",
+        "plugin",
+        "marketplace",
+        "install",
+        "update"
+      ],
+      "use": "Official Claude Code marketplace schema, source, version, and lifecycle contract.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "openai-plugins",
+      "title": "OpenAI Plugins documentation",
+      "authority": "skill-architecture",
+      "kind": "http",
+      "url": "https://learn.chatgpt.com/docs/plugins.md",
+      "topics": [
+        "codex",
+        "plugin",
+        "install",
+        "activation",
+        "session"
+      ],
+      "use": "Official Codex plugin availability and post-install session activation contract.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "claude-discover-plugins",
+      "title": "Claude Code plugin discovery documentation",
+      "authority": "skill-architecture",
+      "kind": "http",
+      "url": "https://code.claude.com/docs/en/discover-plugins.md",
+      "topics": [
+        "claude",
+        "plugin",
+        "marketplace",
+        "install",
+        "update",
+        "activation"
+      ],
+      "use": "Official Claude Code install, update, uninstall, and plugin reload lifecycle.",
+      "scope": "skills-maintenance"
+    },
+    {
+      "id": "opencode-plugins",
+      "title": "OpenCode plugin documentation source",
+      "authority": "skill-architecture",
+      "kind": "http",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/web/src/content/docs/plugins.mdx",
+      "topics": [
+        "opencode",
+        "plugin",
+        "javascript",
+        "typescript",
+        "npm"
+      ],
+      "use": "Official OpenCode plugin boundary distinguishing code extensions from Agent Skills.",
       "scope": "skills-maintenance"
     }
   ],

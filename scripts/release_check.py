@@ -18,6 +18,10 @@ ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = ROOT / "gzh" / "pyproject.toml"
 PACKAGE_INIT = ROOT / "gzh" / "gzh" / "__init__.py"
 RELEASE_CONTRACT = ROOT / "RELEASING.md"
+PLUGIN_MANIFESTS = {
+    "codex_plugin": Path(".agents/.codex-plugin/plugin.json"),
+    "claude_plugin": Path(".agents/.claude-plugin/plugin.json"),
+}
 LICENSE_NAMES = (
     "COPYING", "COPYING.md", "COPYING.rst", "COPYING.txt",
     "LICENSE", "LICENSE.md", "LICENSE.rst", "LICENSE.txt",
@@ -45,6 +49,17 @@ def source_version(path: Path) -> str:
     if len(values) != 1:
         raise ValueError("gzh.__version__ must have one literal string assignment")
     return values[0]
+
+
+def plugin_versions(root: Path) -> dict[str, str]:
+    versions = {}
+    for name, relative in PLUGIN_MANIFESTS.items():
+        data = json.loads((root / relative).read_text(encoding="utf-8"))
+        version = data.get("version") if isinstance(data, dict) else None
+        if not isinstance(version, str):
+            raise ValueError(f"{relative} has no string version")
+        versions[name] = version
+    return versions
 
 
 def cli_version(root: Path) -> str:
@@ -111,6 +126,7 @@ def release_report(
         "pyproject": pyproject_version,
         "package": init_version,
         "cli": command_version,
+        **plugin_versions(root),
     }
     if len(set(declarations.values())) != 1:
         errors.append("version declarations do not match")
@@ -146,6 +162,11 @@ def release_report(
         "requested_tag": tag,
         "tag_verification": tag_identity,
         "version_declarations": declarations,
+        "plugin_package": {
+            "name": "gentoo-overlay-skills",
+            "root": ".agents",
+            "marketplace": "gentoo-zh-skills",
+        },
         "update_channel": "master",
         "rights": {
             "metadata_declared": metadata_declared,

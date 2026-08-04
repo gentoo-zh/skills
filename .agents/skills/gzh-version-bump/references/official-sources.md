@@ -3,6 +3,13 @@
 Use current primary evidence for every package decision. Do not turn memory, an old
 commit, or a derived checklist into repository policy.
 
+## Contents
+
+- [Authority Order](#authority-order)
+- [Primary Sources](#primary-sources)
+- [Task Start](#task-start)
+- [Conflicts and Drift](#conflicts-and-drift)
+
 ## Authority Order
 
 Apply sources in this order:
@@ -59,11 +66,13 @@ Secondary sources include the
 1. Run `gzh repo` and read the complete `AGENTS.md` from that checkout.
 2. Identify the canonical remote by URL, fetch it, and use its current `master` as the
    base required by the live repository policy.
-3. Query the evidence registry for the narrowest relevant official source:
+3. Resolve the absolute directory containing this skill and its sibling
+   `gentoo-overlay-development`, then query the evidence registry for the narrowest
+   relevant official source:
 
    ```bash
-   python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py list --scope portable-core --topic dependency
-   python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py show overlay-policy
+   python3 <skills-root>/gentoo-overlay-development/scripts/source_manager.py list --scope portable-core --topic dependency
+   python3 <skills-root>/gentoo-overlay-development/scripts/source_manager.py show overlay-policy
    ```
 
 4. Read every ebuild for the target package, `metadata.xml`, referenced files, relevant
@@ -84,8 +93,8 @@ diff, or one similar package is never sufficient proof of a general rule.
 Audit registered sources without rewriting policy:
 
 ```bash
-python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py audit --scope portable-core
-python3 .agents/skills/gentoo-overlay-development/scripts/source_manager.py audit --scope adapter:gentoo-zh --fail-on-drift
+python3 <skills-root>/gentoo-overlay-development/scripts/source_manager.py audit --scope portable-core
+python3 <skills-root>/gentoo-overlay-development/scripts/source_manager.py audit --scope adapter:gentoo-zh --fail-on-drift
 ```
 
 The shared `gentoo-overlay-development/references/source-lock.json` stores observed

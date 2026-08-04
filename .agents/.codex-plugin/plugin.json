@@ -1,0 +1,32 @@
+{
+  "name": "gentoo-overlay-skills",
+  "version": "0.2.0",
+  "description": "Evidence-backed workflows for developing and maintaining Gentoo overlays.",
+  "author": {
+    "name": "gentoo-zh",
+    "url": "https://github.com/gentoo-zh"
+  },
+  "homepage": "https://github.com/gentoo-zh/skills",
+  "repository": "https://github.com/gentoo-zh/skills",
+  "keywords": [
+    "gentoo",
+    "overlay",
+    "ebuild",
+    "quality-assurance"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Gentoo Overlay Skills",
+    "shortDescription": "Maintain Gentoo overlays",
+    "longDescription": "Develop and maintain Gentoo overlays with evidence-backed workflows and deterministic quality gates.",
+    "developerName": "gentoo-zh",
+    "category": "Developer Tools",
+    "capabilities": [],
+    "websiteURL": "https://github.com/gentoo-zh/skills",
+    "defaultPrompt": [
+      "Develop and verify this Gentoo overlay change.",
+      "Update this gentoo-zh package and run every required check.",
+      "Audit these overlay skills against current official evidence."
+    ]
+  }
+}

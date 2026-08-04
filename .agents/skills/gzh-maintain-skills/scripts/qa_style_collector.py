@@ -30,9 +30,9 @@ MAX_SINCE_DAYS = 3650
 MAX_GIT_OUTPUT_BYTES = 2 * 1024 * 1024
 MAX_REPORT_BYTES = 2 * 1024 * 1024
 SKILL_ROOT = Path(__file__).resolve().parent.parent
-ROOT = SKILL_ROOT.parents[2]
+SKILLS_ROOT = SKILL_ROOT.parent
 SOURCE_MANAGER_PATH = (
-    ROOT / ".agents" / "skills" / "gentoo-overlay-development" / "scripts"
+    SKILLS_ROOT / "gentoo-overlay-development" / "scripts"
     / "source_manager.py")
 
 TOPIC_ORDER = (

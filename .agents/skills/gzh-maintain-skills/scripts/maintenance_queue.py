@@ -24,7 +24,20 @@ from typing import Any, NamedTuple
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-ROOT = SCRIPT_DIR.parents[3]
+
+
+def load_repository_root() -> Path:
+    path = SCRIPT_DIR / "repository_context.py"
+    spec = importlib.util.spec_from_file_location(
+        "gzh_queue_repository_context", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load repository context resolver")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.repository_root()
+
+
+ROOT = load_repository_root()
 SOURCE_MANAGER = (
     ROOT / ".agents" / "skills" / "gentoo-overlay-development" / "scripts"
     / "source_manager.py")

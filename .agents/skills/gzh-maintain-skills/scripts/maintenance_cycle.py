@@ -21,7 +21,20 @@ from urllib.parse import urlparse
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_ROOT = Path(__file__).resolve().parent
-ROOT = SKILL_ROOT.parents[2]
+
+
+def load_repository_root() -> Path:
+    path = SCRIPT_ROOT / "repository_context.py"
+    spec = importlib.util.spec_from_file_location(
+        "gzh_maintenance_repository_context", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("cannot load repository context resolver")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.repository_root()
+
+
+ROOT = load_repository_root()
 SOURCE_MANAGER = (
     ROOT / ".agents" / "skills" / "gentoo-overlay-development" / "scripts"
     / "source_manager.py")

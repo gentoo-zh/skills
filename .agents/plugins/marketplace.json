@@ -1,0 +1,20 @@
+{
+  "name": "gentoo-zh-skills",
+  "interface": {
+    "displayName": "gentoo-zh Skills"
+  },
+  "plugins": [
+    {
+      "name": "gentoo-overlay-skills",
+      "source": {
+        "source": "local",
+        "path": "./.agents"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

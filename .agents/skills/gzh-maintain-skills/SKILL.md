@@ -23,6 +23,9 @@ unsupported policy. Prefer deterministic checks and the smallest evidence-backed
    Chinese pull request body example.
 6. Confirm the current Git branch, canonical remote by URL, clean state, and exact
    synchronization before the first edit. Preserve unrelated changes.
+7. Run repository maintenance only in a Git checkout whose canonical remote is
+   `gentoo-zh/skills`. Invoke helpers from that checkout. A plugin cache is an installed
+   snapshot, not the repository to fetch, modify, commit, or release.
 
 ## Run a Baseline Cycle
 

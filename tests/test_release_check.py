@@ -37,6 +37,11 @@ def fixture_repository(tmp_path, *, project_version="0.1.0",
         f'__version__ = "{init_version}"\n', encoding="utf-8")
     (tmp_path / "RELEASING.md").write_text(
         "# Release Contract\n", encoding="utf-8")
+    for relative in release_check.PLUGIN_MANIFESTS.values():
+        manifest = tmp_path / relative
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(
+            json.dumps({"version": project_version}), encoding="utf-8")
     if licensed:
         (tmp_path / "LICENSE").write_text("MIT\n", encoding="utf-8")
     return tmp_path
@@ -60,13 +65,15 @@ def initialize_repository(path):
 
 def test_current_source_only_release_contract_is_consistent():
     report = release_check.release_report(
-        root=ROOT, tag="v0.1.0", mode="source-only")
+        root=ROOT, tag="v0.2.0", mode="source-only")
 
     assert report["ok"] is True
     assert report["version_declarations"] == {
-        "pyproject": "0.1.0",
-        "package": "0.1.0",
-        "cli": "0.1.0",
+        "pyproject": "0.2.0",
+        "package": "0.2.0",
+        "cli": "0.2.0",
+        "codex_plugin": "0.2.0",
+        "claude_plugin": "0.2.0",
     }
     assert report["rights"]["status"] == "undeclared"
     assert report["custom_package_artifacts_allowed"] is False
@@ -85,6 +92,19 @@ def test_release_contract_rejects_version_and_tag_mismatch(tmp_path):
         "version declarations do not match",
         "release tag must be v0.1.0",
     ]
+
+
+def test_release_contract_rejects_plugin_version_drift(tmp_path):
+    repository = fixture_repository(tmp_path)
+    manifest = repository / release_check.PLUGIN_MANIFESTS["codex_plugin"]
+    manifest.write_text(json.dumps({"version": "0.2.0"}), encoding="utf-8")
+
+    report = release_check.release_report(
+        root=repository, tag="v0.1.0", mode="source-only",
+        observed_cli_version="0.1.0")
+
+    assert report["ok"] is False
+    assert report["errors"] == ["version declarations do not match"]
 
 
 def test_package_artifacts_require_both_license_surfaces(tmp_path):
@@ -158,11 +178,11 @@ def test_release_contract_requires_annotated_tag_at_head(tmp_path):
 def test_release_check_cli_emits_structured_result():
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--mode", "source-only",
-         "--tag", "v0.1.0"],
+         "--tag", "v0.2.0"],
         cwd=ROOT, check=False, capture_output=True, text=True)
 
     assert result.returncode == 0, result.stderr
     report = json.loads(result.stdout)
     assert report["ok"] is True
-    assert report["expected_tag"] == "v0.1.0"
+    assert report["expected_tag"] == "v0.2.0"
     assert result.stderr == ""
