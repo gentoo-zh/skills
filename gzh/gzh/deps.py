@@ -42,7 +42,10 @@ def _stop_generator_group(process: subprocess.Popen) -> None:
     try:
         process.wait(timeout=1)
     except subprocess.TimeoutExpired:
-        process.kill()
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
         process.wait()
 
 

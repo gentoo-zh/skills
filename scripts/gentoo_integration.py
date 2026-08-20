@@ -68,19 +68,28 @@ def read_regular_file(path: Path, maximum: int = MAX_METADATA_BYTES) -> bytes:
         before = os.fstat(descriptor)
         if not stat.S_ISREG(before.st_mode) or before.st_size > maximum:
             raise IntegrationError(f"metadata file is invalid or oversized: {path}")
-        chunks = []
-        total = 0
-        while True:
-            chunk = os.read(descriptor, min(65536, maximum - total + 1))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            total += len(chunk)
-            if total > maximum:
-                raise IntegrationError(f"metadata file exceeds {maximum} bytes: {path}")
-        content = b"".join(chunks)
+        def read_all() -> bytes:
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            chunks = []
+            total = 0
+            while True:
+                chunk = os.read(descriptor, min(65536, maximum - total + 1))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > maximum:
+                    raise IntegrationError(
+                        f"metadata file exceeds {maximum} bytes: {path}")
+            return b"".join(chunks)
+
+        content = read_all()
+        # A same-size in-place rewrite can share one timestamp tick, so stat
+        # alone cannot see it. Re-read and require identical bytes.
+        confirmation = read_all()
         after = os.fstat(descriptor)
         if (len(content) != before.st_size
+                or content != confirmation
                 or (before.st_dev, before.st_ino, before.st_mode, before.st_size,
                     before.st_mtime_ns, before.st_ctime_ns)
                 != (after.st_dev, after.st_ino, after.st_mode, after.st_size,

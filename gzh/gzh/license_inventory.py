@@ -720,12 +720,20 @@ def inspect_license_archive(
                 initial_digest, snapshot_size = _snapshot_archive(
                     source, archive_snapshot,
                     maximum_size=limits.max_archive_bytes)
+                # A same-size in-place rewrite can share one timestamp tick, so
+                # the identity comparison cannot see it. Re-digest the source.
+                source.seek(0)
+                confirmation_digest = hashlib.sha256()
+                while chunk := source.read(READ_CHUNK_BYTES):
+                    confirmation_digest.update(chunk)
                 copied_metadata = os.fstat(source.fileno())
                 if (snapshot_size != metadata.st_size
+                        or confirmation_digest.hexdigest() != initial_digest
                         or _file_identity(copied_metadata)
                         != _file_identity(metadata)):
                     raise LicenseInventoryError(
                         "archive changed while it was copied")
+                archive_snapshot.seek(0)
                 is_zip = _zip_preflight(archive_snapshot, limits)
                 is_tar, tar_is_spooled = _tar_preflight(
                     archive_snapshot, limits,

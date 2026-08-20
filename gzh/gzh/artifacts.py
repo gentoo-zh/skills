@@ -173,7 +173,14 @@ def _inspect_distfile(path: Path) -> dict[str, Any]:
                 raise _DistfileError(
                     "unstable-distfile", "DIST file identity changed before hashing")
             hashes = _hash_stream(handle)
+            # A same-size in-place rewrite can share one timestamp tick, so the
+            # stat comparison below cannot see it. Re-hash and require a match.
+            handle.seek(0)
+            confirmation = _hash_stream(handle)
             opened_after = os.fstat(handle.fileno())
+            if confirmation != hashes:
+                raise _DistfileError(
+                    "unstable-distfile", "DIST file changed during hashing")
     except _DistfileError:
         raise
     except OSError as exc:
