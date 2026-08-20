@@ -31,19 +31,19 @@
 - `gzh-bump-from-issues`：gentoo-zh bump-reminder issue 批处理；
 - `gzh-maintain-skills`：本仓库的证据审计和有界维护迭代。
 
-默认安装目标为 Codex 和 OpenCode。新环境同时安装 Codex、Claude Code 和 OpenCode 时，使用两个互不重叠的发现目录：
+默认安装目标为 Codex、omp 和 OpenCode。同时安装全部目标：
 
 ```bash
-CODEX_HOME="$HOME/.codex" ./install.sh codex claude opencode
+./install.sh codex claude omp opencode
 ```
 
-该命令把 Codex skill 安装到 `$HOME/.codex/skills`，并让 Claude Code 和 OpenCode 共用 `$HOME/.claude/skills`。OpenCode 会扫描多个兼容目录；同名 skill 出现在两个可发现目录时，加载结果取决于扫描顺序，因此安装器会在写入前拒绝重复路径。
+Codex、omp 和 OpenCode 都会扫描 `$HOME/.agents/skills`，所以该命令把 skill 装在那里，只有 Claude Code 另用自己的目录。同名 skill 出现在两个可发现目录时，加载结果取决于扫描顺序，因此安装器会在写入前拒绝重复路径。
 
 已有受管理安装需要迁移目录时，先移除 skill，再执行新的安装命令；`gzh` 环境不受 `--skills-only` 影响：
 
 ```bash
 ./install.sh --uninstall --skills-only
-CODEX_HOME="$HOME/.codex" ./install.sh codex claude opencode
+./install.sh codex claude omp opencode
 ```
 
 也可以只安装指定目标或组件：
@@ -51,14 +51,16 @@ CODEX_HOME="$HOME/.codex" ./install.sh codex claude opencode
 ```bash
 ./install.sh codex claude --copy
 ./install.sh claude --skills-only
+./install.sh omp --skills-only
 ./install.sh opencode --skills-only
 ./install.sh --gzh-only
 ```
 
 各目标使用以下发现目录：
 
-- Codex：未设置 `CODEX_HOME` 时使用 `$HOME/.agents/skills`，否则使用 `$CODEX_HOME/skills`；
+- Codex：`$HOME/.agents/skills`。`CODEX_HOME` 只改变 `config.toml` 的位置，不改变 skill 扫描路径，所以安装器不再按它选择目录；
 - Claude Code：`${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills`；
+- omp：与其他目标共同安装时复用它已扫描的兼容目录，只安装该目标时使用 `$HOME/.agents/skills`；
 - OpenCode：只安装该目标时使用 `${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills`，与其他目标共同安装时复用兼容目录；
 - `gzh`：环境位于 `${GZH_INSTALL_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/gentoo-zh-skills/gzh}`，启动器位于 `${GZH_BIN_DIR:-$HOME/.local/bin}/gzh`。
 

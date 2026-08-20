@@ -196,6 +196,28 @@ def test_bundle_refresh_rolls_back_when_state_write_fails(
     assert retired in state["targets"][0]["skills"]
 
 
+def test_omp_shares_the_scope_it_already_scans(tmp_path):
+    env = environment(tmp_path)
+    invoke(INSTALLER, ["omp", "--skills-only"], env)
+
+    for name in SKILL_NAMES:
+        assert (tmp_path / "home" / ".agents" / "skills" / name).is_symlink()
+    status = invoke(INSTALLER, ["omp", "--skills-only", "--status"], env)
+    assert "omp" in status.stdout
+    assert status.stdout.count("link, current") == len(SKILL_NAMES)
+
+
+def test_omp_and_claude_together_use_the_claude_scope(tmp_path):
+    env = environment(tmp_path)
+    invoke(INSTALLER, ["claude", "omp", "--skills-only"], env)
+
+    for name in SKILL_NAMES:
+        assert (tmp_path / "claude" / "skills" / name).is_symlink()
+        assert not (tmp_path / "home" / ".agents" / "skills" / name).exists()
+    status = invoke(INSTALLER, ["claude", "omp", "--skills-only", "--status"], env)
+    assert "claude+omp" in status.stdout
+
+
 def test_default_clients_share_agents_scope_even_with_codex_home_set(tmp_path):
     env = environment(tmp_path)
     invoke(INSTALLER, ["--skills-only"], env)
@@ -206,7 +228,7 @@ def test_default_clients_share_agents_scope_even_with_codex_home_set(tmp_path):
         assert not (tmp_path / "xdg" / "opencode" / "skills" / name).exists()
         assert not (tmp_path / "claude" / "skills" / name).exists()
     status = invoke(INSTALLER, ["--skills-only", "--status"], env)
-    assert "codex+opencode" in status.stdout
+    assert "codex+omp+opencode" in status.stdout
     assert status.stdout.count("link, current") == len(SKILL_NAMES)
 
 
@@ -220,7 +242,7 @@ def test_default_clients_share_official_agents_scope(tmp_path):
         assert not (tmp_path / "home" / ".claude" / "skills" / name).exists()
         assert not (tmp_path / "xdg" / "opencode" / "skills" / name).exists()
     status = invoke(INSTALLER, ["--skills-only", "--status"], env)
-    assert "codex+opencode" in status.stdout
+    assert "codex+omp+opencode" in status.stdout
     assert status.stdout.count("link, current") == len(SKILL_NAMES)
 
 

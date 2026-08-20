@@ -27,7 +27,7 @@ INSTALLER_ID = "gentoo-zh/skills"
 SKILL_MARKER = ".gzh-skill-install.json"
 GZH_MARKER = ".gzh-install.json"
 INSTALLATION_STATE = "skill-installations.json"
-CLIENT_NAMES = {"claude", "codex", "opencode"}
+CLIENT_NAMES = {"claude", "codex", "omp", "opencode"}
 IGNORED_NAMES = {".git", ".hg", ".svn", "__pycache__", SKILL_MARKER}
 MAX_MARKER_BYTES = 4096
 
@@ -68,6 +68,18 @@ def destinations(clients: list[str]) -> dict[Path, list[str]]:
     if "claude" in selected:
         base = expand_env_path("CLAUDE_CONFIG_DIR", home / ".claude") / "skills"
         result.setdefault(base, []).append("claude")
+    if "omp" in selected:
+        discovered = set(omp_discovery_destinations())
+        codex_base = codex_destination(home)
+        claude_base = expand_env_path(
+            "CLAUDE_CONFIG_DIR", home / ".claude") / "skills"
+        if "codex" in selected and codex_base in discovered:
+            base = codex_base
+        elif "claude" in selected and claude_base in discovered:
+            base = claude_base
+        else:
+            base = home / ".agents" / "skills"
+        result.setdefault(base, []).append("omp")
     if "opencode" in selected:
         discovered = set(opencode_discovery_destinations())
         codex_base = codex_destination(home)
@@ -99,6 +111,21 @@ def all_known_destinations() -> list[Path]:
 def codex_discovery_destinations() -> list[Path]:
     home = Path.home()
     paths = [codex_destination(home), *legacy_codex_destinations(home)]
+    return list(dict.fromkeys(paths))
+
+
+def omp_discovery_destinations() -> list[Path]:
+    """Scopes omp scans for user skills.
+
+    Verified against omp 17.3.8: a skill placed in either directory is listed by
+    a print-mode run. omp keeps its own state under ~/.omp but reads skills from
+    the shared agent scopes.
+    """
+    home = Path.home()
+    paths = [
+        home / ".agents" / "skills",
+        expand_env_path("CLAUDE_CONFIG_DIR", home / ".claude") / "skills",
+    ]
     return list(dict.fromkeys(paths))
 
 
@@ -372,6 +399,8 @@ def inferred_clients(base: Path) -> list[str]:
         "CLAUDE_CONFIG_DIR", Path.home() / ".claude") / "skills"
     if base == absolute_path(claude):
         clients.append("claude")
+    if base in map(absolute_path, omp_discovery_destinations()):
+        clients.append("omp")
     if base in map(absolute_path, opencode_discovery_destinations()):
         clients.append("opencode")
     return clients
@@ -1043,7 +1072,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "clients", nargs="*", type=client_name,
-        metavar="{claude,codex,opencode}")
+        metavar="{claude,codex,omp,opencode}")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--copy", action="store_const", const="copy", dest="mode")
     mode.add_argument("--link", action="store_const", const="link", dest="mode")
@@ -1064,7 +1093,7 @@ def main() -> int:
             raise InstallError("--refresh-installed does not accept target or mode options")
         with installation_mutation_lock():
             return refresh_installed()
-    clients = args.clients or ["codex", "opencode"]
+    clients = args.clients or ["codex", "omp", "opencode"]
     scan_all = not args.clients
     include_skills = not args.gzh_only
     include_gzh = not args.skills_only
