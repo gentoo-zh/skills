@@ -1391,7 +1391,8 @@ def notify_telegram_cmd(message, chat_id):
 @cli.command("drop-old")
 @click.option("--all", "all_", is_flag=True, default=False, help="scan all packages")
 @click.option("--pkg", default=None, help="single cat/pkg")
-@click.option("--keep", default=2, show_default=True, type=click.IntRange(min=1))
+@click.option("--keep", default=1, show_default=True, type=click.IntRange(min=1),
+              help="release versions to keep; a live ebuild is always kept")
 @click.option("--apply", is_flag=True, default=False,
               help="disabled: deletion requires package-specific review")
 def drop_old_cmd(all_, pkg, keep, apply):

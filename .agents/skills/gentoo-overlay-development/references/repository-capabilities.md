@@ -20,6 +20,9 @@ inspection may continue to identify the missing fact.
 Resolve and record:
 
 - worktree root, `profiles/repo_name`, repository identity, and allowed writable paths;
+- which surface owns each affected path: package files under `category/package/`, repository
+  metadata under `metadata/`, `profiles/`, and `repo.xml`, and CI configuration, wherever the
+  target repository places them;
 - live policy files and their current revisions;
 - requested operation, affected repository surfaces, and whether each write is supported;
 - canonical repository identity, fetch remote, default branch, and synchronization rule;

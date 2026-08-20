@@ -9,7 +9,7 @@ Coordinate queue discovery and one-package bump workflows. Produce evidence-base
 
 ## Start from current policy and complete issue data
 
-1. Run `gzh repo` and read the complete live overlay `AGENTS.md`. Its repository, CI, commit, and PR rules override this skill and all references.
+1. Run `gzh repo` and read the complete live overlay `AGENTS.md`. Its repository, CI, commit, and PR rules override this skill and all references. They are the default rather than a veto: an explicit instruction from the human directing this batch overrides them for the item it names, and the batch report records that deviation against the item.
    If `gzh` is unavailable, install it from a checked-out `gentoo-zh/skills` root with `./install.sh --gzh-only`. Then run inside the overlay or set `GZH_OVERLAY_DIR` to its absolute path.
 2. Use the evidence order required by `gzh-version-bump`: current repository policy,
    official Gentoo sources and tools, and upstream primary evidence before GURU practice
@@ -66,6 +66,7 @@ narrative is useful. Include:
   full commit, commit time, changed files, gate results, executor evidence path and digest;
 - failures: issue, package, branch, failed step, exact error, attempts, and retained work state;
 - skips or escalations: issue, package, evidence-based reason, and whether a persistent triage record was written;
+- per item, findings established as pre-existing, with the package history, previous-version result, or bot report that classified them; an explicit empty result when the item has none;
 - checks skipped for environmental reasons, warnings, and residual risk.
 
 Only the coordinating agent may write the report; delegates return structured evidence

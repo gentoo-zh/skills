@@ -49,8 +49,18 @@ Add or change a tracker entry only after verifying the upstream release model.
   follows.
 - Verify prefixes, prerelease handling, tag filtering, and sorting with real upstream
   data. Do not copy options from another package without checking their meaning.
+- When the verified project has moved, propagate it: `HOMEPAGE`, the `metadata.xml`
+  `remote-id`, and every version-tracking URL name the current project, while `SRC_URI`
+  still names the exact artifact that release published.
 - Inspect existing active and commented entries for the package and related variants.
   Preserve a documented reason for leaving an entry disabled.
+- When two entries would track the same upstream source, leave only one active and comment
+  the other out with its reason. A package that can enable automatic bumping is the
+  exception to that rule.
+- The overlay's tracker compares versions with Portage ordering, because the installed
+  version comes from the tree and a PEP440 comparison misreads `_p` and `_rc` and reports a
+  downgrade as an update. Read a tracker result under that ordering and verify the real tag
+  before acting on it.
 - Preserve overlay-specific keys such as `github_account`; they are not nvchecker source
   options. Change them only when the live workflow or a maintainer provides the required
   evidence.

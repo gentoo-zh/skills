@@ -36,9 +36,11 @@ format is inconvenient.
 
 - Check the main Gentoo repository's `licenses/` before adding a local license. Reuse an
   identical existing license name; do not maintain an overlay duplicate that can drift.
-- When the required license is absent from the main tree, follow the live overlay policy
-  for adding its complete text under `licenses/`. A link or summary is sufficient only
-  when the current repository policy and source terms explicitly permit that form.
+- When the required license is absent from the main tree, add its complete text under
+  `licenses/`, add it to the matching group in `profiles/license_groups`, and set `RESTRICT`
+  from its own distribution terms. All three land in the same commit. A link or summary is
+  sufficient only when the current repository policy and source terms explicitly permit
+  that form.
 - Express all applicable licenses in `LICENSE`. Include the main work and bundled works
   according to the official Devmanual syntax; do not substitute the license of a related
   project, website, or third-party component.

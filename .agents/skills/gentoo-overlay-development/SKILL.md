@@ -45,7 +45,11 @@ directory layout or another overlay.
    affected surfaces from evidence, and load only the references required by that route.
    Apparent change size never weakens the live capability contract or Gentoo review.
 2. Read [ebuild-change-workflow.md](references/ebuild-change-workflow.md) for a change to
-   an existing package and its direct support files, including a QA-only correction.
+   an existing package and its direct support files, including a QA-only correction. When
+   one comparison of the old and new release proves the artifact set, build inputs,
+   dependencies, USE behavior, patches, licenses, and installed layout unchanged, that
+   comparison is the evidence: keep the full gate set, and do not reopen a reference or
+   rerun an analyzer for a surface it already settled.
 3. Read [package-lifecycle.md](references/package-lifecycle.md) for a new package,
    keyword change, move, rename, version or package removal.
 4. Read [repository-development.md](references/repository-development.md) for an eclass,
@@ -58,9 +62,11 @@ directory layout or another overlay.
 8. For changed source topology, prebuilt artifacts, patches, licenses, redistribution,
    generated bundles, or high-risk distfiles, follow
    [artifacts-and-licensing.md](references/artifacts-and-licensing.md).
-9. Make the smallest evidence-backed edit. Keep global scope metadata-safe, keep USE
+9. For an installed desktop entry, application id, or bundled browser engine, follow
+   [desktop-integration.md](references/desktop-integration.md).
+10. Make the smallest evidence-backed edit. Keep global scope metadata-safe, keep USE
    branches consistent, and keep every referenced file in the same change.
-10. Stop instead of guessing a version, dependency, slot, artifact, checksum, license,
+11. Stop instead of guessing a version, dependency, slot, artifact, checksum, license,
    restriction, keyword, patch status, or installed layout.
 
 ## Verify the Result

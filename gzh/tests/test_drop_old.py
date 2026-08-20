@@ -47,6 +47,13 @@ def test_drop_revision_sort(tmp_path):
     assert [p.name for p in kept] == ["foo-1.0-r2.ebuild"]
 
 
+def test_drop_default_keeps_one_release_version(tmp_path):
+    d = _pkgdir(tmp_path, ["1.0", "1.1", "9999"])
+    dropped, kept = drop_candidates(list_ebuilds(d, "foo"), "foo")
+    assert [p.name for p in dropped] == ["foo-1.0.ebuild"]
+    assert sorted(p.name for p in kept) == ["foo-1.1.ebuild", "foo-9999.ebuild"]
+
+
 def test_drop_nothing_when_within_keep(tmp_path):
     d = _pkgdir(tmp_path, ["1.0", "2.0"])
     dropped, kept = drop_candidates(list_ebuilds(d, "foo"), "foo", keep=2)

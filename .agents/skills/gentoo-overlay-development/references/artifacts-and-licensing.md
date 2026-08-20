@@ -16,12 +16,19 @@ Read exact release material before editing `SRC_URI`, `Manifest`, `PATCHES`, `LI
 2. Verify every archive, generated dependency bundle, and per-architecture artifact by
    filename, source, release, architecture, expected size, and available signature or
    digest evidence.
-3. Preserve the established artifact host unless primary evidence and live repository
-   policy authorize a migration. Do not invent a mirror, substitute a nearby archive, or
-   use an expiring authenticated URL.
-4. Give changed content a distinct distfile name. Investigate reused names with changed
-   bytes before updating a Manifest.
-5. Regenerate the Manifest with the repository-approved command and inspect every changed
+3. Preserve the established artifact host and its existing filename convention unless
+   primary evidence and live repository policy authorize a migration that changes both. Do
+   not invent a mirror, substitute a nearby archive, assume an upstream location for an
+   artifact the existing `SRC_URI` fetches elsewhere, or use an expiring authenticated URL.
+4. Prove that every versioned dependency, vendor, crate, or `node_modules` artifact already
+   exists for the new version before referencing it; otherwise the fetch returns 404.
+5. Give changed content a distinct distfile name. Investigate reused names with changed
+   bytes before updating a Manifest. For an in-place replacement of an existing distfile,
+   verify provenance, contents, the producing tag or commit, available signatures, and
+   licenses, use a distinct distfile name, and revise the ebuild.
+6. Cross-check a large distfile's size against its source, so a truncated download cannot
+   produce a plausible but invalid Manifest entry.
+7. Regenerate the Manifest with the repository-approved command and inspect every changed
    entry. Follow the official
    [Manifest guidance](https://devmanual.gentoo.org/general-concepts/manifest/).
 

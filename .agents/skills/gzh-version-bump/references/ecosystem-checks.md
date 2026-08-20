@@ -42,6 +42,10 @@ or tool output. Follow the evidence order in [official-sources.md](official-sour
 - Classify dependencies by when they are needed. Use the PMS and the Devmanual rather
   than copying `DEPEND`, `RDEPEND`, `BDEPEND`, `IDEPEND`, or `PDEPEND` from a similar
   package.
+- A raised toolchain floor that the Gentoo tree does not yet provide blocks publication.
+  Hand over the compare link and state that the pull request must be opened as a draft,
+  citing the upstream declaration and the current tree version on packages.gentoo.org, for
+  example `>=dev-lang/go-1.26.5` while the tree has 1.26.4.
 - Read the current documentation and source of every inherited eclass. Check supported
   EAPIs, variables that must be set before `inherit`, exported phases, and defaults.
 - Exercise each changed USE state and run the reliable upstream test subset with
@@ -73,8 +77,8 @@ dependency probes. A match is a review target, not an automatic violation.
   release. Regenerate `CRATES`, `GIT_CRATES`, or vendor data from the new lock file
   using the current cargo eclass workflow.
 - Treat upstream `rust-version` as a minimum and reconcile it with `RUST_MIN_VER` and
-  the current Rust eclass. Do not invent an upper bound without a demonstrated
-  incompatibility.
+  the current Rust eclass. No eclass reads it for you. Do not invent an upper bound without
+  a demonstrated incompatibility.
 - Verify that all crates and git dependencies resolve offline. Preserve exact git
   source identities required by the lock file.
 - Let Portage control stripping and debug handling. Remove upstream linker settings
@@ -83,9 +87,10 @@ dependency probes. A match is a review target, not an automatic violation.
 ## Go
 
 - Compare the new `go.mod`, `go.sum`, workspace files, and generated dependency data.
-- Treat the `go` directive as the minimum language/toolchain requirement and reconcile
-  it with the package's `BDEPEND` and the current go-module eclass. Under the overlay's
-  `GOTOOLCHAIN=local` policy, do not treat the `toolchain` suggestion as a minimum.
+- Treat the `go` directive as the minimum language and toolchain requirement and reconcile
+  it with the package's `>=dev-lang/go` `BDEPEND` and the current go-module eclass. No
+  eclass reads it for you. Under the overlay's `GOTOOLCHAIN=local` policy, the `toolchain`
+  line is only a suggestion and sets no floor.
 - Verify module data offline and ensure every versioned dependency archive belongs to
   the target release.
 - Preserve useful version injection flags, but let Portage control stripping and debug
@@ -119,7 +124,9 @@ dependency probes. A match is a review target, not an automatic violation.
 
 - Validate installed `.desktop` files with the same tool used by the current Portage
   path when the package installs them. Fix the file or use a documented, path-scoped QA
-  exception only for a verified false positive.
+  exception only for a verified false positive. When the entry, its application id, or a
+  bundled browser engine changes, follow the desktop-entry review in the
+  `gentoo-overlay-development` skill's `desktop-integration.md`.
 - Perform the clean install and isolated elog check required by the live overlay
   workflow. Treat every saved `qa`, `warn`, or `error` message as evidence to
   investigate.

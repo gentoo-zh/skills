@@ -13,7 +13,7 @@ def list_ebuilds(pkg_dir: Path, pn: str) -> list[Path]:
     return list(Path(pkg_dir).glob(f"{pn}-*.ebuild"))
 
 
-def drop_candidates(ebuilds: list[Path], pn: str, keep: int = 2,
+def drop_candidates(ebuilds: list[Path], pn: str, keep: int = 1,
                     vercmp=vercmp) -> tuple[list[Path], list[Path]]:
     liveup: list[Path] = []
     rest: list[tuple[str, Path]] = []
@@ -44,7 +44,7 @@ def _enumerate_pkgs(root: Path, target: str) -> list[str]:
     return sorted(out)
 
 
-def run_drop_old(target: str, keep: int = 2, apply: bool = False,
+def run_drop_old(target: str, keep: int = 1, apply: bool = False,
                  overlay_root: Path | None = None) -> dict:
     if apply:
         raise ValueError(

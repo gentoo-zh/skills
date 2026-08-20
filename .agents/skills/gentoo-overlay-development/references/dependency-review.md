@@ -4,6 +4,12 @@ Classify dependencies by observed behavior under the active EAPI. Use the
 [Gentoo dependency guide](https://devmanual.gentoo.org/general-concepts/dependencies/)
 and the current Package Manager Specification for variable and dependency syntax.
 
+## Contents
+
+- [Build the Evidence Set](#build-the-evidence-set)
+- [Declare the Relationship](#declare-the-relationship)
+- [Check Impact](#check-impact)
+
 ## Build the Evidence Set
 
 1. Read upstream build files, lock files, source imports, linker output, test
@@ -14,6 +20,9 @@ and the current Package Manager Specification for variable and dependency syntax
    control dependency generation.
 4. Record the consumer action, phase, USE state, provider atom, slot or version
    requirement, and evidence for each direct dependency.
+5. Accept only observed behavior as evidence for an atom: a linked SONAME, a build-file
+   `dependency()`, `find_package`, or `pkg-config` call, a `dlopen`ed library, or a program
+   a phase runs. Another distribution's control file is not evidence.
 
 Do not copy upstream package names into Gentoo atoms without verifying the provider in
 the target repository set. Do not infer generated dependency archives, pins, sibling
@@ -62,15 +71,37 @@ that a dependency is behaviorally required or compatible.
 ## Declare the Relationship
 
 - Select `BDEPEND`, `DEPEND`, `RDEPEND`, `IDEPEND`, or `PDEPEND` from the active EAPI's
-  documented install-root, build-host, and phase semantics.
+  documented install-root, build-host, and phase semantics. In EAPI 8 or later, a host tool
+  that must execute while the package is merged, such as a post-install cache generator,
+  belongs in `IDEPEND`.
 - Declare direct requirements only. Do not add transitive libraries merely because they
   appear in another package's dependency closure.
+- Do not declare what the environment already provides: `@system` members, tools an
+  inherited eclass pulls in, or a compiler or libc floor the profile guarantees.
+- Use one atom per package. Fold the version bound, slot, and USE constraints into that
+  single entry.
+- Carry the build system's own version floors into the atom and do not invent one it does
+  not state. Add an upper bound only for a verified incompatibility with no available fix.
 - Use a slot or subslot operator only for a verified provider compatibility or rebuild
   relationship. A rebuild operator does not make fixed prebuilt bytes compatible with a
   changed ABI.
+- Before adding `:=` or `:slot=`, confirm that the provider declares a subslot. Without one
+  the operator binds `slot/slot`, so consumers rebuild when the slot changes but never on an
+  ABI break inside it.
+- For a verified direct ABI linkage, put `:=` or `:slot=` on every `DEPEND` or `RDEPEND` atom
+  that models it, and never copy the operator to a transitive dependency. A provider subslot
+  represents an ABI that requires consumer rebuilds, so re-check provider SONAMEs,
+  private-header ABI, and library renames on every bump.
 - Keep built slot operators out of syntax contexts where the active EAPI forbids them.
+- Before adding or retaining a dependency or an alternative provider, check the removal
+  entries in both the target repository's and the main Gentoo tree's `profiles/package.mask`.
 - Put only verified interchangeable providers in an any-of group and preserve the
-  repository's documented preference order.
+  repository's documented preference order. Keep built slot operators out of `PDEPEND` and
+  outside `|| ( )`.
+- When a package is removed or renamed, update the dependency atoms together with the
+  `elog` and `optfeature` recommendation strings that name it.
+- Never derive a sibling package's version from `${PV}` without verifying that the derived
+  atom exists and resolves.
 - Make a USE condition control the dependency and every corresponding build option,
   source, test, and installed component. Check both enabled and disabled states.
 - Gate test-only inputs on the same condition that runs the tests. Retain a reliable test

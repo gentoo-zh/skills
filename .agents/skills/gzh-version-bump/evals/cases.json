@@ -272,6 +272,28 @@
       "expected": [
         "do not apply the gentoo-zh version bump workflow"
       ]
+    },
+    {
+      "id": "supersede-old-version",
+      "prompt": "Bump app-misc/example from 2.4.1 to 2.4.2; nothing depends on it and the ebuild body is unchanged.",
+      "should_trigger": true,
+      "expected": [
+        "drop the superseded version by default and commit `add NEW, drop OLD`",
+        "check reverse dependencies, slots, and keywords before removing the old ebuild",
+        "keep the old version only for a stated policy reason and record that reason",
+        "treat `gzh drop-old` output as a version-ordered candidate list, not a retention decision"
+      ]
+    },
+    {
+      "id": "routine-rename-scope",
+      "prompt": "Bump dev-util/example to 1.9.4. The release changes only the source tarball.",
+      "should_trigger": true,
+      "expected": [
+        "compare the two releases once to classify the change instead of scanning every surface repeatedly",
+        "load only the finish pipeline and no specialist reference while the comparison shows no changed surface",
+        "run the baseline gates without repeating a check that already passed on the same tree",
+        "change only what the new release invalidates instead of rewriting or restyling the ebuild"
+      ]
     }
   ]
 }

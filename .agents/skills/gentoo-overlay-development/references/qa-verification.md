@@ -8,6 +8,8 @@ with guessed equivalents.
 
 - [Style and Structural Review](#style-and-structural-review)
 - [Manifest and Package QA](#manifest-and-package-qa)
+- [Triage a Finding](#triage-a-finding)
+- [Review the Change](#review-the-change)
 - [Build and Tests](#build-and-tests)
 - [Install and Elog](#install-and-elog)
 - [Completion Rule](#completion-rule)
@@ -31,11 +33,14 @@ with guessed equivalents.
 2. Review changed entries against the expected filenames, sizes, digests, architectures,
    and retained ebuilds. A valid digest proves integrity, not origin or permission.
 3. Run the repository's package-scoped `pkgcheck` gate with its required scope and
-   severity.
+   severity. Iterate with the narrowest relevant package check and rerun the command that
+   exposed each failure.
 4. Run repository or commit scans, including network checks, only with the exact
    repository-defined range and remote behavior.
 5. Investigate each finding from source and current tool documentation. Do not silence a
-   genuine defect or treat a transport failure as a passing URL check.
+   genuine defect or treat a transport failure as a passing URL check. Retain a notice only
+   when it is a documented false positive or unavoidable, recording its rationale and
+   remaining risk, and never rewrite working behavior merely to satisfy a checker.
 
 When a portable, read-only `pkgcheck` report is useful and live policy has supplied the
 identity and scope, run from this skill directory:
@@ -64,6 +69,22 @@ gzh qa category/package --profile stable --arch amd64
 These selectors constrain pkgcheck only. They do not establish a build, install, runtime,
 or architecture test result.
 
+## Triage a Finding
+
+- Before treating a finding as introduced by the change, read the package history and the
+  previous version's result. Report a finding that predates the change as pre-existing.
+- When the resolved capability contract records a QA bot that reports on the review record,
+  read that report too: it names the commit and packages it scanned, so read it instead of
+  guessing what CI saw.
+- Do not repeat a check that already passed on the same tree: no rebuilding what already
+  built clean, no rerunning a scan that already passed. A rebase or a new commit makes an
+  earlier commit scan stale and requires a rerun, and staleness never excuses a gate live
+  policy requires.
+- A network result is evidence about the running host only. An edge that returns 403 here
+  may serve the same URL elsewhere, so re-check a flagged URL from a second network before
+  calling it dead. CI that runs its QA scan without network checks proves nothing about
+  those keywords.
+
 ## Build and Tests
 
 Apply live build gates to every covered surface. Add USE matrices and upstream tests only when relevant:
@@ -76,7 +97,9 @@ Apply live build gates to every covered surface. Add USE matrices and upstream t
    Prefer the repository-approved package test driver when it can enumerate profiles and
    USE combinations. Record the exact profile, USE state, test feature, command, and tool
    version; a default build does not prove that the test phase ran.
-4. Keep the largest reliable subset when individual tests require unavailable resources.
+4. Gate a network-dependent test suite with `PROPERTIES="test? ( test_network )"` only
+   when the package has `IUSE=test`; otherwise use `PROPERTIES="test_network"`.
+5. Keep the largest reliable subset when individual tests require unavailable resources.
    Record the exact skipped behavior and impact. Use a broad test restriction only after
    current evidence proves no reliable subset remains.
 
@@ -94,6 +117,15 @@ Apply live build gates to every covered surface. Add USE matrices and upstream t
 5. Run a trusted minimal runtime check when supported. Record unavailable hardware,
    sessions, accounts, architectures, or external services as unverified with their
    impact.
+
+## Review the Change
+
+- Stage only the owned paths, then review the staged diff and its diffstat before creating a
+  commit. Reject unrelated hunks, debug output, missing `files/` assets, and unintended
+  `Manifest` entries.
+- Verify every patch, substitution, generator, and manual or glob install against the
+  intended release source and the final installed files, modes, and license notices, not
+  against command exit status alone.
 
 ## Completion Rule
 

@@ -139,6 +139,11 @@ filesystem and ELF loader search paths; it does not establish Gentoo provider at
 - Add runtime dependencies for system libraries and programs that the installed package
   actually links or invokes. Do not add dependencies for libraries retained inside the
   private bundle.
+- An unresolved `DT_NEEDED` entry is a runtime defect even when QA is suppressed. Resolve
+  it through a verified bundled layout or a genuine system `RDEPEND`; never suppress it.
+- A private module may legitimately lack a SONAME, but every unusual RPATH needs
+  object-specific justification. A retained private blob may use a verified literal
+  `'$ORIGIN/...'` RPATH.
 - Static `DT_NEEDED` inspection does not reveal every `dlopen` target or helper process.
   Confirm those through upstream documentation, source or wrapper inspection, and a
   controlled runtime test.
@@ -146,6 +151,8 @@ filesystem and ELF loader search paths; it does not establish Gentoo provider at
   compatible with a new ABI. Constrain verified provider slots or versions when needed.
 - Change RPATH, replace a needed SONAME, or remove a bundled component only after
   verifying the runtime layout and ABI. Prefer an upstream fix.
+- For a source-built object, repair the build, link, or install system first. Use `patchelf`
+  only as an evidence-backed fallback, and declare it in `BDEPEND` when used.
 - Replace a bundled library with a system library only after checking SONAME, symbol
   versions, required interfaces, launcher configuration, and actual startup behavior.
 - Remove foreign-architecture or foreign-OS components only when the selected package

@@ -99,8 +99,10 @@ Secondary sources include the
    python3 <skills-root>/gentoo-overlay-development/scripts/source_manager.py show overlay-policy
    ```
 
-4. Read every ebuild for the target package, `metadata.xml`, referenced files, relevant
-   history, and the current source for every inherited eclass.
+4. Read the package inventory the skill's evidence step already collected. Widen it to the
+   remaining ebuilds, the full package history, or an inherited eclass's current source only
+   when a changed surface, a finding, a shared referenced file, or a requested ebuild change
+   needs that evidence. Do not re-collect what the first pass established.
 5. Record the source URL, check date, claim, scope, and whether the evidence is normative,
    package-specific, precedent, or inference.
 

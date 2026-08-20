@@ -22,7 +22,9 @@ size:
 
 ## Select a Current Precedent
 
-Before adding custom variables, phase code, or QA exceptions, inspect the exact package
+Before adding custom variables, phase code, or QA exceptions, find how the current Gentoo
+tree or the target repository already solves the same problem and take that form. Prefer
+the local main tree at `/var/db/repos/gentoo` when it is present. Inspect the exact package
 in the current Gentoo tree when it exists. Then inspect its current history and only the
 smallest genuinely comparable sibling. Match the source or prebuilt model, archive
 format, build system, installed layout, runtime integration, and eclass contract. Product
@@ -31,8 +33,9 @@ family or directory proximity alone is insufficient.
 Prefer an established eclass helper and the simpler current phase pattern when it covers
 the verified requirement. Do not copy a large source-build ebuild into a prebuilt
 package, retain obsolete workarounds, or reproduce code already owned by an eclass.
-Precedent remains advisory and never overrides PMS, the Devmanual, eclass documentation,
-upstream facts, or live repository policy.
+A construct with no precedent in either tree needs a stated reason. Precedent otherwise
+remains advisory and never overrides PMS, the Devmanual, eclass documentation, upstream
+facts, or live repository policy.
 
 ## Load and Run by Changed Surface
 

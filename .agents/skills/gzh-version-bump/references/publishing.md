@@ -3,12 +3,40 @@
 Read this file only after the user separately asks to publish or update a pull request.
 Complete the local finish pipeline before preparing publication.
 
+## Decide What May Be Opened
+
+Open the pull request only for a routine bump: an ebuild rename plus `gzh manifest`, or a
+version variable such as a build id, with nothing else changed. That still requires the
+per-pull-request confirmation below.
+
+The title is the `pkgdev` English subject verbatim. Where the branch carries more than one
+commit, use the subject of the commit carrying the main change.
+
+Every other change stops at the personal fork. Push the topic branch, hand the user the
+drafted subject and body with the compare link against canonical `master`, and let them
+open the pull request:
+
+```text
+https://github.com/gentoo-zh/overlay/compare/master...<fork-owner>:<fork-repo>:<branch>
+```
+
+Hand over the same way, stating that the pull request must be opened as a draft, when the
+change raises a toolchain floor the Gentoo tree does not yet provide.
+
 ## Prepare and Confirm the Pull Request
 
 1. Fetch the canonical remote and rebase the topic branch onto its current `master`.
-2. Re-run every gate invalidated by the rebase.
+   Compare and open against canonical `master`, never the personal fork's `master`; the
+   fork lags and inflates the diff with unrelated commits.
+2. Re-run every gate invalidated by the rebase. An earlier commit scan no longer covers the
+   rebased commit.
 3. Re-run `gzh urls` when the rebase changed its commit range or inputs.
-4. Build the pull request body above the live template marker. Preserve the template and
+4. Write the pull request body in Chinese when the human directing this work item writes in
+   Chinese and otherwise in English, never both. A routine or behavior-neutral change that
+   closes an overlay issue needs only `Closes #N`. Keep that reference bare in the body:
+   never pass its number or URL to `pkgdev commit -b/--bug` or `-c/--closes`, whose bare
+   numeric value means a Gentoo Bugzilla ID, and never rewrite it as a Bugzilla URL.
+   Build the pull request body above the live template marker. Preserve the template and
    tick only checks that actually ran. Follow the live `AGENTS.md` for the description;
    do not turn broader checklist wording into routine passing-test or tested-architecture
    prose. Do not let an agent attest the human review box. Reuse only the verified causal
@@ -26,7 +54,9 @@ Complete the local finish pipeline before preparing publication.
 6. Recompute every confirmed plan immediately before publication. Stop when its head SHA,
    base SHA, base-sensitive file set, title, body, or live template changes.
 7. Push only the topic branch to the uniquely identified personal fork. Resolve the fork
-   owner from `gh api user`; never push `master` or a canonical remote.
+   owner from `gh api user`; never push `master` or a canonical remote. Use
+   `--force-with-lease` after a rebase. A missing or ambiguous personal fork blocks
+   publishing, not local editing.
 8. Run `gh pr create` with the confirmed title and complete body, including the preserved
    template. Do not change either after confirmation. A draft pull request is not an
    exception to the confirmation gate.
@@ -34,6 +64,8 @@ Complete the local finish pipeline before preparing publication.
    SHA, and final pull request state. For a failure, inspect the failing job log and apply
    the complete post-commit repair loop from the finish pipeline before pushing a
    replacement commit.
+10. Re-fetch the canonical remote before stating that the commit or pull request is merged,
+    and before basing follow-up work on it. A stale ref reports the opposite.
 
 When live policy explicitly permits a local install skip because the environment cannot
 merge, publication may proceed only when the exact install and elog risk is included in
