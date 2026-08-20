@@ -42,10 +42,20 @@ def expand_env_path(name: str, default: Path) -> Path:
 
 
 def codex_destination(home: Path | None = None) -> Path:
+    # Codex scans $HOME/.agents/skills for user skills. CODEX_HOME relocates
+    # config.toml, not that scan, so installing under it would go undiscovered.
     home = home or Path.home()
+    return home / ".agents" / "skills"
+
+
+def legacy_codex_destinations(home: Path | None = None) -> list[Path]:
+    """Paths a previous install may own but Codex no longer scans."""
+    home = home or Path.home()
+    paths = [home / ".codex" / "skills"]
     configured = os.environ.get("CODEX_HOME")
-    return ((Path(configured).expanduser() / "skills") if configured
-            else home / ".agents" / "skills")
+    if configured:
+        paths.append(Path(configured).expanduser() / "skills")
+    return list(dict.fromkeys(paths))
 
 
 def destinations(clients: list[str]) -> dict[Path, list[str]]:
@@ -78,8 +88,7 @@ def all_known_destinations() -> list[Path]:
     home = Path.home()
     paths = [
         codex_destination(home),
-        home / ".agents" / "skills",
-        home / ".codex" / "skills",
+        *legacy_codex_destinations(home),
         expand_env_path("CLAUDE_CONFIG_DIR", home / ".claude") / "skills",
         expand_env_path(
             "XDG_CONFIG_HOME", home / ".config") / "opencode" / "skills",
@@ -89,8 +98,7 @@ def all_known_destinations() -> list[Path]:
 
 def codex_discovery_destinations() -> list[Path]:
     home = Path.home()
-    paths = [codex_destination(home), home / ".agents" / "skills",
-             home / ".codex" / "skills"]
+    paths = [codex_destination(home), *legacy_codex_destinations(home)]
     return list(dict.fromkeys(paths))
 
 

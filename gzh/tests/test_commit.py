@@ -55,8 +55,9 @@ def test_commit_disables_pkgdev_scan(tmp_path):
     assert args[args.index("--scan") + 1] == "false"
 
 
-def test_commit_gpg_signs_when_a_key_is_configured(tmp_path):
+def test_commit_gpg_signs_when_a_key_is_configured(tmp_path, monkeypatch):
     seen = {}
+    monkeypatch.setattr("gzh.commit.shutil.which", lambda name: "/usr/bin/gpg")
 
     def fake_run(args, **kw):
         if args == ["git", "rev-parse", "HEAD"]:
@@ -68,6 +69,22 @@ def test_commit_gpg_signs_when_a_key_is_configured(tmp_path):
 
     run_commit([tmp_path / "foo-1.0.0.ebuild"], cwd=tmp_path, runner=fake_run)
     assert "--gpg-sign" in seen["args"]
+
+
+def test_commit_omits_gpg_sign_when_gpg_is_unavailable(tmp_path, monkeypatch):
+    seen = {}
+    monkeypatch.setattr("gzh.commit.shutil.which", lambda name: None)
+
+    def fake_run(args, **kw):
+        if args == ["git", "rev-parse", "HEAD"]:
+            return subprocess.CompletedProcess(args, 0, stdout="old-head\n", stderr="")
+        if args[:3] == ["git", "config", "--get"]:
+            return subprocess.CompletedProcess(args, 0, stdout="ABCD1234\n", stderr="")
+        seen["args"] = args
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    run_commit([tmp_path / "foo-1.0.0.ebuild"], cwd=tmp_path, runner=fake_run)
+    assert "--gpg-sign" not in seen["args"]
 
 
 def test_commit_omits_gpg_sign_without_a_key(tmp_path):

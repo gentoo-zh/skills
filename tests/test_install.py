@@ -196,18 +196,18 @@ def test_bundle_refresh_rolls_back_when_state_write_fails(
     assert retired in state["targets"][0]["skills"]
 
 
-def test_default_clients_use_separate_codex_and_opencode_paths_when_configured(tmp_path):
+def test_default_clients_share_agents_scope_even_with_codex_home_set(tmp_path):
     env = environment(tmp_path)
     invoke(INSTALLER, ["--skills-only"], env)
 
     for name in SKILL_NAMES:
-        assert (tmp_path / "codex" / "skills" / name).is_symlink()
-        assert (tmp_path / "xdg" / "opencode" / "skills" / name).is_symlink()
+        assert (tmp_path / "home" / ".agents" / "skills" / name).is_symlink()
+        assert not (tmp_path / "codex" / "skills" / name).exists()
+        assert not (tmp_path / "xdg" / "opencode" / "skills" / name).exists()
         assert not (tmp_path / "claude" / "skills" / name).exists()
     status = invoke(INSTALLER, ["--skills-only", "--status"], env)
-    assert "codex" in status.stdout
-    assert "opencode" in status.stdout
-    assert status.stdout.count("link, current") == 2 * len(SKILL_NAMES)
+    assert "codex+opencode" in status.stdout
+    assert status.stdout.count("link, current") == len(SKILL_NAMES)
 
 
 def test_default_clients_share_official_agents_scope(tmp_path):
@@ -354,10 +354,13 @@ def test_codex_install_refuses_legacy_directory_duplicate(tmp_path):
 
 def test_legacy_codex_copy_remains_refreshable(tmp_path):
     env = environment(tmp_path)
-    env["CODEX_HOME"] = str(tmp_path / "home" / ".codex")
     invoke(INSTALLER, ["codex", "--skills-only", "--copy"], env)
-    copied = (
-        tmp_path / "home" / ".codex" / "skills" / SKILL_NAMES[0] / "SKILL.md")
+    current = tmp_path / "home" / ".agents" / "skills"
+    legacy_root = tmp_path / "home" / ".codex" / "skills"
+    legacy_root.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(current, legacy_root)
+    shutil.rmtree(current)
+    copied = legacy_root / SKILL_NAMES[0] / "SKILL.md"
     copied.write_text("stale\n", encoding="utf-8")
     env.pop("CODEX_HOME")
 
@@ -430,7 +433,7 @@ def test_status_reports_cross_transaction_opencode_duplicates(tmp_path):
     assert "duplicate OpenCode skills are discoverable" in result.stderr
 
 
-def test_status_uses_recorded_codex_profile_after_environment_changes(tmp_path):
+def test_codex_destination_ignores_codex_home(tmp_path):
     env = environment(tmp_path)
     invoke(INSTALLER, ["codex", "--skills-only"], env)
     env.pop("CODEX_HOME")
@@ -438,14 +441,14 @@ def test_status_uses_recorded_codex_profile_after_environment_changes(tmp_path):
     result = invoke(
         INSTALLER, ["codex", "--skills-only", "--status"], env)
 
-    assert str(tmp_path / "codex" / "skills") in result.stdout
-    assert str(tmp_path / "home" / ".agents" / "skills") not in result.stdout
+    assert str(tmp_path / "home" / ".agents" / "skills") in result.stdout
+    assert str(tmp_path / "codex" / "skills") not in result.stdout
 
 
 def test_copy_status_refresh_and_uninstall(tmp_path):
     env = environment(tmp_path)
     invoke(INSTALLER, ["codex", "--skills-only", "--copy"], env)
-    copied = tmp_path / "codex" / "skills" / SKILL_NAMES[0] / "SKILL.md"
+    copied = tmp_path / "home" / ".agents" / "skills" / SKILL_NAMES[0] / "SKILL.md"
     copied.write_text("stale\n", encoding="utf-8")
     status = invoke(
         INSTALLER, ["codex", "--skills-only", "--status"], env, expected=1)
@@ -480,7 +483,7 @@ def test_copy_stage_failure_removes_partial_discovery_directory(
 
 def test_unowned_destination_is_never_replaced(tmp_path):
     env = environment(tmp_path)
-    destination = tmp_path / "codex" / "skills" / SKILL_NAMES[0]
+    destination = tmp_path / "home" / ".agents" / "skills" / SKILL_NAMES[0]
     destination.mkdir(parents=True)
     sentinel = destination / "keep.txt"
     sentinel.write_text("keep\n", encoding="utf-8")
@@ -496,7 +499,7 @@ def test_unowned_destination_is_never_replaced(tmp_path):
 def test_copy_skill_symlink_marker_cannot_claim_ownership(tmp_path):
     env = environment(tmp_path)
     invoke(INSTALLER, ["codex", "--skills-only", "--copy"], env)
-    destination = tmp_path / "codex" / "skills" / SKILL_NAMES[0]
+    destination = tmp_path / "home" / ".agents" / "skills" / SKILL_NAMES[0]
     marker = destination / ".gzh-skill-install.json"
     outside = tmp_path / "outside-skill-marker.json"
     outside.write_text(marker.read_text(encoding="utf-8"), encoding="utf-8")
@@ -532,7 +535,7 @@ def test_invalid_skill_marker_never_claims_ownership(tmp_path, content):
 def test_combined_uninstall_preflights_gzh_before_removing_skills(tmp_path):
     env = environment(tmp_path)
     invoke(INSTALLER, ["codex", "--skills-only"], env)
-    skill_root = tmp_path / "codex" / "skills"
+    skill_root = tmp_path / "home" / ".agents" / "skills"
     install_root = tmp_path / "gzh-install"
     install_root.mkdir()
     sentinel = install_root / "keep.txt"

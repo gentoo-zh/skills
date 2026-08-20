@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -12,6 +13,20 @@ def signing_key_configured(cwd: Path, runner=subprocess.run) -> bool:
     key = runner(["git", "config", "--get", "user.signingkey"],
                  cwd=cwd, capture_output=True, text=True)
     return key.returncode == 0 and bool(key.stdout.strip())
+
+
+def signing_available(cwd: Path, runner=subprocess.run) -> bool:
+    """Return whether an explicit signing key exists and its program is present.
+
+    A configured key does not prove that GPG can run; the overlay contract omits
+    --gpg-sign when GPG is unavailable, so the signing program must resolve too.
+    """
+    if not signing_key_configured(cwd, runner=runner):
+        return False
+    program = runner(["git", "config", "--get", "gpg.program"],
+                     cwd=cwd, capture_output=True, text=True)
+    name = (program.stdout or "").strip() if program.returncode == 0 else ""
+    return shutil.which(name or "gpg") is not None
 
 
 def _owned_paths(paths: list[Path], cwd: Path) -> tuple[list[str], list[str]]:
@@ -160,10 +175,11 @@ def run_commit(paths: list[Path], cwd: Path,
                 "stderr": head.stderr,
                 **_restore_owned_index(cwd, exact_paths, runner)}
 
-    # The overlay contract adds --gpg-sign only for an explicit user.signingkey.
+    # The overlay contract adds --gpg-sign only for an explicit user.signingkey
+    # whose signing program is present, and omits it when GPG is unavailable.
     # Git still honors commit.gpgsign independently when this option is omitted.
     args = ["pkgdev", "commit", "--scan", "false", "--signoff=true"]
-    if signing_key_configured(cwd, runner=runner):
+    if signing_available(cwd, runner=runner):
         args.append("--gpg-sign")
     if message:
         args += ["--message", message]
