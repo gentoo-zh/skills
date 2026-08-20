@@ -4,6 +4,7 @@ import io
 import json
 import struct
 import tarfile
+import time
 import zipfile
 
 import pytest
@@ -474,6 +475,10 @@ def test_inventory_uses_snapshot_when_path_is_swapped_and_restored(
         parser_sources.append(source)
         result = original_zipfile(source, *args, **kwargs)
         if archive.exists() and saved.exists():
+            # The swap is only observable through ctime, whose resolution is the
+            # kernel clock tick. Leave the swap's tick before restoring so the
+            # round trip cannot collapse into a single unchanged timestamp.
+            time.sleep(0.01)
             archive.rename(replacement)
             saved.rename(archive)
         return result

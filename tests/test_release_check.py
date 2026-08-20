@@ -54,6 +54,10 @@ def initialize_repository(path):
         "GIT_AUTHOR_EMAIL": "release@example.invalid",
         "GIT_COMMITTER_NAME": "Release Test",
         "GIT_COMMITTER_EMAIL": "release@example.invalid",
+        # Isolate from the developer's configuration: tag.forceSignAnnotated
+        # would otherwise turn the lightweight tag below into a signed one.
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_SYSTEM": os.devnull,
     })
     subprocess.run(["git", "init", "-q"], cwd=path, env=environment, check=True)
     subprocess.run(["git", "add", "."], cwd=path, env=environment, check=True)

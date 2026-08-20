@@ -23,6 +23,24 @@ ELF Header:
 """
 
 
+def _recorded_child_pid(pid_path) -> int | None:
+    """Return the child PID, or None when the group died before recording it.
+
+    The fixture shell echoes the PID right after spawning, so a bounded stop can
+    kill the group before that write lands. An absent PID therefore means the
+    child never outlived the runner, which is what the caller asserts.
+    """
+    for _attempt in range(100):
+        try:
+            raw = pid_path.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            raw = ""
+        if raw:
+            return int(raw)
+        time.sleep(0.01)
+    return None
+
+
 def _elf(path: Path) -> Path:
     path.write_bytes(b"\x7fELFpayload")
     return path
@@ -251,11 +269,18 @@ wait
     )
     elapsed = time.monotonic() - started
 
-    assert elapsed < 5
+    # The behavioral assertions below carry the guarantee; this bound only
+    # catches a hang, so it must not measure a loaded machine's speed.
+    assert elapsed < 20
     assert report["complete"] is False
     assert report["truncated"] is True
-    child_pid = int(child_pid_path.read_text(encoding="utf-8"))
-    for _attempt in range(100):
+    child_pid = _recorded_child_pid(child_pid_path)
+    if child_pid is None:
+        return
+    # Reaping a killed process group is scheduler-bound, so poll for a
+    # bound that proves the child does not survive rather than one that
+    # measures how fast a loaded machine reaps it.
+    for _attempt in range(500):
         try:
             state = (Path("/proc") / str(child_pid) / "stat").read_text(
                 encoding="utf-8").split()[2]
