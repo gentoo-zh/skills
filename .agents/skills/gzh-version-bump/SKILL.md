@@ -41,18 +41,31 @@ the existing ebuild; rewrite the ebuild only when the release leaves it unusable
 what made it so. Restyling, reordering, or modernizing an ebuild the release did not
 invalidate is out of scope.
 
-Classify the release once, from one comparison of the two releases: the archive listing or
-asset set, the build metadata and lockfiles, the declared dependencies and options, and the
-licenses. That comparison is the evidence for every routing decision below; do not re-derive
-it later from a fuller scan, and do not open a reference for a facet it proved unchanged.
+Classify the release once, from two inputs. Compare the two upstream releases at the level
+that decides routing: the archive listing or asset set, the build metadata and lockfiles,
+the declared dependencies and options, and the licenses. Then, after the new ebuild exists,
+classify the ebuild side deterministically:
 
-When it proves every facet unchanged, the bump is a routine rename. Read only this file,
+```bash
+gzh surfaces <old-ebuild> <new-ebuild>
+```
+
+The report names each changed surface, follows a changed build-id or version variable
+through to the surface that reads it, and lists anything that changed but matches no
+surface. `rename_only` means the two ebuilds are identical once the version is normalized;
+`header_only` adds a copyright refresh. It classifies the ebuild text only, so an unchanged
+surface still needs the upstream comparison before its review is skipped.
+
+Together those two are the evidence for every routing decision below. Do not re-derive them
+later from a fuller scan, and do not open a reference for a surface they proved unchanged.
+
+When both prove every surface unchanged, the bump is a routine rename. Read only this file,
 [version-retention.md](references/version-retention.md), and
 [finish-pipeline.md](references/finish-pipeline.md); run steps 1, 2, 3, 6, and 8 below and
-skip steps 4, 5, and 7, whose references answer questions this comparison already settled.
+skip steps 4, 5, and 7, whose references answer questions the comparison already settled.
 The retention decision is never skipped: every bump decides whether the superseded version
-is dropped. A single differing facet ends the routine path for that facet alone, and loads
-only the reference the list below names for it.
+is dropped. A single differing surface ends the routine path for that surface alone, and
+loads only the reference the list below names for it.
 
 Route references and specialist tools from verified release differences, never from
 semantic-version size or line count:

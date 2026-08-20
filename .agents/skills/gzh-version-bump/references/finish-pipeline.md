@@ -24,8 +24,8 @@ reference loading and specialist checks only; it never weakens that baseline. Ne
 classify a release from version size or an unchanged ebuild body alone.
 
 A routine rename runs the baseline only: `gzh lint`, `gzh manifest`, `gzh qa`, `gzh build`,
-`gzh merge`, `gzh diff`, `gzh commit`, `gzh urls`. Add nothing else unless a verified
-release difference names the surface it proves.
+`gzh merge`, `gzh surfaces`, `gzh diff`, `gzh commit`, `gzh urls`. Add nothing else unless a
+verified release difference names the surface it proves.
 
 Load and run specialist work only for a surface it can prove:
 
@@ -233,11 +233,16 @@ replace this gate.
 ## 6. Review the Change
 
 ```bash
+gzh surfaces <old-ebuild> <new-ebuild>
 gzh diff <old-ebuild> <new-ebuild>
 git status --short
 git diff --stat
 git diff
 ```
+
+Reconcile the surface report with the intended change: a surface it reports as changed that
+the release did not require is an unintended edit, and an entry under
+`unclassified_changes` is a difference no surface covers, which needs its own explanation.
 
 Reject unrelated changes, debug output, missing referenced files, unexplained dependency
 or license changes, and unintended `Manifest` entries. Confirm that every commit will be

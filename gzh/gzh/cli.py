@@ -27,6 +27,7 @@ from gzh.capabilities import inspect_repository, load_bundled_adapter
 from gzh.check import Gate, run_read_only_checks
 from gzh.commit import run_commit, run_recommit
 from gzh.drop_old import run_drop_old
+from gzh.surfaces import SurfaceError, classify_surfaces
 from gzh.ebuild_parser import parse_ebuild
 from gzh.deps import (DependencyMetadataError, analyze_ebuild_dependencies,
                       compare_ebuild_dependencies)
@@ -502,6 +503,18 @@ def bump_plan_cmd(cat_pkg, new_pv, package_model, assets_evidence):
     click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
     if not report["ok"] or not report["complete"] or not report["can_apply"]:
         raise SystemExit(1)
+
+
+@cli.command("surfaces")
+@click.argument("old", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.argument("new", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+def surfaces_cmd(old, new):
+    """Report which ebuild surfaces differ between two versions."""
+    try:
+        report = classify_surfaces(old, new)
+    except SurfaceError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
 
 
 @cli.command("diff-ebuild")
