@@ -6,8 +6,8 @@ from __future__ import annotations
 PROFILE = {
     "schema_version": 1,
     "adapter_id": "gentoo-zh",
-    "profile_revision": 1,
-    "reviewed_at": "2026-08-04",
+    "profile_revision": 2,
+    "reviewed_at": "2026-08-20",
     "sources": {
         "overlay-policy": {
             "title": "gentoo-zh overlay AGENTS.md",
@@ -18,9 +18,9 @@ PROFILE = {
             "reviewed_evidence": {
                 "kind": "sha256",
                 "value": (
-                    "2d0b8551a72727c32b170e3a8efc6abec06138575fdfa91402096504c9161f33"
+                    "59a2ae4d8d8c8ff233b62b56914ec75213486a0ed9eb2e9225fd61f7146dedc0"
                 ),
-                "checked_at": "2026-08-03T15:48:54Z",
+                "checked_at": "2026-08-20T11:10:43Z",
             },
         },
         "overlay-ci-pkgcheck": {

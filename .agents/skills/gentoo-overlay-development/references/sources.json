@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "checked": "2026-08-04",
+  "checked": "2026-08-20",
   "authorities": [
     "overlay-policy",
     "gentoo-standard",
@@ -129,6 +129,15 @@
       "claude-plugin-marketplaces",
       "claude-discover-plugins",
       "opencode-plugins"
+    ],
+    "gentoo-zh-version-retention-review": [
+      "overlay-policy",
+      "gentoo-tree",
+      "devmanual-removal"
+    ],
+    "desktop-entry-review": [
+      "overlay-policy",
+      "gentoo-qa-policy"
     ]
   },
   "capability_scopes": {
@@ -181,6 +190,15 @@
     ],
     "client-plugin-packaging": [
       "skills-maintenance"
+    ],
+    "gentoo-zh-version-retention-review": [
+      "adapter:gentoo-zh",
+      "comparative-evidence",
+      "portable-core"
+    ],
+    "desktop-entry-review": [
+      "adapter:gentoo-zh",
+      "portable-core"
     ]
   },
   "sources": [
@@ -196,7 +214,10 @@
         "commit",
         "ebuild",
         "prebuilt",
-        "qa"
+        "qa",
+        "retention",
+        "dependency",
+        "desktop"
       ],
       "use": "Live repository policy; highest priority for overlay work.",
       "scope": "adapter:gentoo-zh"

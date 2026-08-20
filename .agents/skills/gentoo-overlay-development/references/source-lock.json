@@ -3,10 +3,10 @@
   "sources": {
     "overlay-policy": {
       "kind": "http",
-      "sha256": "2d0b8551a72727c32b170e3a8efc6abec06138575fdfa91402096504c9161f33",
-      "bytes": 24864,
+      "sha256": "59a2ae4d8d8c8ff233b62b56914ec75213486a0ed9eb2e9225fd61f7146dedc0",
+      "bytes": 31726,
       "final_url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/AGENTS.md",
-      "checked_at": "2026-08-03T15:48:54Z"
+      "checked_at": "2026-08-20T11:10:43Z"
     },
     "overlay-ci-pkgcheck": {
       "kind": "http",
@@ -129,32 +129,32 @@
     },
     "pkgcheck": {
       "kind": "http",
-      "sha256": "f4718ef1cee8e19b29e0e45869e84e969fd9454dc23b6fe8df48cf71f5878d0c",
-      "bytes": 340163,
+      "sha256": "c8c04a550308e91dee8a9c04802796876ddf692bfc2a127ef21fc0c59850b1d2",
+      "bytes": 376865,
       "final_url": "https://pkgcore.github.io/pkgcheck/man/pkgcheck.html",
-      "checked_at": "2026-08-03T15:48:54Z"
+      "checked_at": "2026-08-20T12:32:56Z"
     },
     "pkgdev": {
       "kind": "http",
-      "sha256": "bd818e23870acf01730921734548605e7ca87222de39d2eb9405cc5e6e980ec0",
-      "bytes": 69523,
+      "sha256": "eb4e5e2e83829398b6131b4ffe7d95245d9c6f996d5f49b3cf799d491bf72797",
+      "bytes": 127826,
       "final_url": "https://pkgcore.github.io/pkgdev/man/pkgdev.html",
-      "checked_at": "2026-08-03T15:48:54Z"
+      "checked_at": "2026-08-20T12:32:56Z"
     },
     "gentoo-tree": {
       "kind": "git",
-      "revision": "13e4df7231d602fb0f296ac782bc7218d809e9e4",
-      "checked_at": "2026-08-04T12:25:12Z"
+      "revision": "57ef016a9d21ed83f0ad5954db1c1b8a6011cdaa",
+      "checked_at": "2026-08-20T12:34:00Z"
     },
     "guru": {
       "kind": "git",
-      "revision": "f131c453884f37b1600b0a2231953a3c153ca82c",
-      "checked_at": "2026-08-04T09:28:56Z"
+      "revision": "331fa6e551a4664f648d86643929b64858d63fa8",
+      "checked_at": "2026-08-20T12:34:00Z"
     },
     "guru-contributors": {
       "kind": "mediawiki",
-      "revision": "1444325",
-      "checked_at": "2026-08-03T15:48:54Z"
+      "revision": "1447163",
+      "checked_at": "2026-08-20T12:34:00Z"
     },
     "gentoo-tree-lessons": {
       "kind": "git",
@@ -163,15 +163,15 @@
     },
     "chinese-skill": {
       "kind": "git",
-      "revision": "4693ee2a7ec9d1c2a713d8f2e6b2d9bbba2aae7e",
-      "checked_at": "2026-08-03T15:48:54Z"
+      "revision": "242ec69c089f5dae91cfc7eb3b4dc924d5c1aab0",
+      "checked_at": "2026-08-20T12:34:00Z"
     },
     "agent-skills-spec": {
       "kind": "http",
-      "sha256": "494b0d84537c4d39714bf91e016d31d0731df0380015321cb12040625b22d3f9",
-      "bytes": 6953,
+      "sha256": "b9079c0c10b7930e8c6a20ff2bc10cda2a3343c55185120e3f1116a1a529b220",
+      "bytes": 7166,
       "final_url": "https://raw.githubusercontent.com/agentskills/agentskills/main/docs/specification.mdx",
-      "checked_at": "2026-08-03T20:17:54Z"
+      "checked_at": "2026-08-20T12:32:56Z"
     },
     "openai-skills": {
       "kind": "git",
@@ -180,22 +180,22 @@
     },
     "codex-build-skills": {
       "kind": "http",
-      "sha256": "190e29385af1d57d22fad85fe41a1676f6fe60c562b5234efc37d929c2d79009",
-      "bytes": 11074,
+      "sha256": "e925dc243d22ce13d9b1e3c7c8ab89eaefb996e49dd8519fd08ddcd3860a4732",
+      "bytes": 11076,
       "final_url": "https://learn.chatgpt.com/docs/build-skills.md",
-      "checked_at": "2026-08-03T16:55:52Z"
+      "checked_at": "2026-08-20T12:32:56Z"
     },
     "anthropic-skills": {
       "kind": "git",
-      "revision": "b29e7cf65e5cb78a5ac33d582270551bc74a14eb",
-      "checked_at": "2026-08-03T15:48:54Z"
+      "revision": "0a64e398ec6bb34a494f0c347e8ccae53a862f8e",
+      "checked_at": "2026-08-20T12:34:00Z"
     },
     "claude-skills": {
       "kind": "http",
-      "sha256": "9be360458169056f52477a8a318f1ea9178947a49de5105a254881ae9a3130c1",
-      "bytes": 73711,
+      "sha256": "448fde484cc410c84d871ccffe9c8676f6a5e5fd8ff8330183ef2461fed43575",
+      "bytes": 96949,
       "final_url": "https://code.claude.com/docs/en/skills.md",
-      "checked_at": "2026-08-04T01:02:45Z"
+      "checked_at": "2026-08-20T12:32:56Z"
     },
     "opencode-skills": {
       "kind": "http",
@@ -248,17 +248,17 @@
     },
     "overlay-readme": {
       "kind": "http",
-      "sha256": "46ec37f601d8ddbc984c42c0e8129c9db3555613ed6c624176d4a0d8d6ff2ee2",
-      "bytes": 4893,
+      "sha256": "b8073e0fa35cc38ddb72c419e6c144c5304f05c61466408d3ca700a7a141c8df",
+      "bytes": 5129,
       "final_url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/README.en.md",
-      "checked_at": "2026-08-03T16:43:33Z"
+      "checked_at": "2026-08-20T12:20:00Z"
     },
     "overlay-license-groups": {
       "kind": "http",
-      "sha256": "3b7a961ddaf668d691ad824177263a0ee599214bc76296cbd265ec0fe18dfa26",
-      "bytes": 1063,
+      "sha256": "ecd2ce1a9934c83a3628e9c181291ec6cd4f2db63fdd82441ca64226a0fae2cf",
+      "bytes": 1110,
       "final_url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/profiles/license_groups",
-      "checked_at": "2026-08-04T12:01:12Z"
+      "checked_at": "2026-08-20T12:20:00Z"
     },
     "devmanual-licenses": {
       "kind": "http",
@@ -319,17 +319,17 @@
     },
     "overlay-version-tracking-config": {
       "kind": "http",
-      "sha256": "ebd4d0e07e823e3cf4fa006177c2ce9a97f26338d296efdabedcafec15e8614c",
-      "bytes": 58897,
+      "sha256": "fd305cd48a2a21f2e9e771ae63de9354a114aa3114a58235ce74591574c4cf49",
+      "bytes": 61533,
       "final_url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/.github/workflows/overlay.toml",
-      "checked_at": "2026-08-04T00:10:19Z"
+      "checked_at": "2026-08-20T12:20:00Z"
     },
     "overlay-version-tracking-workflow": {
       "kind": "http",
-      "sha256": "9ea538e3ab2eab981f4742b14909a200ec97d97a5764a37f3b30877a90a9f775",
-      "bytes": 5843,
+      "sha256": "8c13a685041d5c3b6fb8d92c215a4456839093e56327b6846b2d49e1e8ce01b8",
+      "bytes": 5997,
       "final_url": "https://raw.githubusercontent.com/gentoo-zh/overlay/master/.github/workflows/nvchecker.yml",
-      "checked_at": "2026-08-04T00:10:19Z"
+      "checked_at": "2026-08-20T12:20:00Z"
     },
     "portage-ebuild-command": {
       "kind": "http",
@@ -361,8 +361,8 @@
     },
     "portage-source": {
       "kind": "git",
-      "revision": "c1caa6a9ebba7b532bb7564fb265b0e574075750",
-      "checked_at": "2026-08-04T00:10:19Z"
+      "revision": "a4dfa425478c67da25253ff4ed93d8b9ab6f75a4",
+      "checked_at": "2026-08-20T12:34:00Z"
     },
     "devmanual-source": {
       "kind": "git",
@@ -371,13 +371,13 @@
     },
     "pkgcheck-source": {
       "kind": "git",
-      "revision": "5577b93d569bd79a82cbf51cd818b34d3990288a",
-      "checked_at": "2026-08-04T00:10:19Z"
+      "revision": "ecea6f476394450ab253393febb879305051e728",
+      "checked_at": "2026-08-20T12:34:00Z"
     },
     "pkgdev-source": {
       "kind": "git",
-      "revision": "291610e1260bd09ac0d90271da519da7429b39a3",
-      "checked_at": "2026-08-04T00:10:19Z"
+      "revision": "e839d0cf6b0e3bac2517f7be96b29c481bc2c7af",
+      "checked_at": "2026-08-20T12:34:00Z"
     },
     "python-tarfile": {
       "kind": "http",
@@ -416,17 +416,17 @@
     },
     "codex-plugin-packaging": {
       "kind": "http",
-      "sha256": "2e89138d8c01b9b4dc92f449e6fdf626732937d0125988901405d1793700c38c",
-      "bytes": 23083,
+      "sha256": "605face331e44ea6befdc54c63b3d1e560f0595635db9083a20b9bbd19554e18",
+      "bytes": 22899,
       "final_url": "https://developers.openai.com/plugins/build/plugins.md",
-      "checked_at": "2026-08-04T03:53:23Z"
+      "checked_at": "2026-08-20T12:32:56Z"
     },
     "claude-plugin-reference": {
       "kind": "http",
-      "sha256": "3303b0f05c827280cdda9f0b8a1db9d4823aa259ad27924ecb5fb84ffe99d372",
-      "bytes": 90774,
+      "sha256": "dee03b014c2bc3ee8760344525a5289e14402a15e023ee61df49250ee2e479f4",
+      "bytes": 105485,
       "final_url": "https://code.claude.com/docs/en/plugins-reference.md",
-      "checked_at": "2026-08-04T03:53:23Z"
+      "checked_at": "2026-08-20T12:32:56Z"
     },
     "codex-plugin-submission-errors": {
       "kind": "http",
@@ -437,10 +437,10 @@
     },
     "claude-plugin-marketplaces": {
       "kind": "http",
-      "sha256": "f3b67408fe9c1baac520e0a03c904ddc489db95c938f0b561d562f7b7f639dd6",
-      "bytes": 75526,
+      "sha256": "33ae0625956a0a956da0305705cb44eb47dc996304f9ced85f63c27efed91159",
+      "bytes": 97558,
       "final_url": "https://code.claude.com/docs/en/plugin-marketplaces.md",
-      "checked_at": "2026-08-04T03:53:23Z"
+      "checked_at": "2026-08-20T12:32:56Z"
     },
     "opencode-plugins": {
       "kind": "http",
@@ -451,24 +451,24 @@
     },
     "codex-developer-commands": {
       "kind": "http",
-      "sha256": "943d2180c3763d51bdc4460db5e06381bb25be30ad1cf7b65347bb66a0f179e0",
-      "bytes": 48867,
+      "sha256": "0c0a8da89c314369ae0ba9503b0b525dad58e075d8e52db48a034087603fe38c",
+      "bytes": 48974,
       "final_url": "https://learn.chatgpt.com/docs/developer-commands.md?surface=cli",
-      "checked_at": "2026-08-04T04:05:49Z"
+      "checked_at": "2026-08-20T12:32:56Z"
     },
     "openai-plugins": {
       "kind": "http",
-      "sha256": "4f49d3c7b74acdb4403e5df51e262c9b3af5b4e12930ca2b146aa6950a23eda6",
-      "bytes": 10918,
+      "sha256": "d8d105ef59de0e989ad00eb59ba60bd027bcf8d6957724c046b8ff74d27be4da",
+      "bytes": 10822,
       "final_url": "https://learn.chatgpt.com/docs/plugins.md",
-      "checked_at": "2026-08-04T04:05:49Z"
+      "checked_at": "2026-08-20T12:32:56Z"
     },
     "claude-discover-plugins": {
       "kind": "http",
-      "sha256": "c9a4283cf4bd30b160c283bc8f16dc74bd40130d8e2cb031bdc4d0faac928248",
-      "bytes": 28411,
+      "sha256": "60b15a31df37efddcbced8b23230969e43e13cacf4ef9f6ed4bd580f4b8cf096",
+      "bytes": 32317,
       "final_url": "https://code.claude.com/docs/en/discover-plugins.md",
-      "checked_at": "2026-08-04T04:05:49Z"
+      "checked_at": "2026-08-20T12:32:56Z"
     },
     "portage-egencache": {
       "kind": "http",
@@ -497,5 +497,5 @@
       "checked_at": "2026-08-04T08:59:16Z"
     }
   },
-  "updated_at": "2026-08-04T12:25:12Z"
+  "updated_at": "2026-08-20T12:34:00Z"
 }
