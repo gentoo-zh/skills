@@ -1,7 +1,7 @@
 {
   "name": "gentoo-overlay-skills",
-  "version": "0.3.2",
-  "description": "Evidence-backed workflows for developing and maintaining Gentoo overlays.",
+  "version": "1.0.0",
+  "description": "Step-by-step skills for gentoo-zh overlay work: bump, new package, review. Policy stays in the overlay's AGENTS.md.",
   "author": {
     "name": "gentoo-zh",
     "url": "https://github.com/gentoo-zh"
