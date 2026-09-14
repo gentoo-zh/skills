@@ -110,11 +110,12 @@ After the package-specific work, run every live hard gate and applicable step in
 
 1. `gzh lint`
 2. `gzh manifest`
-3. `gzh qa`
-4. `gzh build` and `gzh merge`
-5. `gzh diff`
-6. `gzh commit`
-7. `gzh urls`
+3. `gzh floors`
+4. `gzh qa`
+5. `gzh build` and `gzh merge`
+6. `gzh diff`
+7. `gzh commit`
+8. `gzh urls`
 
 This baseline applies even to a verified copy-only bump. Run additional tools only for
 the surface they prove: dependency analysis for dependency or USE changes; artifact

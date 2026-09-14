@@ -35,6 +35,7 @@ from gzh.dependency_query import query_reverse_dependencies
 from gzh.executor import (ExecutorError, InstallRequest, create_commit_patch,
                           create_executor, load_executor_config)
 from gzh.executor_evidence import verify_evidence
+from gzh.floors import FloorError, check_floors
 from gzh.github_observation import (GitHubPublicationProvider,
                                     GitHubReadError, read_ci)
 from gzh.image_qa import inspect_image
@@ -444,6 +445,45 @@ def lint_cmd(ebuild):
     click.echo(_json.dumps(issues, indent=2, ensure_ascii=False))
     if any(i["severity"] == "error" for i in issues):
         raise SystemExit(1)
+
+
+@cli.command("floors")
+@click.argument("ebuild", type=click.Path(exists=True, dir_okay=False,
+                                           path_type=Path))
+@click.option("--distdir", type=click.Path(file_okay=False, path_type=Path),
+              default=None, help="where the distfiles are (default: portageq DISTDIR)")
+@click.option("--keep", type=click.Path(file_okay=False, path_type=Path),
+              default=None, help="unpack here and leave it for inspection")
+def floors_cmd(ebuild, distdir, keep):
+    """Predict the go/rust floor and pre-stripped elog notices from the distfiles."""
+    if distdir is None:
+        proc = subprocess.run(["portageq", "distdir"], capture_output=True, text=True)
+        if proc.returncode or not proc.stdout.strip():
+            raise click.ClickException("cannot resolve DISTDIR; pass --distdir")
+        distdir = Path(proc.stdout.strip())
+    try:
+        report = check_floors(ebuild, distdir, keep=keep)
+    except FloorError as exc:
+        click.echo(str(exc), err=True)
+        raise SystemExit(2)
+    click.echo(_json.dumps(report, indent=2, ensure_ascii=False))
+    if not report["ok"]:
+        raise SystemExit(1)
+
+
+@cli.command("needed-deps")
+@click.argument("package")
+@click.option("--ebuild", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None, help="read RDEPEND from this ebuild instead of the VDB")
+@click.option("--vdb", type=click.Path(file_okay=False, path_type=Path),
+              default=Path("/var/db/pkg"), show_default=True)
+def needed_deps_cmd(package, ebuild, vdb):
+    """Compare an installed package's NEEDED sonames with its direct RDEPEND."""
+    from gzh.needed_deps import main as needed_main
+    argv = [package, "--vdb", str(vdb)]
+    if ebuild:
+        argv += ["--ebuild", str(ebuild)]
+    raise SystemExit(needed_main(argv))
 
 
 @cli.command("license")

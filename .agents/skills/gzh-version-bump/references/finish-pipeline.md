@@ -23,8 +23,8 @@ style review, a clean install, and saved-elog review. A verified copy-only bump 
 reference loading and specialist checks only; it never weakens that baseline. Never
 classify a release from version size or an unchanged ebuild body alone.
 
-A routine rename runs the baseline only: `gzh lint`, `gzh manifest`, `gzh qa`, `gzh build`,
-`gzh merge`, `gzh surfaces`, `gzh diff`, `gzh commit`, `gzh urls`. Add nothing else unless a
+A routine rename runs the baseline only: `gzh lint`, `gzh manifest`, `gzh floors`, `gzh qa`,
+`gzh build`, `gzh merge`, `gzh surfaces`, `gzh diff`, `gzh commit`, `gzh urls`. Add nothing else unless a
 verified release difference names the surface it proves.
 
 Load and run specialist work only for a surface it can prove:
@@ -98,6 +98,24 @@ Review the `Manifest` diff against the expected upstream artifacts. Investigate 
 entries for retained versions, reused distfile names with different content, missing
 per-architecture artifacts, and unexpected files. Do not use an arbitrary file-size
 threshold as proof of integrity or provenance.
+
+Once the distfiles are present, predict the merge-time toolchain and strip notices from
+them, before anything is built:
+
+```bash
+gzh floors <changed-ebuild> [--distdir <directory>]
+```
+
+It unpacks every archive the ebuild's `SRC_URI` and `Manifest` name and applies the same
+rules as `install-qa-check.d/60go-module-eclass` (the `go` line of every `go.mod` against
+the `>=dev-lang/go-X` floor; the version string must be complete, `1.26` is less than
+`1.26.0` there), `60cargo-eclass` (`edition` and `rust-version` of every `Cargo.toml`,
+vendored crates included, against `RUST_MIN_VER`), and `estrip` (ELF objects already
+lacking `.symtab` against `QA_PRESTRIPPED` or `RESTRICT=strip`). Each finding names the
+exact string the ebuild needs. Exit 2 means the check did not run (a distfile is missing
+or `bsdtar` is absent); that is not a pass. These three notices are exactly the ones a
+test box with an older `::gentoo` snapshot fails to reproduce, because the checks live in
+the tree, not in Portage.
 
 Use the artifact inventory for prebuilt payloads, generated bundles, per-architecture
 sets, manual downloads, mutable or reused filenames, archive-topology changes, unclear
@@ -219,6 +237,22 @@ error finding blocks completion. Symlinks are not executable-file allowlist entr
 review their targets separately. Also run `gzh binary <installed-object-or-image>` before
 executing any trusted runtime smoke test. These static reports complement the merge and
 saved-elog gate; they do not replace it.
+
+After the merge, on the host where the package is installed, compare what its ELF objects
+link against with what the ebuild declares:
+
+```bash
+gzh needed-deps <category/package> [--ebuild <changed-ebuild>]
+```
+
+`gzh/needed_deps.py` is a single file that needs only Portage, so copy it to the test box
+when the merge happened there. It reads the merged package's `NEEDED.ELF.2`, resolves every
+soname through the installed packages' `PROVIDES`, and reports a provider that is not a
+direct `RDEPEND`: `transitive` when a direct dependency's own `RDEPEND` carries it (gtk
+pulling pango), `missing` when it is only reachable through a longer chain or not at all,
+`unresolved` when nothing installed provides it. `missing` and `unresolved` fail. It sees
+linked libraries only; a runtime helper such as `glycin-loaders` or a GStreamer element
+still has to be read off the source.
 
 When the local host cannot perform the required install and an authorized named executor
 exists, read [executors.md](executors.md) and run `gzh exec` with the exact atom, commit,
