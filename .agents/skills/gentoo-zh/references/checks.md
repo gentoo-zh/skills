@@ -62,7 +62,7 @@ Placeholders: `<body>` (completed PR draft), `<bundle>` (Go vendor archive), `<c
 
 ## PR evidence
 
-- [ ] When preparing a PR: `cat <body>` — replace the template's first comment with the reason; put any Closes #N on its own line, fill Tested: with actual execution or "not run: reason", preserve both template checkboxes, and tick only true statements after the explicit-range scan in `.agents/rules/qa.md` § Scanning; stop on inaccurate/incomplete text (`.agents/rules/pr-text.md`).
+- [ ] When preparing a PR: `cat <body>` — replace the template's first comment with the reason; put any Closes #N on its own line; state the arch, profile and what ran, or that nothing ran and why; keep the template's checkboxes (`scripts/pr-template.sh` requires them) and tick each only when true after the explicit-range scan in `.agents/rules/qa.md` § Scanning; stop on inaccurate or incomplete text (`.agents/rules/pr-text.md`).
 - [ ] Before publishing: `git fetch <canonical> && git rebase <canonical>/master && pkgcheck scan --git-remote <canonical> --commits="$(git merge-base <canonical>/master HEAD)..HEAD" --net && git push --force-with-lease <fork> <branch>` — stop on a conflict or scan finding; repeat after each fix commit (`.agents/rules/git-workflow.md`, `.agents/rules/qa.md` § Scanning).
 - [ ] Before `gh pr create`: `git diff --name-only <canonical>/master...HEAD` — show the title, body and this file list, then stop until the human confirms this PR (`.agents/rules/pr-text.md` § Opening the PR).
 - [ ] With a PR and gh: `gh pr view <pr> --repo gentoo-zh/overlay --json headRefOid,title,body,comments` — match the local head and read that SHA's pkgcheck/elog reports; stop on stale/missing/unread reports or unresolved findings (`.agents/rules/qa.md`).
