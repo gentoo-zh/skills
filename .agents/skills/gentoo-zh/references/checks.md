@@ -16,6 +16,7 @@ Repeat prebuilt checks for every shipped arch and ELF. Within language floors, r
 ## Prebuilt payloads
 
 - [ ] `scanelf -nR <payload>` — stop if any arch's NEEDED entry lacks a verified bundled provider or system dependency; compare with `.agents/rules/prebuilt-binaries.md`.
+- [ ] `strings -n 6 <elf> | grep -E '^lib[A-Za-z0-9_+-]+\.so(\.[0-9]+)*$'` — candidate dlopen targets only; a library name alone, such as an x11-dl candidate table, is not evidence. Before adding or requesting a dependency for one, find its symbols in the same binary (`strings <elf> | grep -c <symbol>`); stop if none are referenced.
 - [ ] `objdump -T <elf> | grep -o 'GLIBC_[0-9.]*' | sort -V | tail -1` — stop if the highest symbol version exceeds the guaranteed libc floor without a matching dependency; explain empty output from the ELF evidence.
 - [ ] `grep -nE 'RDEPEND|DEPEND|sys-libs/glibc' <ebuild>` — compare the full dependency blocks in the ebuild dump below; stop if their floors or arch conditions miss a measured requirement.
 - [ ] `grep -n REQUIRED_USE <ebuild>` — read the full assignment in the ebuild dump below; stop if it contains `elibc_glibc`; no match means REQUIRED_USE is absent.
