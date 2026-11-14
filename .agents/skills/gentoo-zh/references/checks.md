@@ -23,6 +23,7 @@ Repeat prebuilt checks for every shipped arch and ELF. Within language floors, r
 ## Bundled components and LICENSE
 
 - [ ] `find <src> \( -iname '*LICENSE*' -o -iname 'COPYING*' -o -iname 'NOTICE*' -o -name sqlite3.c -o -name sqlite_orm.h -o -iname '*icu*' \) -print` — stop if any bundled component or amalgamation lacks a license assessment.
+- [ ] `grep -rhoE 'SPDX-License-Identifier: *[A-Za-z0-9.+-]+( (AND|OR|WITH) [A-Za-z0-9.+-]+)*' <src> | sort | uniq -c` — list licenses declared in file headers, which catches amalgamations and vendored headers that ship no LICENSE file; stop if one is missing from the assessment.
 - [ ] `if git -C <src> rev-parse --show-toplevel 2>/dev/null; then git -C <src> submodule status --recursive; fi` — for a Git source checkout (confirm the printed root is the release checkout, not its parent), stop on unpopulated, mismatched or conflicted submodules, or an unassessed bundled license.
 - [ ] `if test -f <src>/.gitmodules; then cat <src>/.gitmodules; fi` — for an archive declaring submodules, stop if a listed bundled component is absent from the source/license assessment.
 - [ ] `cat <ebuild>` — map every bundled component found above to a license name under `$(portageq get_repo_path / gentoo)/licenses/` from its own notice or header; stop if `LICENSE` omits one, and report a component whose license you could not determine as a finding, not as pending evidence.
