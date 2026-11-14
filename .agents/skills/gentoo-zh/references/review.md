@@ -41,7 +41,7 @@ Use [checks.md](checks.md): language floors for languages present; prebuilt payl
    ```bash
    git diff --name-only <canonical>/master...HEAD
    ```
-7. Read the completed findings and give a local verdict. Do not approve while any finding is unreproduced, any dependency lacks evidence, install or QA failed, or any affected USE state is untested.
+7. Read the completed findings and give a local verdict. Do not approve while any finding is unreproduced, any dependency lacks evidence, install or QA failed, any affected USE state is untested, any check for the head is pending or failed, or you have not read the CI elog report for that head SHA. A green check is not a reading: the findings quote the head SHA and every qa/warn/error line from that report with its attribution, or state that the report has none.
    ```bash
    cat <findings>
    ```
