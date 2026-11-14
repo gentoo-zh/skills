@@ -1,7 +1,7 @@
 {
   "name": "gentoo-overlay-skills",
-  "version": "1.0.0",
-  "description": "Step-by-step skills for gentoo-zh overlay work: bump, new package, review. Policy stays in the overlay's AGENTS.md.",
+  "version": "2.0.0",
+  "description": "Entry skill for gentoo-zh overlay work: bump, new package, review.",
   "author": {
     "name": "gentoo-zh",
     "url": "https://github.com/gentoo-zh"
