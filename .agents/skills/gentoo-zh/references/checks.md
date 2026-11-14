@@ -25,7 +25,7 @@ Repeat prebuilt checks for every shipped arch and ELF. Within language floors, r
 - [ ] `find <src> \( -iname '*LICENSE*' -o -iname 'COPYING*' -o -iname 'NOTICE*' -o -name sqlite3.c -o -name sqlite_orm.h -o -iname '*icu*' \) -print` — stop if any bundled component or amalgamation lacks a license assessment.
 - [ ] `if git -C <src> rev-parse --show-toplevel 2>/dev/null; then git -C <src> submodule status --recursive; fi` — for a Git source checkout (confirm the printed root is the release checkout, not its parent), stop on unpopulated, mismatched or conflicted submodules, or an unassessed bundled license.
 - [ ] `if test -f <src>/.gitmodules; then cat <src>/.gitmodules; fi` — for an archive declaring submodules, stop if a listed bundled component is absent from the source/license assessment.
-- [ ] `cat <ebuild>` — compare the complete LICENSE expression with the discovered notices and components, including ICU, sqlite and sqlite_orm when bundled; stop if the license expression omits one.
+- [ ] `cat <ebuild>` — map every bundled component found above to a license name under `$(portageq get_repo_path / gentoo)/licenses/` from its own notice or header; stop if `LICENSE` omits one, and report a component whose license you could not determine as a finding, not as pending evidence.
 
 ## Library bump
 
@@ -36,7 +36,8 @@ Repeat prebuilt checks for every shipped arch and ELF. Within language floors, r
 
 ## Fork of a ::gentoo package
 
-- [ ] `diff -u "$(portageq get_repo_path / gentoo)"/<cat>/<orig>/<orig>-<orig-ver>.ebuild <ebuild>` — for a fork, explain every hunk, including removed comments and USE flags; stop on any unexplained hunk (exit 1 means differences).
+- [ ] `diff -u "$(portageq get_repo_path / gentoo)"/<cat>/<orig>/<orig>-<orig-ver>.ebuild <ebuild>` — exit 1 means differences; classify every hunk. Stop on any of these unless an upstream file of this release requires it (cite path:line): a USE flag, patch, flag or option the fork adds that the current ::gentoo ebuild lacks; a ::gentoo comment the fork removed or shortened; a ::gentoo workaround the fork dropped.
+- [ ] `grep -nE '^(IUSE|PATCHES)|FILESDIR|append-|filter-' <ebuild> "$(portageq get_repo_path / gentoo)"/<cat>/<orig>/<orig>-<orig-ver>.ebuild` — list fork-only flags and patches side by side; each needs the citation above.
 
 ## overlay.toml autobump
 
